@@ -107,11 +107,27 @@ html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer > * {
 }
 
 /* The site's backdrop picture at the top of a page (home, albums) normally fades into the page color,
-   which is transparent here, so its bottom edge showed as a line across the window: it fades out itself. */
+   which is transparent here, so its bottom edge showed as a line across the window: it fades out itself.
+   The picture can end above the bottom of its box, so the picture is faded too, not only the box. */
 html[data-feathertune-ambient] ytmusic-browse-response #background,
+html[data-feathertune-ambient] ytmusic-browse-response #background img,
 html[data-feathertune-ambient] ytmusic-browse-response .background-gradient {
   -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+}
+
+/* The search box and its suggestions sit over the page; with the page colors transparent they let the
+   page show through, so they keep a solid color while open. */
+html[data-feathertune-ambient] ytmusic-search-box[opened],
+html[data-feathertune-ambient] ytmusic-search-box:focus-within {
+  --ytmusic-search-background: color-mix(in srgb, var(--feathertune-ink, #030303), #fff 8%);
+  --ytmusic-general-background-c: color-mix(in srgb, var(--feathertune-ink, #030303), #fff 8%);
+  --ytmusic-background: color-mix(in srgb, var(--feathertune-ink, #030303), #fff 8%);
+}
+
+html[data-feathertune-ambient] ytmusic-search-box[opened] #suggestion-list,
+html[data-feathertune-ambient] ytmusic-search-box:focus-within #suggestion-list {
+  background-color: color-mix(in srgb, var(--feathertune-ink, #030303), #fff 8%);
 }
 
 html[data-feathertune-ambient] ytmusic-player-bar {

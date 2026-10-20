@@ -62,7 +62,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "discord",
         name: "Discord Rich Presence",
-        description: "Shows the track as \"Listening to\" on Discord. Needs your Discord application id below.",
+        description: "Shows the track on Discord with its artwork, links and a time bar. Needs your Discord application id below.",
         cost: "Not measured: one idle thread, a local message to Discord per track.",
         default_on: true,
         live: false,
@@ -112,7 +112,7 @@ pub const PLUGINS: &[Plugin] = &[
         id: "synced_lyrics",
         name: "Synced lyrics",
         description: "Shows time-synced lyrics from LRCLIB in the site's Lyrics tab, with the current line \
-                      highlighted. One request per track, cached on disk; when LRCLIB has none, the site's own \
+                      (or word, when the entry has word times) highlighted. One request per track, cached on disk; when LRCLIB has none, the site's own \
                       lyrics stay.",
         cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread.",
         default_on: true,

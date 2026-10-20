@@ -1,20 +1,27 @@
-//! Discord Rich Presence: "Listening to" with the title, the artist, the artwork and a time bar,
-//! cleared on pause. Off while `[discord] client_id` is empty.
+//! Discord Rich Presence: "Listening to YouTube Music" with the title, the artist, the album on the
+//! artwork, the site's icon, a time bar, links on the title, the artist and the artwork, and a button
+//! to open the track; cleared on pause. Off while `[discord] client_id` is empty. Discord shows the
+//! activity name only where it honors `name`; elsewhere it is the name of the Discord application.
 //!
 //! Failures are silent: if Discord is not running the connection is simply tried again at the next
 //! player event (a track change, a pause or the page's 15 s position refresh), so there is no timer.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use discord_rich_presence::activity::{Activity, ActivityType, Assets, Timestamps};
+use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Url};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::player::{Player, State};
 
 /// The position refresh arrives every 15 s; only a drift beyond this (a seek) is worth a new update.
 const MAX_DRIFT_MS: i64 = 2_000;
+const NAME: &str = "YouTube Music";
+const SITE: &str = "https://music.youtube.com";
+const ICON: &str = "https://music.youtube.com/img/favicon_144.png";
+/// Discord rejects longer URLs.
+const MAX_URL: usize = 256;
 
 pub fn start(app: &AppHandle, client_id: &str) {
     let client_id = client_id.trim();
@@ -63,20 +70,42 @@ impl Presence {
         }
         let details = fit(&t.title);
         let artist = fit(&t.artist);
-        let album = fit(&t.album);
-        let mut activity = Activity::new().activity_type(ActivityType::Listening).timestamps(times);
+        let album = fit(&t.album).or_else(|| details.clone());
+        let watch = t.id.as_ref().map(|id| format!("{SITE}/watch?v={id}"));
+        let search = Url::parse_with_params(&format!("{SITE}/search"), [("q", t.artist.as_str())])
+            .ok()
+            .map(String::from)
+            .filter(|u| u.len() <= MAX_URL && artist.is_some());
+        let mut activity = Activity::new()
+            .name(NAME)
+            .activity_type(ActivityType::Listening)
+            .status_display_type(StatusDisplayType::Name)
+            .timestamps(times);
         if let Some(d) = &details {
             activity = activity.details(d.as_str());
+            if let Some(w) = &watch {
+                activity = activity.details_url(w.as_str());
+            }
         }
         if let Some(a) = &artist {
             activity = activity.state(a.as_str());
+            if let Some(s) = &search {
+                activity = activity.state_url(s.as_str());
+            }
         }
-        if let Some(art) = t.artwork.as_deref().filter(|a| a.len() <= 256) {
-            let mut assets = Assets::new().large_image(art);
+        let mut assets = Assets::new().small_image(ICON).small_text(NAME);
+        if let Some(art) = t.artwork.as_deref().filter(|a| a.len() <= MAX_URL) {
+            assets = assets.large_image(art);
             if let Some(a) = &album {
                 assets = assets.large_text(a.as_str());
             }
-            activity = activity.assets(assets);
+            if let Some(w) = &watch {
+                assets = assets.large_url(w.as_str());
+            }
+        }
+        activity = activity.assets(assets);
+        if let Some(w) = &watch {
+            activity = activity.buttons(vec![Button::new("Listen on YouTube Music", w.as_str())]);
         }
         match self.client.set_activity(activity) {
             Ok(()) => self.sent = Some((key, start)),

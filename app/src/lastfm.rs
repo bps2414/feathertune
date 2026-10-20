@@ -281,8 +281,10 @@ impl LastFm {
             .into_iter()
             .flatten()
             .min();
+            // The timeout is made inside the async block: its timer needs the runtime, which this
+            // plain thread only enters in `block_on` (made outside, it panics and ends the thread).
             let received = match deadline {
-                Some(d) => tauri::async_runtime::block_on(tokio::time::timeout(d, rx.recv())).ok(),
+                Some(d) => tauri::async_runtime::block_on(async { tokio::time::timeout(d, rx.recv()).await }).ok(),
                 None => Some(tauri::async_runtime::block_on(rx.recv())),
             };
             match received {

@@ -69,7 +69,7 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 
 **Last.fm:** autenticação desktop (`auth.getToken` → navegador → `auth.getSession`, consultado em intervalos); a session key fica no Gerenciador de Credenciais do Windows. Os builds de release da CI embutem a API key do mantenedor a partir dos secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` do repositório (`option_env!`); chaves no `config.toml` têm prioridade. O ponto do scrobble conta só o tempo tocado; scrobbles que falham esperam em `lastfm-queue.json` (nova tentativa a cada 5 min, descartados depois de 14 dias).
 
-**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas.
+**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
 
 ## Regras de desempenho da UI
 

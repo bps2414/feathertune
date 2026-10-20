@@ -69,7 +69,7 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 
 **Last.fm:** desktop auth (`auth.getToken` → browser → `auth.getSession`, polled); the session key lives in the Windows Credential Manager. CI release builds embed the maintainer's API key from the repository secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` (`option_env!`); keys in `config.toml` take priority. The scrobble point counts played time only; failed scrobbles wait in `lastfm-queue.json` (retried every 5 min, dropped after 14 days).
 
-**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines.
+**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
 
 ## UI performance rules
 

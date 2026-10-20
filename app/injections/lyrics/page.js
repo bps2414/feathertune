@@ -1,16 +1,19 @@
-// Synced lyrics. Rust sends { id, lines: [[ms, text], ...] } for the current track, or null (the track
-// changed, or LRCLIB has none). In the site's Lyrics tab the timed lines replace the site's own text and
-// the current line follows the <video> time. With no data the site's own lyrics are left alone. The page
+// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...] } for the current track, or null (the
+// track changed, or LRCLIB has none). In the site's Lyrics tab the timed lines replace the site's own text
+// and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
+// one by one in the current line. With no data the site's own lyrics are left alone. The page
 // fetches nothing and calls nothing; lines are shown with textContent only. Presentation only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const MAX_LINES = 2000;
+const MAX_WORDS = 100;
 const MANUAL_SCROLL_MS = 4000;
 
 let lines = null; // [{ ms, text }], sorted by ms
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let current = -1;
+let sung = -1; // in the current line, the last word whose time has come
 let manualUntil = 0;
 let observed = null;
 const observer = new MutationObserver(() => refresh());
@@ -18,16 +21,22 @@ const observer = new MutationObserver(() => refresh());
 const tab = () => document.querySelector(TAB);
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+const timed = (l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string';
+
 const valid = (data) =>
   !!data &&
   Array.isArray(data.lines) &&
   data.lines.length > 0 &&
   data.lines.length <= MAX_LINES &&
-  data.lines.every((l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string');
+  data.lines.every(
+    (l) =>
+      timed(l) && (l[2] === undefined || (Array.isArray(l[2]) && l[2].length <= MAX_WORDS && l[2].every(timed))),
+  );
 
 const clear = () => {
   lines = null;
   current = -1;
+  sung = -1;
   items = [];
   box?.remove();
   box = null;
@@ -43,7 +52,16 @@ const build = () => {
   items = lines.map((l) => {
     const el = document.createElement('p');
     el.className = l.text ? 'ft-line' : 'ft-line ft-gap';
-    el.textContent = l.text;
+    if (l.words) {
+      el.classList.add('ft-words');
+      for (const w of l.words) {
+        const span = document.createElement('span');
+        span.textContent = w.text;
+        el.append(span);
+      }
+    } else {
+      el.textContent = l.text;
+    }
     box.append(el);
     return el;
   });
@@ -52,6 +70,7 @@ const build = () => {
   credit.textContent = 'Synced lyrics: LRCLIB';
   box.append(credit);
   current = -1;
+  sung = -1;
 };
 
 // Puts the box in the tab renderer and shows it only while the Lyrics tab is the open one.
@@ -72,14 +91,14 @@ const refresh = () => {
   if (open) sync(document.querySelector('video'), true);
 };
 
-// The last line whose time has come.
-const indexAt = (ms) => {
+// The last entry (line or word) whose time has come.
+const indexAt = (list, ms) => {
   let lo = 0;
-  let hi = lines.length - 1;
+  let hi = list.length - 1;
   let found = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (lines[mid].ms <= ms) {
+    if (list[mid].ms <= ms) {
       found = mid;
       lo = mid + 1;
     } else {
@@ -89,12 +108,33 @@ const indexAt = (ms) => {
   return found;
 };
 
+// Lights the words of the current line up to the time (only the spans that change).
+const singWords = (ms) => {
+  const words = lines[current]?.words;
+  if (!words) return;
+  const index = indexAt(words, ms);
+  if (index === sung) return;
+  const spans = items[current].children;
+  for (let i = Math.min(index, sung) + 1; i <= Math.max(index, sung); i++) {
+    spans[i]?.classList.toggle('ft-sung', i <= index);
+  }
+  sung = index;
+};
+
 const sync = (video, force) => {
   if (!lines || !box || box.hidden || !video) return;
-  const index = indexAt(video.currentTime * 1000 + 250);
-  if (index === current && !force) return;
-  items[current]?.classList.remove('ft-current');
+  const ms = video.currentTime * 1000 + 250;
+  const index = indexAt(lines, ms);
+  if (index === current && !force) {
+    singWords(ms);
+    return;
+  }
+  const old = items[current];
+  old?.classList.remove('ft-current');
+  if (old) for (const span of old.children) span.classList.remove('ft-sung');
   current = index;
+  sung = -1;
+  singWords(ms);
   const el = items[index];
   if (!el) return;
   el.classList.add('ft-current');
@@ -116,7 +156,7 @@ feathertune.lyrics = Object.freeze({
   set(data) {
     clear();
     if (!valid(data)) return;
-    lines = data.lines.map(([ms, text]) => ({ ms, text }));
+    lines = data.lines.map(([ms, text, words]) => ({ ms, text, words: words?.map(([ms, text]) => ({ ms, text })) }));
     refresh();
   },
 });

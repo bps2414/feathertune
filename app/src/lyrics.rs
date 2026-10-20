@@ -9,7 +9,9 @@
 //!   already seen costs no request. "Not found" is cached too, for a week. Failures (network, server
 //!   busy) are not cached and not retried before the track changes.
 //! - The page never fetches anything and never calls Rust for this: it only receives
-//!   `{ id, lines: [[ms, text], ...] }` through `injections::send`, or `null` on a track change.
+//!   `{ id, lines: [[ms, text, words?], ...] }` through `injections::send`, or `null` on a track change.
+//!   `words` (`[[ms, text], ...]`) is there only when the lyrics are in Enhanced LRC, with a time
+//!   before each word (`<mm:ss.xx>`); most LRCLIB entries are timed by line only.
 //! - Plain (unsynced) lyrics are ignored: the site already shows those.
 
 use std::path::{Path, PathBuf};
@@ -29,13 +31,30 @@ const USER_AGENT: &str =
 const MAX_BODY: u64 = 512 * 1024;
 const MAX_LINES: usize = 2000;
 const MAX_LINE_CHARS: usize = 300;
+const MAX_WORDS: usize = 100;
 /// A cached "no synced lyrics" is asked again after this long.
 const NOT_FOUND_TTL: u64 = 7 * 24 * 3600;
 /// The cache holds at most this many files; over it, the oldest are removed down to `KEEP_FILES`.
 const MAX_FILES: usize = 400;
 const KEEP_FILES: usize = 300;
 
-type Lines = Vec<(u32, String)>;
+type Words = Vec<(u32, String)>;
+type Lines = Vec<Line>;
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Line {
+    ms: u32,
+    text: String,
+    /// Each word with its own time and the spaces after it; empty when the line is timed as a whole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    words: Words,
+}
+
+impl Line {
+    fn to_json(&self) -> Value {
+        if self.words.is_empty() { json!([self.ms, self.text]) } else { json!([self.ms, self.text, self.words]) }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Entry {
@@ -87,6 +106,7 @@ pub fn start(app: &AppHandle, profile: &Path) {
             // The track may have changed during the request.
             let still = app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current);
             if let (Some(lines), true) = (lines, still) {
+                let lines: Vec<Value> = lines.iter().map(Line::to_json).collect();
                 let payload = json!({ "id": state.track.id, "lines": lines });
                 crate::injections::send(&app, "lyrics", &payload);
             }
@@ -178,7 +198,7 @@ fn prune(dir: &Path) {
     }
 }
 
-/// `[mm:ss.xx] text` lines (several stamps per line allowed) into (milliseconds, text), by time.
+/// `[mm:ss.xx] text` lines (several stamps per line allowed) into lines by time, in milliseconds.
 /// Metadata tags (`[ar:...]`) and lines without a time are dropped; the text is capped.
 fn parse_lrc(text: &str) -> Lines {
     let mut lines: Lines = Vec::new();
@@ -191,14 +211,62 @@ fn parse_lrc(text: &str) -> Lines {
             times.push(ms);
             rest = after;
         }
-        let words: String = rest.trim().chars().filter(|c| !c.is_control()).take(MAX_LINE_CHARS).collect();
+        let (text, words) = parse_words(rest);
         for ms in times {
-            lines.push((ms, words.clone()));
+            lines.push(Line { ms, text: text.clone(), words: words.clone() });
         }
     }
-    lines.sort_by_key(|(ms, _)| *ms);
+    lines.sort_by_key(|l| l.ms);
     lines.truncate(MAX_LINES);
     lines
+}
+
+/// The text of a line without its word stamps, and its words when it has them (Enhanced LRC:
+/// `<mm:ss.xx>word <mm:ss.xx>word`). Text before the first stamp is sung with the line.
+fn parse_words(rest: &str) -> (String, Words) {
+    let clean = |s: &str| -> String { s.chars().filter(|c| !c.is_control()).collect() };
+    let mut plain = String::new();
+    let mut words: Words = Vec::new();
+    let mut stamped = false;
+    let mut at = 0;
+    let mut s = rest;
+    loop {
+        let next = stamp(s);
+        let segment = clean(next.map_or(s, |(start, _, _)| &s[..start]));
+        plain.push_str(&segment);
+        if !segment.trim().is_empty() && words.len() < MAX_WORDS {
+            words.push((at, segment));
+        } else if let Some(last) = words.last_mut() {
+            last.1.push_str(&segment);
+        }
+        let Some((_, end, ms)) = next else { break };
+        stamped = true;
+        at = ms;
+        s = &s[end..];
+    }
+    let text: String = plain.trim().chars().take(MAX_LINE_CHARS).collect();
+    if !stamped || text.is_empty() {
+        return (text, Vec::new());
+    }
+    if let Some(first) = words.first_mut() {
+        first.1 = first.1.trim_start().to_owned();
+    }
+    if let Some(last) = words.last_mut() {
+        last.1 = last.1.trim_end().to_owned();
+    }
+    for word in &mut words {
+        word.1 = word.1.chars().take(MAX_LINE_CHARS).collect();
+    }
+    (text, words)
+}
+
+/// The first `<mm:ss.xx>` in `s`: where it starts, where it ends and its time.
+fn stamp(s: &str) -> Option<(usize, usize, u32)> {
+    s.match_indices('<').find_map(|(start, _)| {
+        let len = s[start + 1..].find('>')?;
+        let ms = parse_time(&s[start + 1..start + 1 + len])?;
+        Some((start, start + len + 2, ms))
+    })
 }
 
 /// `mm:ss` or `mm:ss.xx`, in milliseconds.

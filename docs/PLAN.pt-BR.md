@@ -65,7 +65,11 @@ Protótipo (`spike/`: wry 0.57 + WebView2 155 sem otimização, deslogado, janel
 | 3 | 20/10/2026 | Tocando, na bandeja, integrações no padrão (3 rodadas, mediana) | 9 | 3,4% (3,2–3,7%) | 415 MB | 185 MB | 2,0 s |
 | 4 | 20/10/2026 | `--profile dist`, experimentos mantidos ligados, janela aberta (3 rodadas, mediana) | 9 | **3,3%** (3,1–3,4%) | **403 MB** | 733 MB | 1,9 s |
 | 4 | 20/10/2026 | `--profile dist`, experimentos mantidos ligados, na bandeja (3 rodadas, mediana) | 9 | 3,3% (2,4–3,4%) | 411 MB | **188 MB** | 2,0 s |
+| 5 | 20/10/2026 | `--profile dist`, casca nativa, plugins no padrão, janela aberta (3 rodadas, mediana) | 9 | 4,5% (4,1–5,5%) | 430 MB | 761 MB | 1,9 s |
+| 5 | 20/10/2026 | `--profile dist`, casca nativa, na bandeja (3 rodadas, mediana) | 9 | 3,6% (3,4–3,9%) | 436 MB | 217 MB | 1,9 s |
+| 5 | 20/10/2026 | `--profile dist`, mini player aberto, janela principal escondida (3 rodadas, mediana) | 9 | 4,0% (3,2–5,3%) | 442 MB | 218 MB | 2,0 s |
 
+- Linhas da Fase 5: todas ficaram acima das linhas dist da Fase 4 (+27 MB privados e +1,2 ponto de CPU com a janela aberta, +29 MB de WS na bandeja), além da variação delas. Não houve base no mesmo dia (medir de novo o build da Fase 4 no mesmo dia ficou de fora para poupar tempo), então ainda não se sabe quanto vem da casca e quanto do site ou do runtime do WebView2, que podem ter mudado desde a manhã; veja os itens em aberto da Fase 5.
 - As linhas da Fase 3 são as rodadas da base da Fase 4 (E0): mesmo binário, atalhos e notificação de faixa ligados, Discord e Last.fm desligados porque a máquina de teste não tem id de aplicativo nem chave de API configurados; essas duas integrações **não** estão nos números. Linhas da Fase 4: veja os experimentos abaixo.
 - As Fases 1 e 2 foram medidas com o perfil release antigo (LTO thin, 1 codegen unit). O processo do exe ocupa ~4 MB privados de qualquer jeito, então o perfil não mexe nesses números; a tabela final da Fase 4 usa `--profile dist`.
 - Na bandeja o `<video>` seguiu avançando e a sessão continuou logada.
@@ -81,13 +85,16 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 ├─ estado do player  ◄──── ponte de mão única ───────────┘   e manda só isso pro Rust
 ├─ teclas de mídia / flyout do Windows (SMTC)
 ├─ Discord Rich Presence, Last.fm, notificação de faixa
-└─ filtro de rastreadores (só listas de privacidade, Fase 4)
+├─ filtro de rastreadores (só listas de privacidade, Fase 4)
+├─ barra de título e mini player nativos (Direct2D, Fase 5)
+└─ janela de configurações: outra webview, página nossa
+   num esquema próprio, sem acesso ao site (Fase 5)
 ```
 
 - **Rust:** tudo do Windows (bandeja, SMTC, atalhos, autostart, notificações), as integrações, o controle de memória (escondeu → `MemoryUsageTargetLevel=Low`, mostrou → `Normal`) e o filtro de rede.
 - **Página:** o site como é entregue. Login, biblioteca, letra, rádio e recomendações já vêm prontos; o app não reimplementa nada disso.
 - **Ponte:** um script injetado (`initialization_script`) observa o player e manda ao Rust um JSON com título, artista, capa, tempo e estado. O Rust trata como dado não confiável: valida e não executa nada. Os comandos Rust → página (pausar, próxima) clicam nos botões do player; se o site mudar a interface, quebram uns 3 seletores CSS, não um protocolo.
-- **Segurança:** a página remota não recebe nenhum comando do Tauri além do relato de estado; a navegação fica presa aos domínios do site e do login (o resto abre no navegador padrão).
+- **Segurança:** a página remota não recebe nenhum comando do Tauri além do relato de estado, e a janela de configurações só alcança os próprios comandos (veja a Fase 5); a navegação fica presa aos domínios do site e do login (o resto abre no navegador padrão).
 
 ## Riscos
 
@@ -243,7 +250,7 @@ Coluna feathertune: `app/target/dist/feathertune.exe`, experimentos mantidos lig
 
 **Limites da sessão na nuvem (histórico) e o que rodou no Windows:** a sessão na nuvem só rodou `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` no Linux; o job `dist` do CI gera o instalador no Windows. Em 20/10/2026 uma sessão sem supervisão no Windows rodou: o build release, as conferências de bandeja/atalhos da Fase 3 listadas lá, a base e E1–E8 (3 rodadas abertas + 3 na bandeja cada), o build e a medição `--profile dist` e a conferência silenciosa de instalar/reinstalar por cima/desinstalar. Pendente para o mantenedor: Discord e login/scrobble reais no Last.fm; a confirmação da chave Run e do toast; a coluna de comparação com o Electron; o caminho "excluir dados" da desinstalação; e as notas dos títulos das Fases 3 e 4.
 
-### Fase 5: Casca nativa (Opus 5.5 medium) — planejada em 20/10/2026
+### Fase 5: Casca nativa (Opus 5.5 medium) — feita e medida no Windows em 20/10/2026; **não concluída, 3 itens em aberto** (veja o fim desta seção)
 
 O app ganha visual e controles próprios em volta do site: barra de título, uma janela de configurações que lista os plugins, um mini player e Last.fm sem digitar chaves.
 
@@ -262,6 +269,30 @@ O app ganha visual e controles próprios em volta do site: barra de título, uma
   - o Last.fm conecta num build do CI sem editar o `config.toml` (confirmado pelo mantenedor);
   - o mini player controla a reprodução com a janela principal escondida;
   - com a janela aberta fica dentro da variação da linha dist da Fase 4 (403 MB privados, 733 MB WS, 3,3% de CPU), a linha da bandeja não muda, e o mini player tem sua própria linha na tabela.
+
+Notas de implementação (`app/src/{titlebar,gfx,miniplayer,plugins,settings_window}.rs`, `app/settings/`, `app/capabilities/`):
+
+- **Janela:** `main` é uma `tauri::window::Window` sem webview própria (`decorations(false)`, sombra mantida) e o site é a webview filha `site`, 32 DIP abaixo do topo. A janela do `--measure` continua com 1280×800 de área cliente, então o site agora fica com 1280×768. O multiwebview não travou: memória Low ao esconder, filtro de rastreadores, SMTC e teclas de mídia, instância única, estado da janela e `--measure` funcionam na webview filha, então o plano reserva do DWM não foi usado.
+- **Barra de título:** um subclass da janela `main` pinta a faixa (render target DC do Direct2D preso ao HDC do paint, então recorta como GDI e nunca desenha por cima da webview; texto em DirectWrite; glifos da "Segoe MDL2 Assets") e responde ao `WM_NCHITTEST`: bordas de redimensionar pelo tratamento padrão, depois `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE` nos botões (assim o Windows 11 mostra os snap layouts no maximizar), `HTCAPTION` no resto da faixa e `HTCLIENT` no botão de menu. Ela mantém os limites da webview no `WM_SIZE`, segue mudanças de DPI e o claro/escuro dos apps, e `gfx::set_theme_color` é o gancho da Fase 6. O botão de menu abre um menu nativo (Settings, Mini player, Quit) que reaproveita os ids da bandeja. Fechar vai para a bandeja como antes.
+- **Plugins** (`app/src/plugins.rs`, a lista única): `controls`, `tracker_filter`, `track_notifications`, `global_shortcuts`, `discord`, `lastfm`, `mini_player`, cada um com nome, descrição, custo (tirado das linhas desta tabela) e padrão (todos ligados). O interruptor é `[plugins] <id> = true|false`; as chaves antigas `[injections] controls`, `[privacy] tracker_filter` e `[notifications] track_change` continuam sendo lidas, e a janela de configurações as troca pela entrada em `[plugins]`. Atalhos, notificações e o mini player valem na hora; os outros avisam "restart". Um `config.toml` novo já sai com a lista de plugins comentada.
+- **Janela de configurações:** `settings_window::open` cria a janela `settings` quando é aberta (mesmo perfil e mesmos argumentos do WebView2 do site, então ela divide o processo browser e só acrescenta um renderer) a partir de `feathertune://` (no Windows, `http://feathertune.localhost/`), com os arquivos compilados no exe a partir de `app/settings/`. É destruída ao fechar. As gravações passam pelo `toml_edit`, que mantém os comentários do usuário (o `toml` 1.x os descarta); um arquivo que não parseia não é gravado. As entradas são validadas no Rust: atalhos são parseados como atalhos, o id do Discord só aceita dígitos, a key e o secret do Last.fm só alfanuméricos, features do Chromium só nomes.
+- **Como as duas capabilities ficam separadas:**
+  - `player-bridge.json` agora é `"webviews": ["site"]` (era `"windows": ["main"]`, que também casaria com qualquer outra webview nessa janela), com `local: false` e só a origem do site, e concede só `allow-player-state`.
+  - `settings-window.json` é `"webviews": ["settings"]`, `local: true`, e concede só os três comandos `settings_*`. O Tauri casa uma capability pelo rótulo da webview ou da janela **e** pela origem, então o site remoto (rótulo `site`, origem remota) não casa com a capability local nem com os comandos dela, e a página de configurações (rótulo `settings`, origem local) não casa com a ponte, que é só remota. Nenhuma das duas tem permissões `core:*`, então nenhuma página alcança as APIs de janela ou webview (eval, navegação, outras webviews).
+  - Os comandos `settings_*` também conferem o rótulo da webview que chamou e recusam qualquer uma que não seja `settings`, e nenhum deles recebe uma webview nem executa script no site.
+  - Esquemas próprios valem para todas as webviews (limitação do Tauri), então o handler do esquema responde 403 a qualquer pedido que não venha da webview `settings`, e só aceita GET. De qualquer forma, o site não consegue navegar até lá (a navegação dele continua presa aos domínios do site e do login).
+  - A página de configurações tem uma CSP restrita (`default-src 'none'`, scripts e estilos só dela mesma) e monta o DOM só com `textContent`.
+- **Last.fm:** o `lastfm.rs` lê `FEATHERTUNE_LASTFM_API_KEY`/`_SECRET` com `option_env!` no build; o `config.toml` vence se os dois valores dele estiverem preenchidos; sem nenhum dos dois, o Last.fm fica desligado como antes. O passo `dist` do CI passa os dois secrets como variáveis de ambiente (vazias em forks).
+- **Mini player:** um popup Win32 (`WS_EX_TOPMOST`, janela de ferramenta, cantos arredondados do DWM, 340×96 DIP) desenhado com Direct2D, aberto pelo menu da barra, pela bandeja, por `[shortcuts] mini_player` ou por `feathertune.exe --mini-player`. Abrir esconde a janela principal com memória Low; "voltar" ou mostrar a janela principal o fecha. Uma thread em `Player::subscribe()` redesenha; quando a URL da capa muda, ela baixa a capa com `ureq` (só URLs que passam na mesma checagem de host do payload da página, sem redirecionamento, limite de 4 MB) e decodifica e reduz com WIC. Os avisos de faixa ficam de fora enquanto ele está aberto.
+- **Correção achada no caminho:** o `ureq` era compilado com `native-tls-no-default`, mas o ureq 3.4 só aceita o provedor NativeTls com a feature `native-tls` ligada, e entra em pânico na primeira requisição https sem ela. Isso também teria quebrado toda chamada ao Last.fm desde a Fase 3 (nunca exercitada, sem chaves na máquina de teste). A feature agora é `native-tls`, o que traz mais um crate (`webpki-root-certs`, sem uso: as raízes continuam vindo do Windows pelo verificador da plataforma). É o único crate novo além do `toml_edit` (que já estava no `Cargo.lock` via `proc-macro-crate`).
+- **Features novas do `windows`:** `Win32_Graphics_{Direct2D, Direct2D_Common, DirectWrite, Dwm, Dxgi_Common, Gdi, Imaging}`, `Win32_System_{LibraryLoader, Registry}`, `Win32_UI_{HiDpi, Input_KeyboardAndMouse, WindowsAndMessaging}`; feature `unstable` do Tauri.
+- **Rodado no Windows (20/10/2026, build release, perfil logado, sem supervisão; mensagens de janela enviadas por script, sem mouse de verdade):**
+  - o hit-test da faixa devolve CLIENT (menu), CAPTION, MINBUTTON, MAXBUTTON, CLOSE, TOP (borda) e CLIENT abaixo da faixa; a faixa pinta 0x202020 no modo escuro com glifo branco, e a página aparece abaixo dela;
+  - WM_CLOSE esconde na bandeja com memória Low e a reprodução continua logada; uma segunda execução mostra a janela de novo;
+  - a tecla de mídia tocar/pausar pausa e retoma pela SMTC;
+  - o menu da barra abre a janela de configurações, que lista todos os plugins (lido por UI Automation); virar um interruptor gravou `[plugins] track_notifications` no `config.toml`; fechá-la remove o renderer dela (9 → 8 processos do WebView2);
+  - `--mini-player` esconde a janela principal (memória Low), o mini player mostra a capa baixada, e o botão tocar/pausar dele pausa e retoma.
+  - **Ainda em aberto:** (1) snap layouts, arrastar, redimensionar e maximizar/restaurar com mouse de verdade, em 150% de escala e num segundo monitor; digitar no site depois de trocar de janela (foco do teclado na webview filha) e a aparência do flyout; (2) o login do Last.fm num build do CI sem editar o `config.toml` (precisa dos dois secrets do repositório); (3) a medição: as linhas da Fase 5 ficaram acima das linhas dist da Fase 4, então meça o commit da Fase 4 (`73b93b2`) e este em seguida, no mesmo dia, para saber se a casca custa memória (se custar, olhe primeiro o segundo host do controller do WebView2 e o paint da barra). Troque a nota do título por "Fase 5: concluída em <data>" quando (1), (2) e (3) forem fechados.
 
 ### Fase 6: Visual (Sonnet 5.5 high) — planejada em 20/10/2026
 
@@ -290,6 +321,7 @@ $a = '--measure', '<url da faixa>'
 ./measure.ps1 -Name playing -ArgumentList $a
 ./measure.ps1 -Name tray -ArgumentList $a -HideAfter 25 -Wait 50
 ./measure.ps1 -Name tray-1h -ArgumentList $a -HideAfter 25 -Minutes 60
+./measure.ps1 -Name mini -ArgumentList $a -MiniAfter 25 -Wait 50                       # mini player aberto (Fase 5)
 1..3 | % { ./measure.ps1 -Name final-$_ -Exe app/target/dist/feathertune.exe -ArgumentList $a }   # tabela da Fase 4
 ./median.ps1 -Prefix final-                                                                       # mediana das 3 rodadas
 ./measure.ps1 -Name spike -Exe spike/target/release/spike.exe -ArgumentList '"<url>"', 'spike/data/x'
@@ -297,7 +329,7 @@ $a = '--measure', '<url da faixa>'
 
 `median.ps1 -Prefix <p>` imprime a mediana e a faixa min–max de cada `results/<p>*.json`, para as linhas de 3 rodadas das tabelas.
 
-`-HideAfter` manda WM_CLOSE para a janela (o app vai para a bandeja). O app usa o perfil real, então mede logado.
+`-HideAfter` manda WM_CLOSE para a janela (o app vai para a bandeja); `-MiniAfter` roda `feathertune.exe --mini-player`, que abre o mini player na instância que está rodando. O app usa o perfil real, então mede logado.
 
 ## Referências
 

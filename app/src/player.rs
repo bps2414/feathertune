@@ -177,7 +177,8 @@ fn parse(json: &str) -> Option<State> {
     })
 }
 
-fn artwork(url: &str) -> Option<String> {
+/// The URL if it is an https URL on one of the image hosts (the mini player checks downloads with it too).
+pub(crate) fn artwork(url: &str) -> Option<String> {
     if url.len() > MAX_URL {
         return None;
     }

@@ -1,6 +1,9 @@
 // feathertune: the official web music player in a lean WebView2 window, with a tray icon.
-// Usage: feathertune [--measure] [--hidden] [start url on the player domain]
-// --hidden starts in the tray (the autostart entry passes it).
+// Usage: feathertune [--measure] [--hidden] [--mini-player] [start url on the player domain]
+// --hidden starts in the tray (the autostart entry passes it). --mini-player starts with the mini
+// player instead of the main window, or opens it in the running instance.
+// The main window has no system frame: titlebar.rs draws the title bar and the site is a child
+// webview (label `site`) below it.
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
 // login state, so measure.ps1 can record them. The page can call a single Tauri command,
 // `player_state` (see player.rs and capabilities/), which only reports data.
@@ -8,14 +11,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod discord;
+mod gfx;
 mod injections;
 mod lastfm;
+mod miniplayer;
 mod notify;
 mod player;
+mod plugins;
 mod privacy;
 mod settings;
+mod settings_window;
 mod shortcuts;
 mod smtc;
+mod titlebar;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,7 +32,9 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::webview::WebviewBuilder;
+use tauri::window::WindowBuilder;
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
@@ -54,12 +64,15 @@ fn main() {
     let start = Instant::now();
     let mut measure = false;
     let mut hidden = false;
+    let mut mini = false;
     let mut url: Url = START_URL.parse().unwrap();
     for arg in std::env::args().skip(1) {
         if arg == "--measure" {
             measure = true;
         } else if arg == "--hidden" {
             hidden = true;
+        } else if arg == "--mini-player" {
+            mini = true;
         } else if let Ok(u) = arg.parse::<Url>()
             && u.scheme() == "https"
             && u.host_str() == Some("music.youtube.com")
@@ -69,11 +82,12 @@ fn main() {
     }
     smtc::set_app_id();
     let profile = profile_dir();
-    let config = injections::Config::load(&profile);
     let settings = settings::Settings::load(&profile);
+    let args = browser_args(&settings.browser);
+    let script = injections::script(&settings);
 
     // A measurement must not read or overwrite the saved window state: it needs the fixed 1280x800.
-    let denylist: &[&str] = if measure { &["main"] } else { &[] };
+    let denylist: &[&str] = if measure { &["main", "settings"] } else { &["settings"] };
     let window_state = tauri_plugin_window_state::Builder::new()
         .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
         .with_denylist(denylist)
@@ -83,10 +97,10 @@ fn main() {
         // Must be the first plugin: a second launch brings the first window back and exits.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second autostart launch (`--hidden`) must not pop the window up.
-            if !args.iter().any(|a| a == "--hidden")
-                && let Some(w) = app.get_webview_window("main")
-            {
-                set_hidden(&w, false);
+            if args.iter().any(|a| a == "--mini-player") {
+                miniplayer::open(app);
+            } else if !args.iter().any(|a| a == "--hidden") {
+                show_main(app);
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -94,53 +108,84 @@ fn main() {
         .plugin(tauri_plugin_autostart::Builder::new().arg("--hidden").build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(player::Player::new())
-        .invoke_handler(tauri::generate_handler![player::player_state])
+        .manage(settings::Live::new(profile.clone(), args.clone(), settings))
+        // Only the settings window gets an answer from it (settings_window.rs).
+        .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
+        .invoke_handler(tauri::generate_handler![
+            player::player_state,
+            settings_window::settings_get,
+            settings_window::settings_set,
+            settings_window::settings_action,
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            let window = WindowBuilder::new(app, "main")
                 .title("feathertune")
                 .inner_size(1280.0, 800.0)
-                .data_directory(profile.clone())
-                .visible(!hidden)
-                .additional_browser_args(&browser_args(&settings.browser))
-                .initialization_script(injections::script(&config))
-                .on_navigation({
-                    let handle = handle.clone();
-                    move |url| allowed(url) || open_external(&handle, url)
-                })
-                .on_new_window(move |url, _| {
-                    open_external(&handle, &url);
-                    tauri::webview::NewWindowResponse::Deny
-                })
+                .min_inner_size(400.0, 300.0)
+                .decorations(false)
+                .visible(!hidden && !mini)
                 .build()?;
-            if hidden {
-                set_hidden(&window, true);
+            let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
+            let top = f64::from(titlebar::HEIGHT);
+            let site = window.add_child(
+                WebviewBuilder::new("site", WebviewUrl::External(url))
+                    .data_directory(profile.clone())
+                    .additional_browser_args(&args)
+                    .initialization_script(script)
+                    .on_navigation({
+                        let handle = handle.clone();
+                        move |url| allowed(url) || open_external(&handle, url)
+                    })
+                    .on_new_window(move |url, _| {
+                        open_external(&handle, &url);
+                        tauri::webview::NewWindowResponse::Deny
+                    }),
+                LogicalPosition::new(0.0, top),
+                LogicalSize::new(size.width, (size.height - top).max(0.0)),
+            )?;
+            titlebar::install(app.handle(), &window, &site)?;
+            if hidden || mini {
+                set_hidden(app.handle(), true);
             }
-            if settings.privacy.tracker_filter {
-                privacy::install(&window, &profile, measure);
+            let live = app.state::<settings::Live>();
+            if live.plugin("tracker_filter") {
+                privacy::install(&site, &profile, measure);
             }
-            shortcuts::register(app.handle(), &settings.shortcuts);
-            if settings.notifications.track_change {
-                notify::start(app.handle());
+            shortcuts::register(app.handle());
+            notify::start(app.handle());
+            if live.plugin("discord") {
+                let client_id = live.get().discord.client_id.clone();
+                discord::start(app.handle(), &client_id);
             }
-            discord::start(app.handle(), &settings.discord.client_id);
-            let lastfm = lastfm::start(app.handle(), &settings.lastfm, &profile);
+            let lastfm = if live.plugin("lastfm") {
+                let keys = live.get().lastfm.clone();
+                lastfm::start(app.handle(), &keys, &profile)
+            } else {
+                None
+            };
+            if let Some(l) = &lastfm {
+                app.manage(l.clone());
+            }
             tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {
                 eprintln!("media flyout unavailable: {e}");
             }
+            if mini {
+                miniplayer::open(app.handle());
+            }
             if measure {
                 log_player(app.handle(), start);
-                measure_probes(window, start);
+                measure_probes(site, start);
             }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+            if window.label() == "main"
+                && let WindowEvent::CloseRequested { api, .. } = event
+            {
                 api.prevent_close();
-                if let Some(w) = window.get_webview_window("main") {
-                    set_hidden(&w, true);
-                }
+                set_hidden(window.app_handle(), true);
             }
         })
         .run(tauri::generate_context!())
@@ -212,19 +257,23 @@ fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
             let _ = item.set_text(lastfm_label(Some(connected)));
         });
     }
+    app.manage(AutostartItem(autostart.clone()));
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?,
             &MenuItem::with_id(app, "play_pause", "Play / pause", true, None::<&str>)?,
             &MenuItem::with_id(app, "next", "Next", true, None::<&str>)?,
+            &MenuItem::with_id(app, "mini_player", "Mini player", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &autostart,
             &lastfm_item,
+            &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
         ],
     )?;
+    // This handler gets every menu event of the app, the title bar menu's too (same ids).
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("app icon"))
         .tooltip("feathertune")
@@ -234,6 +283,8 @@ fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
             "toggle" => toggle(app),
             "play_pause" => player(app, "playPause"),
             "next" => player(app, "next"),
+            "mini_player" => miniplayer::toggle(app),
+            "settings" => settings_window::open(app),
             "autostart" => {
                 // The item has already flipped itself when the event arrives.
                 let on = autostart.is_checked().unwrap_or(false);
@@ -269,31 +320,45 @@ fn lastfm_label(connected: Option<bool>) -> &'static str {
     }
 }
 
-fn toggle(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        set_hidden(&w, w.is_visible().unwrap_or(false));
+/// The tray's "Start with Windows" item, kept in step with the settings window.
+struct AutostartItem(CheckMenuItem<tauri::Wry>);
+
+pub(crate) fn sync_autostart_item(app: &AppHandle) {
+    if let Some(item) = app.try_state::<AutostartItem>() {
+        let _ = item.0.set_checked(app.autolaunch().is_enabled().unwrap_or(false));
     }
+}
+
+fn toggle(app: &AppHandle) {
+    let visible = app.get_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
+    set_hidden(app, visible);
+}
+
+pub(crate) fn show_main(app: &AppHandle) {
+    set_hidden(app, false);
 }
 
 /// Runs a command of the `controls` injection (it clicks the player buttons).
 pub(crate) fn player(app: &AppHandle, command: &str) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.eval(format!("window.__feathertune?.controls?.{command}()"));
+    if let Some(site) = app.get_webview("site") {
+        let _ = site.eval(format!("window.__feathertune?.controls?.{command}()"));
     }
 }
 
 /// Hidden: window off, WebView2 not visible and MemoryUsageTargetLevel=Low (page memory goes to
-/// the page file and playback continues). Shown: back to visible and Normal.
-fn set_hidden(window: &WebviewWindow, hidden: bool) {
+/// the page file and playback continues). Shown: back to visible and Normal, and the mini player
+/// closes.
+pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL, ICoreWebView2_19,
     };
     use windows_core::Interface;
 
+    let (Some(window), Some(site)) = (app.get_window("main"), app.get_webview("site")) else { return };
     if hidden {
         let _ = window.hide();
     }
-    let _ = window.with_webview(move |wv| unsafe {
+    let _ = site.with_webview(move |wv| unsafe {
         let controller = wv.controller();
         let _ = controller.SetIsVisible(!hidden);
         let level = if hidden {
@@ -308,6 +373,7 @@ fn set_hidden(window: &WebviewWindow, hidden: bool) {
         }
     });
     if !hidden {
+        miniplayer::close(app);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -316,11 +382,11 @@ fn set_hidden(window: &WebviewWindow, hidden: bool) {
 }
 
 /// Evaluates a script on the main thread and hands its JSON result to `done`.
-fn eval_with(window: &WebviewWindow, js: &'static str, done: impl FnOnce(String) + Send + 'static) {
+fn eval_with(webview: &Webview, js: &'static str, done: impl FnOnce(String) + Send + 'static) {
     use webview2_com::ExecuteScriptCompletedHandler;
     use windows_core::HSTRING;
 
-    let _ = window.with_webview(move |wv| unsafe {
+    let _ = webview.with_webview(move |wv| unsafe {
         if let Ok(core) = wv.controller().CoreWebView2() {
             let handler = ExecuteScriptCompletedHandler::create(Box::new(move |_, result| {
                 done(result);
@@ -346,12 +412,12 @@ fn log_player(app: &AppHandle, start: Instant) {
     });
 }
 
-fn measure_probes(window: WebviewWindow, start: Instant) {
+fn measure_probes(site: Webview, start: Instant) {
     std::thread::spawn(move || {
         let found = Arc::new(AtomicBool::new(false));
         while !found.load(Ordering::Relaxed) && start.elapsed() < Duration::from_secs(60) {
             let found = found.clone();
-            eval_with(&window, BAR_PROBE, move |r| {
+            eval_with(&site, BAR_PROBE, move |r| {
                 if r == "true" && !found.swap(true, Ordering::Relaxed) {
                     println!("player_bar_ms={}", start.elapsed().as_millis());
                 }
@@ -361,7 +427,7 @@ fn measure_probes(window: WebviewWindow, start: Instant) {
         loop {
             std::thread::sleep(Duration::from_secs(10));
             let t = start.elapsed().as_secs();
-            eval_with(&window, STATUS_PROBE, move |r| println!("{t:>5}s {r}"));
+            eval_with(&site, STATUS_PROBE, move |r| println!("{t:>5}s {r}"));
         }
     });
 }

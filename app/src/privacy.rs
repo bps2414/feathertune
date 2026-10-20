@@ -1,4 +1,5 @@
-//! Tracker filter (Phase 4, on by default: `[privacy] tracker_filter = false` in `config.toml` turns it off).
+//! Tracker filter (Phase 4, plugin `tracker_filter`, on by default: `[plugins] tracker_filter = false` in
+//! `config.toml` turns it off).
 //!
 //! Third-party requests that match a *privacy* list (analytics, session recording) are answered
 //! with an empty 403 from WebView2's `WebResourceRequested`, so they never reach the network. The
@@ -25,7 +26,7 @@ use adblock::lists::{ParseOptions, RuleTypes};
 use adblock::request::Request;
 use adblock::{Engine, FilterSet};
 use tauri::webview::PlatformWebview;
-use tauri::{Url, WebviewWindow};
+use tauri::{Url, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_WEB_RESOURCE_CONTEXT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
     COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_OTHER,
@@ -70,14 +71,14 @@ const EXEMPT_DOMAINS: &[&str] = &[
     "2mdn.net",
 ];
 
-/// Adds the filter to the window's WebView2. Does nothing but log if the list or COM fails.
-pub fn install(window: &WebviewWindow, profile: &Path, log_blocked: bool) {
+/// Adds the filter to the site webview. Does nothing but log if the list or COM fails.
+pub fn install(webview: &Webview, profile: &Path, log_blocked: bool) {
     let mut rules = String::from(BUNDLED_LIST);
     if let Ok(extra) = std::fs::read_to_string(profile.join("privacy-list.txt")) {
         rules.push('\n');
         rules.push_str(&extra);
     }
-    let _ = window.with_webview(move |wv| {
+    let _ = webview.with_webview(move |wv| {
         if let Err(e) = unsafe { attach(&wv, &rules, log_blocked) } {
             eprintln!("tracker filter unavailable: {e}");
         }

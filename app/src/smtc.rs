@@ -3,7 +3,7 @@
 //! (`HardwareMediaKeyHandling` in BROWSER_ARGS) and this one, tied to the main window, is fed by
 //! the `Player` state. The buttons reuse the tray commands.
 
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, Window};
 use tokio::sync::broadcast::error::RecvError;
 use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
 use windows::Media::{
@@ -85,7 +85,7 @@ fn ensure_shortcut() -> Result<()> {
     }
 }
 
-pub fn start(app: &AppHandle, window: &WebviewWindow) -> Result<()> {
+pub fn start(app: &AppHandle, window: &Window) -> Result<()> {
     let hwnd = window.hwnd().map_err(|e| windows::core::Error::new(windows::core::HRESULT(-1), e.to_string()))?;
     let interop = factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()?;
     let smtc: SystemMediaTransportControls = unsafe { interop.GetForWindow(HWND(hwnd.0))? };

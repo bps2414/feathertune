@@ -4,7 +4,7 @@
 
 > **Work in progress, experimental.** This is a personal project that I am still testing heavily. Things break, change or get rewritten without notice. There are no releases and no support yet; CI builds an installer; only its silent install and uninstall were tested. Use it at your own risk.
 
-A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: tray icon, media keys and the Windows media flyout, and memory trimming while hidden.
+A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: its own title bar, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
 
 Measured so far (process tree, playing): ~410 MB private memory and ~3% of one CPU core with the window open, ~170 MB of RAM while in the tray, about 2 s to start. Details in [docs/PLAN.md](docs/PLAN.md).
 
@@ -22,7 +22,7 @@ Measured so far (process tree, playing): ~410 MB private memory and ~3% of one C
 | 2. Player state bridge, media keys, flyout | done |
 | 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | tray and shortcuts checked; Discord and Last.fm still to be confirmed on a real profile |
 | 4. Slimming and installer | measured (~400 MB private, ~3.3% CPU, ~190 MB in the tray); silent install/uninstall checked; Electron comparison and the "delete data" uninstall path open |
-| 5. Native shell: own title bar, settings window and plugins, mini player | planned |
+| 5. Native shell: own title bar, settings window and plugins, mini player | built and measured (~430 MB private, ~4.5% CPU open, above Phase 4 pending a same-day baseline); snap/150%/second monitor and Last.fm sign-in on a CI build to be confirmed by the maintainer |
 | 6. Look: album color, synced lyrics, ambient mode | planned |
 
 ## Build
@@ -41,32 +41,36 @@ Installer (NSIS, per user, no admin): `cd app; npx @tauri-apps/cli@2.12.3 build 
 
 ## Configuration
 
-`%LOCALAPPDATA%\feathertune\config.toml` (created on first run with only the injection switches, outside the repository). Add the sections you need; everything is optional:
+`%LOCALAPPDATA%\feathertune\config.toml` (created on first run with the plugin list, outside the repository). The settings window (title bar or tray menu > Settings) edits everything below and keeps your comments; editing by hand works too. Everything is optional:
 
 ```toml
+[plugins]                    # every optional feature; the settings window shows its description and cost
+controls = true              # page module that presses the player's buttons
+tracker_filter = true        # blocks third-party analytics requests; never ads (docs/PLAN.md)
+track_notifications = true   # toast on track change, only while the window is hidden
+global_shortcuts = true
+discord = true               # also needs client_id below
+lastfm = true                # also needs your account connected
+mini_player = true
+
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"
 next = "Ctrl+Alt+Right"
 previous = "Ctrl+Alt+Left"
-
-[notifications]
-track_change = true          # toast on track change, only while the window is in the tray
+mini_player = ""             # opens/closes the mini player
 
 [discord]
-client_id = ""               # your own Discord application id; Rich Presence is off while empty
+client_id = ""               # your own Discord application id
 
 [lastfm]
-api_key = ""                 # your own Last.fm API account; off while either is empty
+api_key = ""                 # optional: CI builds carry their own key; these values take priority
 api_secret = ""
 
 [browser]
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/PLAN.md)
-
-[privacy]
-tracker_filter = true        # blocks third-party analytics requests (default); never ads (docs/PLAN.md)
 ```
 
-"Start with Windows" and "Connect Last.fm" are in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file.
+The old keys `[injections] controls`, `[privacy] tracker_filter` and `[notifications] track_change` are still read; the settings window replaces them with the `[plugins]` entry. "Start with Windows", "Connect Last.fm" and the mini player are also in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file. A local build without a Last.fm key needs `api_key` and `api_secret` here.
 
 ## Disclaimer
 

@@ -8,7 +8,8 @@ publish = false
 tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
-tauri = { version = "2.12", features = ["tray-icon"] }
+# unstable: multiwebview, so the main window holds the native title bar and the site as a child webview.
+tauri = { version = "2.12", features = ["tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
@@ -17,7 +18,10 @@ tauri-plugin-global-shortcut = "2"
 discord-rich-presence = "1"
 keyring = "4"
 md5 = "0.8"
-ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+# "native-tls", not "native-tls-no-default": ureq 3.4 only accepts the NativeTls provider with this
+# feature on, and panics on the first https request otherwise (it also pulls in webpki-root-certs,
+# unused here: the roots come from Windows through RootCerts::PlatformVerifier).
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
 # Toasts. tauri-plugin-notification would inject a script into the page that replaces
 # window.Notification, so the toast is shown from Rust directly (the plugin uses this crate too).
 tauri-winrt-notification = "0.8"
@@ -25,11 +29,38 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
 toml = "1"
+# The settings window writes config.toml with this, keeping the user's comments (toml drops them).
+toml_edit = "0.25"
 # Tracker filter (privacy.rs). Default features: they are what the crate is tested with.
 adblock = "0.13"
 webview2-com = "0.39"
 windows-core = "0.62"
-windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_Storage_EnhancedStorage", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Media",
+    "Storage_Streams",
+    "Win32_Foundation",
+    # Title bar and mini player: Direct2D, DirectWrite, WIC (artwork), GDI paint, DWM corners.
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Variant",
+    "Win32_System_WinRT",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 # Build speed: see AGENTS.md. Debug info for dependencies is never needed and PDB generation is
 # a large part of a Windows link.

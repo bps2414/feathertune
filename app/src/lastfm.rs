@@ -1,6 +1,9 @@
-//! Last.fm: now playing and scrobbles, fed only by the `Player` state. Off while `[lastfm] api_key`
-//! or `api_secret` is empty in `config.toml` (the keys are the user's own and never live in code or Git).
+//! Last.fm: now playing and scrobbles, fed only by the `Player` state (plugin `lastfm`).
 //!
+//! - API keys: `[lastfm] api_key` and `api_secret` in `config.toml` when both are set; otherwise the
+//!   ones built into the binary from the CI secrets `FEATHERTUNE_LASTFM_API_KEY` and
+//!   `FEATHERTUNE_LASTFM_API_SECRET` (only the `dist` job sets them); otherwise off. They are never
+//!   in code or Git. Built-in keys can be read out of the exe, as in any desktop client.
 //! - Sign-in is the desktop flow: `auth.getToken`, the browser opens the authorization page, then
 //!   `auth.getSession` is polled until the user approves. The session key goes to the Windows
 //!   Credential Manager (keyring) and nowhere else; the app never sees a password.
@@ -41,6 +44,17 @@ const MAX_AGE_SECS: u64 = 14 * 24 * 3600;
 const BATCH: usize = 10;
 const AUTH_POLL: Duration = Duration::from_secs(5);
 const AUTH_POLLS: u32 = 60;
+const BUILT_IN_KEY: Option<&str> = option_env!("FEATHERTUNE_LASTFM_API_KEY");
+const BUILT_IN_SECRET: Option<&str> = option_env!("FEATHERTUNE_LASTFM_API_SECRET");
+/// This build carries API keys of its own.
+pub const BUILT_IN_KEYS: bool = set(BUILT_IN_KEY) && set(BUILT_IN_SECRET);
+
+const fn set(value: Option<&str>) -> bool {
+    match value {
+        Some(v) => !v.is_empty(),
+        None => false,
+    }
+}
 
 type OnChange = Arc<dyn Fn(bool) + Send + Sync>;
 
@@ -82,10 +96,11 @@ impl std::fmt::Display for Error {
 
 /// Starts the scrobbler thread. `None` when the keys are not configured.
 pub fn start(app: &AppHandle, settings: &Settings, profile: &Path) -> Option<LastFm> {
-    let (api_key, secret) = (settings.api_key.trim(), settings.api_secret.trim());
-    if api_key.is_empty() || secret.is_empty() {
-        return None;
-    }
+    let (api_key, secret) = match (settings.api_key.trim(), settings.api_secret.trim()) {
+        (k, s) if !k.is_empty() && !s.is_empty() => (k, s),
+        _ if BUILT_IN_KEYS => (BUILT_IN_KEY.unwrap_or_default().trim(), BUILT_IN_SECRET.unwrap_or_default().trim()),
+        _ => return None,
+    };
     let agent = ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
             .tls_config(

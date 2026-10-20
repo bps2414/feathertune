@@ -1,0 +1,275 @@
+//! Direct2D/DirectWrite drawing shared by the native title bar (titlebar.rs) and the mini player
+//! (miniplayer.rs), plus their colors: system light/dark and an optional theme color.
+//!
+//! Each window paints in WM_PAINT through a DC render target bound to the paint HDC, so the drawing
+//! is clipped like GDI (the title bar never draws over the child webview below it). Everything is in
+//! DIPs: the target gets the window's DPI. Icons are glyphs of "Segoe MDL2 Assets" (Windows 10 and 11).
+//! Both windows live on the main thread, so the factories are per thread.
+
+use std::cell::OnceCell;
+use std::sync::Mutex;
+
+use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND, RECT};
+use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT};
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
+    ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+};
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT, DWRITE_TRIMMING,
+    DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory,
+    IDWriteTextFormat,
+};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::core::{HSTRING, Result, w};
+
+pub const ICON_FONT: &str = "Segoe MDL2 Assets";
+pub const TEXT_FONT: &str = "Segoe UI";
+
+#[derive(Clone)]
+struct Factories {
+    d2d: ID2D1Factory,
+    dwrite: IDWriteFactory,
+}
+
+thread_local! {
+    static FACTORIES: OnceCell<Factories> = const { OnceCell::new() };
+}
+
+fn factories() -> Result<Factories> {
+    FACTORIES.with(|cell| {
+        if let Some(f) = cell.get() {
+            return Ok(f.clone());
+        }
+        let f = unsafe {
+            Factories {
+                d2d: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?,
+                dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
+            }
+        };
+        Ok(cell.get_or_init(|| f).clone())
+    })
+}
+
+/// A single-line text format, vertically centered, cut with an ellipsis.
+pub fn text_format(
+    family: &str,
+    size: f32,
+    weight: DWRITE_FONT_WEIGHT,
+    align: DWRITE_TEXT_ALIGNMENT,
+) -> Result<IDWriteTextFormat> {
+    let dwrite = factories()?.dwrite;
+    unsafe {
+        let format = dwrite.CreateTextFormat(
+            &HSTRING::from(family),
+            None,
+            weight,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            size,
+            w!("en-us"),
+        )?;
+        format.SetTextAlignment(align)?;
+        format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+        let ellipsis = dwrite.CreateEllipsisTrimmingSign(&format)?;
+        let trimming =
+            DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 };
+        format.SetTrimming(&trimming, &ellipsis)?;
+        Ok(format)
+    }
+}
+
+pub const fn rect(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
+    D2D_RECT_F { left, top, right, bottom }
+}
+
+pub const fn rgb(hex: u32) -> D2D1_COLOR_F {
+    rgba(hex, 1.0)
+}
+
+pub const fn rgba(hex: u32, a: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        r: ((hex >> 16) & 0xff) as f32 / 255.0,
+        g: ((hex >> 8) & 0xff) as f32 / 255.0,
+        b: (hex & 0xff) as f32 / 255.0,
+        a,
+    }
+}
+
+pub fn with_alpha(c: D2D1_COLOR_F, a: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F { a: c.a * a, ..c }
+}
+
+/// The window's scale factor (1.0 at 96 DPI).
+pub fn scale(hwnd: HWND) -> f32 {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+}
+
+/// Colors of our own surfaces.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub background: D2D1_COLOR_F,
+    pub text: D2D1_COLOR_F,
+    /// Button hover and other soft fills.
+    pub hover: D2D1_COLOR_F,
+    pub pressed: D2D1_COLOR_F,
+}
+
+/// The theme color set by `set_theme_color` (Phase 6: taken from the artwork).
+static THEME_COLOR: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Sets or clears the theme color of the title bar and the mini player. The caller repaints them.
+#[allow(dead_code)] // the hook Phase 6 (album color) uses
+pub fn set_theme_color(color: Option<u32>) {
+    *THEME_COLOR.lock().unwrap() = color;
+}
+
+pub fn palette() -> Palette {
+    let (background, dark) = match *THEME_COLOR.lock().unwrap() {
+        Some(c) => (rgb(c), luminance(c) < 0.5),
+        None if dark_mode() => (rgb(0x202020), true),
+        None => (rgb(0xf3f3f3), false),
+    };
+    let text = if dark { rgb(0xffffff) } else { rgb(0x000000) };
+    Palette { background, text, hover: with_alpha(text, 0.08), pressed: with_alpha(text, 0.05) }
+}
+
+/// Relative luminance of an sRGB color, 0..1 (WCAG).
+fn luminance(c: u32) -> f32 {
+    let channel = |shift: u32| {
+        let v = ((c >> shift) & 0xff) as f32 / 255.0;
+        if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+/// The "app mode" of Settings > Personalization > Colors.
+pub fn dark_mode() -> bool {
+    let mut value = 1u32;
+    let mut size = 4u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut size),
+        )
+    };
+    result.is_ok() && value == 0
+}
+
+/// A window's Direct2D target, kept between paints and rebuilt when the device is lost.
+#[derive(Default)]
+pub struct Surface {
+    target: Option<(ID2D1DCRenderTarget, ID2D1SolidColorBrush)>,
+    /// Bumped whenever the target is rebuilt, so callers know to rebuild their bitmaps.
+    pub generation: u32,
+}
+
+pub struct Canvas<'a> {
+    pub target: &'a ID2D1DCRenderTarget,
+    brush: &'a ID2D1SolidColorBrush,
+}
+
+impl Canvas<'_> {
+    pub fn fill(&self, r: D2D_RECT_F, color: D2D1_COLOR_F) {
+        unsafe {
+            self.brush.SetColor(&color);
+            self.target.FillRectangle(&r, self.brush);
+        }
+    }
+
+    pub fn text(&self, text: &str, format: &IDWriteTextFormat, r: D2D_RECT_F, color: D2D1_COLOR_F) {
+        let text: Vec<u16> = text.encode_utf16().collect();
+        unsafe {
+            self.brush.SetColor(&color);
+            self.target.DrawText(
+                &text,
+                format,
+                &r,
+                self.brush,
+                D2D1_DRAW_TEXT_OPTIONS_CLIP,
+                DWRITE_MEASURING_MODE_NATURAL,
+            );
+        }
+    }
+}
+
+impl Surface {
+    /// Paints the window: validates the update region and draws `area` (client pixels) with `draw`,
+    /// in DIPs from the top left of the client area.
+    pub fn paint(&mut self, hwnd: HWND, area: RECT, draw: impl FnOnce(&Canvas)) {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
+        if let Err(e) = self.draw(hdc, hwnd, area, draw) {
+            if e.code() == D2DERR_RECREATE_TARGET {
+                self.target = None;
+                unsafe {
+                    let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, false);
+                }
+            } else {
+                eprintln!("paint failed: {e}");
+            }
+        }
+        unsafe {
+            let _ = EndPaint(hwnd, &ps);
+        }
+    }
+
+    fn draw(
+        &mut self,
+        hdc: windows::Win32::Graphics::Gdi::HDC,
+        hwnd: HWND,
+        area: RECT,
+        draw: impl FnOnce(&Canvas),
+    ) -> Result<()> {
+        if self.target.is_none() {
+            let props = D2D1_RENDER_TARGET_PROPERTIES {
+                r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                },
+                dpiX: 0.0,
+                dpiY: 0.0,
+                usage: D2D1_RENDER_TARGET_USAGE_NONE,
+                minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+            };
+            let target = unsafe { factories()?.d2d.CreateDCRenderTarget(&props)? };
+            let brush = unsafe { target.CreateSolidColorBrush(&rgb(0), None)? };
+            self.target = Some((target, brush));
+            self.generation = self.generation.wrapping_add(1);
+        }
+        let (target, brush) = self.target.as_ref().expect("just set");
+        let dpi = scale(hwnd) * 96.0;
+        unsafe {
+            target.BindDC(hdc, &area)?;
+            target.SetDpi(dpi, dpi);
+            target.BeginDraw();
+            draw(&Canvas { target, brush });
+            target.EndDraw(None, None)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn luminance_picks_readable_text() {
+        assert!(luminance(0x000000) < 0.01);
+        assert!(luminance(0xffffff) > 0.99);
+        assert!(luminance(0x1db954) > 0.3);
+    }
+}

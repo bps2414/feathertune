@@ -3,7 +3,7 @@
   "identifier": "player-bridge",
   "description": "The player page may only report the player state. Nothing else is exposed to it.",
   "local": false,
-  "windows": ["main"],
+  "webviews": ["site"],
   "remote": { "urls": ["https://music.youtube.com/*"] },
   "permissions": ["allow-player-state"]
 }

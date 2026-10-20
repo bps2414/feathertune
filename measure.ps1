@@ -4,6 +4,7 @@
 #
 #   ./measure.ps1 -Name playing -ArgumentList '--measure','https://music.youtube.com/watch?v=<id>'
 #   ./measure.ps1 -Name tray -HideAfter 25 -Wait 50 -ArgumentList ...      # closes the window -> tray
+#   ./measure.ps1 -Name mini -MiniAfter 25 -Wait 50 -ArgumentList ...    # opens the mini player (hides the window)
 #   ./measure.ps1 -Name tray-1h -HideAfter 25 -Minutes 60 -ArgumentList ...  # one sample per minute
 #   ./measure.ps1 -Name spike -Exe spike\target\release\spike.exe -ArgumentList '"<url>"','"spike\data\x"'
 param(
@@ -13,6 +14,7 @@ param(
     [int]$Wait = 45,       # seconds before the first snapshot
     [int]$Window = 20,     # CPU window between the two snapshots
     [int]$HideAfter = 0,   # >0: sends WM_CLOSE to the main window after N s (the app hides in the tray)
+    [int]$MiniAfter = 0,   # >0: runs `<exe> --mini-player` after N s (the running instance opens the mini player)
     [int]$Minutes = 0      # >0: sampling mode, one sample per minute for N minutes (after HideAfter)
 )
 $ErrorActionPreference = 'Stop'
@@ -74,6 +76,10 @@ try {
         $h = (Get-Process -Id $p.Id).MainWindowHandle
         if ($h -eq [IntPtr]::Zero) { throw 'main window not found' }
         [void][Measure.Win32]::PostMessage($h, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)  # WM_CLOSE
+    }
+    if ($MiniAfter -gt 0) {
+        Wait-Until $MiniAfter
+        Start-Process $Exe -ArgumentList '--mini-player' -Wait
     }
 
     if ($Minutes -gt 0) {

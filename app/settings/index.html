@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>feathertune settings</title>
+  <link rel="stylesheet" href="/settings.css">
+  <script src="/settings.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Settings</h1>
+    <p id="restart" class="notice" hidden>Some changes apply after a restart: quit from the tray and open feathertune again.</p>
+    <p id="error" class="notice error" role="alert" hidden></p>
+  </header>
+
+  <section>
+    <h2>Plugins</h2>
+    <p class="hint">Every optional feature, with what it costs. Switches marked "restart" apply on the next start.</p>
+    <ul id="plugins" class="plugins"></ul>
+  </section>
+
+  <section>
+    <h2>Last.fm</h2>
+    <div class="row">
+      <span id="lastfm-status">…</span>
+      <button id="lastfm-button" type="button" hidden></button>
+    </div>
+    <p class="hint">Connecting opens Last.fm in your browser; the session key stays in the Windows Credential Manager.
+      <span id="lastfm-keys"></span></p>
+    <label>API key <input data-key="lastfm.api_key" autocomplete="off" spellcheck="false"></label>
+    <label>API secret <input data-key="lastfm.api_secret" type="password" autocomplete="off" spellcheck="false"></label>
+  </section>
+
+  <section>
+    <h2>Discord</h2>
+    <label>Application id <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false"></label>
+    <p class="hint">Rich Presence is off while this is empty.</p>
+  </section>
+
+  <section>
+    <h2>Shortcuts</h2>
+    <p class="hint">Global keys, such as Ctrl+Alt+Space or Ctrl+Shift+Left. Empty turns one off.</p>
+    <label>Play / pause <input data-key="shortcuts.play_pause" autocomplete="off" spellcheck="false"></label>
+    <label>Next <input data-key="shortcuts.next" autocomplete="off" spellcheck="false"></label>
+    <label>Previous <input data-key="shortcuts.previous" autocomplete="off" spellcheck="false"></label>
+    <label>Mini player <input data-key="shortcuts.mini_player" autocomplete="off" spellcheck="false"></label>
+  </section>
+
+  <section>
+    <h2>Window</h2>
+    <label class="check"><input type="checkbox" data-key="autostart"> Start with Windows (in the tray)</label>
+    <div class="row">
+      <span>Mini player</span>
+      <button id="mini-player" type="button">Open</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Advanced</h2>
+    <label>Extra Chromium features to turn off <input data-key="browser.disable_features" data-list placeholder="Name1, Name2" autocomplete="off" spellcheck="false"></label>
+    <p class="hint">Experiments only (see the plan). Restart to apply.</p>
+  </section>
+</body>
+</html>

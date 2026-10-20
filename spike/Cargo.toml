@@ -1,0 +1,17 @@
+[package]
+name = "spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+wry = "0.57"
+tao = "0.37"
+webview2-com = "0.39"
+windows = "0.62"
+windows-core = "0.62"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,5 @@
+target/
+# WebView2 profiles (cookies and session)
+data/
+# measure.ps1 output: local paths and listening history, never committed
+results/

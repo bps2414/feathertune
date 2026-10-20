@@ -37,6 +37,8 @@ What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-v
 
 Download `feathertune_<version>_x64-setup.exe` from the [releases](https://github.com/bps2414/feathertune/releases) and run it: per user, no admin, Windows 10/11. Uninstalling asks whether to also delete your data (sign-in, `config.toml`); it is kept unless you tick the box.
 
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
+
 ## Build
 
 Windows 10/11 with the WebView2 runtime and a Rust toolchain (stable, MSVC).

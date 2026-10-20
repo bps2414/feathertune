@@ -32,7 +32,7 @@ Build settings that make this fast (keep them): `.cargo/config.toml` links with 
 The app targets Windows only (`windows` crate, WebView2), so it does not build or run on Linux. In a cloud session:
 - Edit, then push the branch and let the GitHub Actions workflow (`.github/workflows/ci.yml`, Windows runner) run fmt, clippy, tests and a build. Read its result with `gh run list` / `gh run view --log-failed` instead of guessing.
 - `cargo check --target x86_64-pc-windows-msvc` from Linux is not verified to work (`tauri-build` compiles Windows resources); try it at most once, and fall back to CI.
-- Releases: bump `version` in `app/Cargo.toml` and `app/tauri.conf.json` together, then push a `vX.Y.Z` tag; the CI `dist` job publishes the installer. Only when the maintainer asks.
+- Releases: bump `version` in `app/Cargo.toml` and `app/tauri.conf.json` together, add the version's section to `CHANGELOG.md` and `CHANGELOG.pt-BR.md` (the release notes come from the English one; CI fails without it), then push a `vX.Y.Z` tag; the CI `dist` job publishes the installer. Only when the maintainer asks.
 - Anything that needs the running app, a signed-in account or `measure.ps1` is left for the maintainer: say so in the summary instead of claiming it works.
 
 ## Code rules

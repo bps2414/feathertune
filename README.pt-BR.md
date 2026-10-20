@@ -37,6 +37,8 @@ O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR
 
 Baixe `feathertune_<versão>_x64-setup.exe` nos [releases](https://github.com/bps2414/feathertune/releases) e rode: por usuário, sem admin, Windows 10/11. Ao desinstalar, ele pergunta se também apaga seus dados (login, `config.toml`); ficam guardados se a caixa não for marcada.
 
+O que mudou em cada versão: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
+
 ## Compilar
 
 Windows 10/11 com o runtime WebView2 e uma toolchain Rust (stable, MSVC).

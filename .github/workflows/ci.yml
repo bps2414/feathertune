@@ -40,7 +40,8 @@ jobs:
 
   # Fully optimized exe and the NSIS installer (Tauri CLI, `--profile dist`), downloadable from the
   # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock. On a `v*`
-  # tag it also publishes a GitHub release with the installer (the tag must match the app version).
+  # tag it also publishes a GitHub release with the installer (the tag must match the app version), its
+  # notes taken from that version's section of CHANGELOG.md.
   dist:
     if: github.event_name != 'pull_request'
     needs: check
@@ -75,4 +76,6 @@ jobs:
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [ "$TAG" != "v$version" ]; then echo "tag $TAG does not match version $version"; exit 1; fi
-          gh release create "$TAG" target/dist/bundle/nsis/*-setup.exe --title "feathertune $version" --generate-notes
+          awk -v v="$version" '/^## /{on = ($2 == v); next} on' ../CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "no CHANGELOG.md section for $version"; exit 1; fi
+          gh release create "$TAG" target/dist/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md

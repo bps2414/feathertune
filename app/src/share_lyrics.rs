@@ -10,6 +10,8 @@
 //! - Looks: Cover (a soft field of the cover's colors: the cover cut to its center square, shrunk to
 //!   5×5 and blown up again with a cubic filter, on a worker thread), Ink (the album theme's ink and
 //!   glows, as the mini player), Dark, and Paper (light, tinted by the album's glows).
+//!   On every look: the album's dominant color as an accent (quote mark, bar beside the lines, skip
+//!   dots, the note), a drop shadow under the lines, a vignette on Ink and Dark, and a fixed film grain.
 //! - The clipboard gets the picture as a DIB and as "PNG" (which chat apps and browsers prefer).
 //! - Nothing runs while it is open but idle: it repaints on input and on a lyrics change only.
 
@@ -20,12 +22,12 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 use windows::Win32::Foundation::{E_FAIL, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
+    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_BRUSH_PROPERTIES, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-    D2D1_BITMAP_PROPERTIES, D2D1_EXTEND_MODE_CLAMP, D2D1_ROUNDED_RECT, ID2D1BitmapBrush, ID2D1LinearGradientBrush,
-    ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
+    D2D1_BITMAP_PROPERTIES, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_EXTEND_MODE_WRAP, D2D1_ROUNDED_RECT,
+    ID2D1BitmapBrush, ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
@@ -102,6 +104,8 @@ const SKIP: f32 = 26.0;
 const EXPORT_SCALE: f32 = 3.0;
 /// The side of the Cover look's color field.
 const FIELD: u32 = 48;
+/// Side of the film grain tile, in pixels.
+const GRAIN: u32 = 96;
 
 const WM_UPDATE: u32 = WM_APP + 6;
 const STATUS_TIMER: usize = 0xfeb1;
@@ -214,6 +218,8 @@ struct Card {
     lines: Vec<(IDWriteTextLayout, f32)>,
     /// Where a skip mark goes.
     skips: Vec<f32>,
+    /// Bottom of the last line.
+    bottom: f32,
     /// Nothing picked: `lines` holds the hint.
     hint: bool,
     height: f32,
@@ -228,7 +234,13 @@ struct CardBrushes {
     field: Option<ID2D1BitmapBrush>,
     shade: Option<ID2D1LinearGradientBrush>,
     spot: Option<ID2D1RadialGradientBrush>,
-    /// The inner edge of the card.
+    /// Darkens the bottom of the card.
+    vignette: Option<ID2D1RadialGradientBrush>,
+    /// The bar beside the lines, with the accent it was made for.
+    bar: Option<(u32, ID2D1LinearGradientBrush)>,
+    /// A fine film grain, tiled.
+    grain: Option<ID2D1BitmapBrush>,
+    /// The inner edge of the card; also the note's color.
     edge: Option<ID2D1SolidColorBrush>,
     glows: gfx::GlowSets,
 }
@@ -475,6 +487,9 @@ impl CardBrushes {
             self.url.clear();
             self.shade = c.linear(point(0.0, 0.0), point(0.0, 1.0), rgba(0, 0.28), rgba(0, 0.62));
             self.spot = c.radial(rgb(0xffffff));
+            self.vignette = c.radial(rgb(0));
+            self.bar = None;
+            self.grain = grain_brush(c);
             self.edge = c.solid(rgb(0xffffff));
         }
         let url = media.map_or("", |m| m.url.as_str());
@@ -486,6 +501,47 @@ impl CardBrushes {
     }
 }
 
+/// A tile of faint white and black specks (premultiplied BGRA), fixed seed so every picture matches.
+fn grain_brush(c: &Canvas) -> Option<ID2D1BitmapBrush> {
+    let mut seed = 0x9e37_79b9u32;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed
+    };
+    let mut pixels = vec![0u8; (GRAIN * GRAIN * 4) as usize];
+    for px in pixels.as_chunks_mut::<4>().0 {
+        let r = next();
+        let alpha = ((r & 0xff) as f32 * 0.07) as u8;
+        let value = if r & 0x100 == 0 { alpha } else { 0 };
+        *px = [value, value, value, alpha];
+    }
+    let brush = bitmap_brush(c, GRAIN, GRAIN, &pixels)?;
+    unsafe {
+        brush.SetExtendModeX(D2D1_EXTEND_MODE_WRAP);
+        brush.SetExtendModeY(D2D1_EXTEND_MODE_WRAP);
+        // Half a DIP per speck: a pixel and a half in the 3x picture.
+        brush.SetTransform(&Matrix3x2 { M11: 0.5, M12: 0.0, M21: 0.0, M22: 0.5, M31: 0.0, M32: 0.0 });
+    }
+    Some(brush)
+}
+
+/// A beamed pair of eighth notes in a 12 x 12 box at `x`, `y`.
+fn note(c: &Canvas, brush: &ID2D1SolidColorBrush, x: f32, y: f32, color: D2D1_COLOR_F) {
+    unsafe {
+        brush.SetColor(&color);
+        for head in [x + 2.6, x + 9.4] {
+            let e = D2D1_ELLIPSE { point: point(head, y + 10.0), radiusX: 2.6, radiusY: 2.0 };
+            c.target.FillEllipse(&e, brush);
+        }
+    }
+    for stem in [x + 4.0, x + 10.8] {
+        c.fill(rect(stem, y + 1.0, stem + 1.2, y + 10.0), color);
+    }
+    c.fill(rect(x + 4.0, y + 1.0, x + 12.0, y + 3.4), color);
+}
+
 /// The glows of a theme on the card: center, radii (fractions of the card width) and strength.
 fn card_glows(h: f32) -> [(f32, f32, f32, f32, f32); 4] {
     [
@@ -494,6 +550,12 @@ fn card_glows(h: f32) -> [(f32, f32, f32, f32, f32); 4] {
         (CARD_W, h, 0.7, 0.55, 0.45),
         (CARD_W * 0.3, h * 0.3, 0.55, 0.45, 0.22),
     ]
+}
+
+/// A color as 0xRRGGBB, to tell brushes apart.
+fn hex(c: D2D1_COLOR_F) -> u32 {
+    let ch = |v: f32| (v * 255.0).round() as u32;
+    ch(c.r) << 16 | ch(c.g) << 8 | ch(c.b)
 }
 
 /// Draws the card at the origin, `CARD_W` × `card.height` DIPs.
@@ -514,6 +576,12 @@ fn draw_card(
     let paper = look == Look::Paper;
     let text = if paper { rgb(0x1d1b18) } else { rgb(0xffffff) };
     let sub = with_alpha(text, if paper { 0.6 } else { 0.68 });
+    // The album's dominant color, made to stand out on the look.
+    let accent = match theme {
+        Some(t) if paper => rgb(gfx::lerp_color(t.glows[0], 0x000000, 0.35)),
+        Some(t) => rgb(gfx::lerp_color(t.glows[0], 0xffffff, 0.4)),
+        None => text,
+    };
     let glows = |b: &mut CardBrushes, strength: f32| {
         let Some(theme) = theme else { return };
         b.glows.prepare(c, &[theme]);
@@ -527,6 +595,16 @@ fn draw_card(
             }
             c.fill_with(full, brush);
         }
+    };
+    let vignette = |b: &CardBrushes, strength: f32| {
+        let Some(v) = &b.vignette else { return };
+        unsafe {
+            v.SetCenter(point(CARD_W * 0.5, h * 1.08));
+            v.SetRadiusX(CARD_W * 1.1);
+            v.SetRadiusY(h * 0.55);
+            v.SetOpacity(strength);
+        }
+        c.fill_with(full, v);
     };
     match look {
         Look::Cover => {
@@ -545,6 +623,7 @@ fn draw_card(
         Look::Ink => {
             c.fill(full, rgb(ink));
             glows(b, 1.0);
+            vignette(b, 0.4);
         }
         Look::Dark => {
             c.fill(full, rgb(0x121212));
@@ -558,6 +637,7 @@ fn draw_card(
                 }
                 c.fill_with(full, spot);
             }
+            vignette(b, 0.5);
         }
         Look::Paper => {
             c.fill(full, rgb(0xf6f2eb));
@@ -579,7 +659,7 @@ fn draw_card(
         "\u{201d}",
         &f.quote,
         rect(CARD_W - 140.0, PAD - 34.0, CARD_W - PAD + 6.0, PAD + 76.0),
-        with_alpha(text, 0.14),
+        with_alpha(accent, if theme.is_some() { 0.3 } else { 0.14 }),
     );
 
     // Header: the cover on a soft shadow, the title and the artist.
@@ -593,6 +673,16 @@ fn draw_card(
             cover(brush, m.art.width, m.art.height, art);
             let rounded = D2D1_ROUNDED_RECT { rect: art, radiusX: ART_RADIUS, radiusY: ART_RADIUS };
             c.target.FillRoundedRectangle(&rounded, brush);
+            // A thin light rim, as if the cover caught the light.
+            if let Some(edge) = &b.edge {
+                edge.SetColor(&rgba(0xffffff, if paper { 0.25 } else { 0.16 }));
+                let rim = D2D1_ROUNDED_RECT {
+                    rect: rect(art.left + 0.5, art.top + 0.5, art.right - 0.5, art.bottom - 0.5),
+                    radiusX: ART_RADIUS - 0.5,
+                    radiusY: ART_RADIUS - 0.5,
+                };
+                c.target.DrawRoundedRectangle(&rim, edge, 1.0, None);
+            }
         },
         _ => {
             c.pill(art, ART_RADIUS, with_alpha(text, 0.12));
@@ -604,25 +694,52 @@ fn draw_card(
     c.text(&snap.title, &f.card_title, rect(x, PAD + 6.0, right, PAD + 30.0), text);
     c.text(&snap.artist, &f.card_artist, rect(x, PAD + 30.0, right, PAD + 50.0), sub);
 
-    // The lines; a skip is three small dots.
+    // The lines on a soft drop shadow, beside an accent bar fading down; a skip is three small dots.
+    if !card.hint {
+        let top = card.lines.first().map_or(0.0, |(_, y)| *y) + 4.0;
+        let key = hex(accent);
+        if b.bar.as_ref().is_none_or(|(k, _)| *k != key) {
+            let bar = c.linear(point(0.0, 0.0), point(0.0, 1.0), with_alpha(accent, 0.9), with_alpha(accent, 0.1));
+            b.bar = bar.map(|g| (key, g));
+        }
+        if let Some((_, bar)) = &b.bar {
+            unsafe {
+                bar.SetStartPoint(point(0.0, top));
+                bar.SetEndPoint(point(0.0, card.bottom));
+                let r = rect(PAD - 16.0, top, PAD - 13.0, card.bottom - 2.0);
+                c.target.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: 1.5, radiusY: 1.5 }, bar);
+            }
+        }
+    }
     for (layout, y) in &card.lines {
+        if !card.hint && !paper {
+            c.layout(layout, point(PAD, y + 1.5), rgba(0, 0.3));
+        }
         c.layout(layout, point(PAD, *y), if card.hint { with_alpha(text, 0.45) } else { text });
     }
     for y in &card.skips {
         for i in 0..3 {
             let dot = PAD + 2.0 + i as f32 * 10.0;
-            c.pill(rect(dot, y + SKIP / 2.0 - 2.5, dot + 5.0, y + SKIP / 2.0 + 2.5), 2.5, with_alpha(text, 0.4));
+            let r = rect(dot, y + SKIP / 2.0 - 2.5, dot + 5.0, y + SKIP / 2.0 + 2.5);
+            c.pill(r, 2.5, with_alpha(accent, 0.3 + 0.2 * i as f32));
         }
     }
 
-    // Footer: a hairline, a note and the album (or the artist).
+    // Footer: a hairline, a note in a tinted disc and the album (or the artist).
     let y = h - PAD - FOOTER + 26.0;
     c.fill(rect(PAD, y, CARD_W - PAD, y + 1.0), with_alpha(text, 0.16));
     let label = if snap.album.is_empty() { &snap.artist } else { &snap.album };
-    c.text("\u{e8d6}", &f.small_icons, rect(PAD, y + 16.0, PAD + 12.0, y + 32.0), sub);
-    c.text(label, &f.footer, rect(PAD + 20.0, y + 16.0, CARD_W - PAD, y + 32.0), sub);
+    c.pill(rect(PAD, y + 13.0, PAD + 22.0, y + 35.0), 11.0, with_alpha(accent, 0.18));
+    if let Some(edge) = &b.edge {
+        note(c, edge, PAD + 5.0, y + 18.0, accent);
+    }
+    c.text(label, &f.footer, rect(PAD + 30.0, y + 16.0, CARD_W - PAD, y + 32.0), sub);
 
-    // A faint inner edge, like glass.
+    // Film grain over everything, then a faint inner edge, like glass.
+    if let Some(grain) = &b.grain {
+        unsafe { grain.SetOpacity(if paper { 0.6 } else { 1.0 }) };
+        c.fill_with(full, grain);
+    }
     if let Some(edge) = &b.edge {
         let inset = rect(10.0, 10.0, CARD_W - 10.0, h - 10.0);
         let rounded = D2D1_ROUNDED_RECT { rect: inset, radiusX: 18.0, radiusY: 18.0 };
@@ -651,7 +768,7 @@ fn layout_card(rows: &[(u32, String)], picks: &[usize], lyric: &IDWriteTextForma
         lines.push((layout, y));
         y += m.height + LINE_GAP;
     }
-    Ok(Card { lines, skips, hint, height: y - LINE_GAP + FOOTER + PAD })
+    Ok(Card { lines, skips, bottom: y - LINE_GAP, hint, height: y - LINE_GAP + FOOTER + PAD })
 }
 
 impl Share {

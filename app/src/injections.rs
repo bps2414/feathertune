@@ -2,7 +2,8 @@
 //! (`page.js` and/or `style.css`) and is compiled into the binary.
 //!
 //! Each module has an on/off switch under `[injections]` in the profile's `config.toml`, except the
-//! `core` module (the player state bridge), which is always on.
+//! `core` module (the player state bridge), which is always on. A module that is still an
+//! unmeasured experiment (`performance`) is off until the switch says otherwise.
 //! On startup the enabled modules are assembled into a single initialization script that only
 //! runs on the main frame of https://music.youtube.com. CSS enters as a `<style>` element and each
 //! module runs inside its own `try/catch`, so a module that throws does not take the others down.
@@ -21,11 +22,32 @@ struct Injection {
     css: Option<&'static str>,
     /// false: always on, with no switch in `config.toml`.
     toggle: bool,
+    /// State when `config.toml` does not mention the module.
+    default_on: bool,
 }
 
 const INJECTIONS: &[Injection] = &[
-    Injection { id: "core", js: Some(include_str!("../injections/core/page.js")), css: None, toggle: false },
-    Injection { id: "controls", js: Some(include_str!("../injections/controls/page.js")), css: None, toggle: true },
+    Injection {
+        id: "core",
+        js: Some(include_str!("../injections/core/page.js")),
+        css: None,
+        toggle: false,
+        default_on: true,
+    },
+    Injection {
+        id: "controls",
+        js: Some(include_str!("../injections/controls/page.js")),
+        css: None,
+        toggle: true,
+        default_on: true,
+    },
+    Injection {
+        id: "performance",
+        js: None,
+        css: Some(include_str!("../injections/performance/style.css")),
+        toggle: true,
+        default_on: false,
+    },
 ];
 
 #[derive(Deserialize, Default)]
@@ -35,7 +57,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads `config.toml` from the profile. Writes a default one (every module on) if it is missing.
+    /// Reads `config.toml` from the profile. Writes a default one (every module at its default) if it is missing.
     /// A file that does not parse is left untouched and the defaults are used.
     pub fn load(profile: &Path) -> Config {
         let path = profile.join("config.toml");
@@ -47,7 +69,7 @@ impl Config {
             Err(_) => {
                 let mut text = String::from("[injections]\n");
                 for inj in INJECTIONS.iter().filter(|i| i.toggle) {
-                    text.push_str(&format!("{} = true\n", inj.id));
+                    text.push_str(&format!("{} = {}\n", inj.id, inj.default_on));
                 }
                 let _ = std::fs::create_dir_all(profile);
                 let _ = std::fs::write(&path, text);
@@ -57,7 +79,7 @@ impl Config {
     }
 
     fn enabled(&self, inj: &Injection) -> bool {
-        !inj.toggle || self.injections.get(inj.id).copied().unwrap_or(true)
+        !inj.toggle || self.injections.get(inj.id).copied().unwrap_or(inj.default_on)
     }
 }
 
@@ -89,4 +111,18 @@ pub fn script(config: &Config) -> String {
     }
     out.push_str("})();\n");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn experiments_stay_off_until_switched_on() {
+        assert!(!script(&Config::default()).contains("backdrop-filter"));
+        let on: Config = toml::from_str("[injections]\nperformance = true").unwrap();
+        assert!(script(&on).contains("backdrop-filter"));
+        let off: Config = toml::from_str("[injections]\ncontrols = false").unwrap();
+        assert!(!script(&off).contains("SELECTORS"));
+    }
 }

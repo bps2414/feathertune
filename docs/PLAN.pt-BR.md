@@ -119,7 +119,7 @@ Resultado: tocando 408 MB privados e 2,8% de CPU, bandeja 167 MB de WS, abertura
 
 - Injeção `core` (sempre ligada, só no frame principal) → comando único `player_state` → `Player` (`app/src/player.rs`, API documentada no topo). Capability `app/capabilities/player-bridge.json`: só esse comando, só a janela `main`, só a origem do site e nada para origem local. O `frontendDist` saiu do `tauri.conf.json`: com ele, o Tauri tratava o site remoto como origem *local*, e qualquer capability local futura vazaria para a página.
 - O SMTC do próprio WebView2 aparecia como `msedgewebview2.exe`, então foi desligado (`HardwareMediaKeyHandling`) e o app publica o seu (`app/src/smtc.rs`, preso à janela principal).
-- **Nome no flyout:** um exe solto aparece como "Unknown app". O que resolve é o processo ter um AppUserModelID (`dev.feathertune.desktop`) e existir um atalho no Menu Iniciar com o mesmo ID. O app cria `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` se não existir; na Fase 4 o instalador deve criá-lo com o mesmo AUMID e o desinstalador deve removê-lo.
+- **Nome no flyout:** um exe solto aparece como "Unknown app". O que resolve é o processo ter um AppUserModelID (`dev.feathertune.desktop`) e existir um atalho no Menu Iniciar com o mesmo ID. O app cria `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` se não existir; o instalador da Fase 4 o cria com o mesmo AUMID e o desinstalador o remove (veja a Fase 4).
 - Teclas de mídia com o app na bandeja: tocar/pausar ≤ 16 ms, próxima ~0,5 s, anterior ~0,2 s até o novo estado chegar no Rust. CPU tocando: mediana de 3,6%, 408 MB privados.
 
 ### Fase 3: Integrações (Sonnet 5.5 high) — código escrito em 20/10/2026, conferências do mantenedor e medição pendentes
@@ -147,14 +147,79 @@ Notas da implementação (`app/src/{settings,shortcuts,notify,discord,lastfm}.rs
 - **Last.fm:** o item da bandeja conecta ou desconecta. O login abre o navegador e consulta `auth.getSession` a cada 5 s por 5 min; a session key vai para o Credential Manager (serviço `feathertune`). O ponto do scrobble conta só tempo tocado (pausas fora) e um timer acorda a thread nesse momento. Tocar a mesma faixa de novo (a posição volta depois do scrobble) conta como nova audição. Scrobbles que falham esperam em `lastfm-queue.json` no perfil (lotes de 10, nova tentativa a cada 5 min, na partida e no próximo scrobble; itens com mais de 14 dias são descartados porque o Last.fm os ignora). Session key rejeitada (erro 9) descarta a sessão e pede novo login.
 - **Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` passam no Linux; o app não foi executado. Pendente para o mantenedor, no Windows: cada item na bandeja, a conferência do Discord, um scrobble de verdade e o `measure.ps1` (3 rodadas, mediana) das duas linhas acima. Quando tudo passar, troque a nota do título por "Fase 3: concluída em <data>" e preencha a tabela.
 
-### Fase 4: Dieta e entrega (Sonnet 5.5 high)
+### Fase 4: Dieta e entrega (Sonnet 5.5 high) — código escrito em 20/10/2026, medições e conferência de instalação do mantenedor pendentes
 
-- Experimentos um por vez, cada um medido com `measure.ps1` (3 rodadas, mediana). Só fica o que mostrar ganho:
-  - CSS que remove animações, transições e `backdrop-filter`, como módulo de injeção `performance`;
-  - flags de features que o app não usa.
-- Filtro de rastreadores: `WebResourceRequested` do WebView2 (via `with_webview`) + crate `adblock` com **só lista de privacidade**, nunca lista de anúncio, e nada que mude o que o player toca. É o único item de interop COM da fase: se travar, devolva só ele ao Opus.
-- Instalador NSIS do Tauri com o bootstrapper do WebView2, gerado com `--profile dist`.
-- **Pronto quando:** a tabela final cliente Electron × feathertune está aqui (3 rodadas, mesmo critério), o instalador instala e desinstala limpo, e a desinstalação só remove o perfil se o usuário pedir.
+Tudo abaixo está implementado; nada foi executado. A sessão na nuvem não abre o app, não roda o `measure.ps1` e não instala, então toda célula medida está `pendente` e a fase **não** está marcada como concluída. Troque a nota do título por "Fase 4: concluída em <data>" quando as tabelas estiverem preenchidas e o roteiro de instalação passar.
+
+**Experimentos** (um por vez, cada um medido com `measure.ps1`, 3 rodadas, mediana; só fica o que mostrar ganho). Todos os interruptores estão no `config.toml` do perfil, então a tabela inteira precisa de **um** build:
+
+```toml
+[injections]
+performance = true                 # CSS: sem animação, transição, rolagem suave nem backdrop-filter
+[browser]
+disable_features = ["Nome1", "Nome2"]   # entram no único --disable-features (nomes: letras, dígitos, _)
+[privacy]
+tracker_filter = true              # o filtro de rastreadores abaixo
+```
+
+```powershell
+cd app; cargo build --release; cd ..                     # uma vez para a fase toda
+$a = '--measure', '<url da faixa>'
+1..3 | % { ./measure.ps1 -Name base-open-$_ -ArgumentList $a }                         # janela aberta
+./median.ps1 -Prefix base-open-
+1..3 | % { ./measure.ps1 -Name base-tray-$_ -ArgumentList $a -HideAfter 25 -Wait 50 }  # na bandeja
+./median.ps1 -Prefix base-tray-
+```
+
+Repita com outro prefixo (`e1-open-`, `e1-tray-`, ...) depois de mudar só a linha daquele experimento no `config.toml`, e ponha as duas saídas do `median.ps1` na tabela. **Regra:** a mudança só fica se a mediana superar a da base por mais que a própria variação min–max da base (Fase 2: CPU 3,1–3,9%) *e* o login e a reprodução continuarem funcionando. Um nome de feature que o Chromium não conhece é ignorado sem erro, então "sem mudança" também pode significar que o nome não existe no runtime instalado. Depois dos experimentos isolados, meça uma vez os que ficaram juntos.
+
+| # | Experimento (interruptor) | Aberto: CPU / privado / WS | Bandeja: WS | Decisão |
+|---|---|---|---|---|
+| E0 | Base: app atual, tudo abaixo desligado | pendente | pendente | — |
+| E1 | Módulo CSS `performance` (`performance = true`) | pendente | pendente | pendente |
+| E2 | `SpareRendererForSitePerProcess`: sem processo renderer reserva | pendente | pendente | pendente |
+| E3 | `Prerender2`: sem pré-renderização de páginas | pendente | pendente | pendente |
+| E4 | `MediaRouter`, `DialMediaRouteProvider`: sem descoberta de Cast | pendente | pendente | pendente |
+| E5 | `OptimizationHints`, `OptimizationGuideModelDownloading`, `OptimizationHintsFetching`, `OptimizationTargetPrediction`: sem hints nem download de modelos | pendente | pendente | pendente |
+| E6 | Filtro de rastreadores, lista embutida (`tracker_filter = true`) | pendente | pendente | pendente |
+| E7 | Filtro + lista de privacidade em `privacy-list.txt` (por exemplo a EasyPrivacy) | pendente | pendente | pendente |
+| E8 | Tudo o que ficou, junto | pendente | pendente | — |
+
+Consideradas e **não** testadas, de propósito: isolamento de sites desligado (`site-per-process`, enfraquece o isolamento de uma página não confiável); `--disable-component-update` (pode congelar os componentes de mídia do runtime e quebrar a reprodução); features do Privacy Sandbox ou ligadas a anúncios (mexem em anúncios); `--disable-gpu` e V8 lite (já descartados, veja Peso medido); `CalculateNativeWinOcclusion` (a bandeja já esconde a view de forma explícita, e essa faria janelas escondidas contarem como visíveis). Uma feature que fica sai de `disable_features` e vai para `DISABLED_FEATURES` em `app/src/main.rs`; um módulo ou experimento que não fica é apagado, e a linha aqui guarda os números.
+
+**Módulo `performance`** (`app/injections/performance/style.css`): zera duração e atraso de animações e transições (`0s`, e não `animation: none`, para que os handlers de `animationend`/`transitionend` ainda disparem), `scroll-behavior: auto`, `backdrop-filter: none`. Só apresentação. Desligado por padrão até o E1 mostrar ganho. Os spinners de carregamento param por definição; qualquer outra coisa que pareça quebrada no E1 (ou um elemento dentro de shadow root nativo, que um seletor da página não alcança) é motivo para descartar o módulo.
+
+**Filtro de rastreadores** (`app/src/privacy.rs`, `[privacy] tracker_filter`, desligado por padrão): `WebResourceRequested` do WebView2 via `with_webview` + crate `adblock` (0.13, features padrão) com as regras cosméticas descartadas, então só consegue bloquear requisições, nunca mudar a página. Feito para não conseguir tocar em anúncios nem na reprodução, no código e não confiando na lista:
+
+- o handler só é registrado para scripts, imagens, XHR/fetch, pings e "other"; documentos, frames, mídia, fontes e folhas de estilo nunca chegam nele;
+- hosts dos domínios do player, qualquer domínio Google e os domínios de entrega de anúncios do Google (doubleclick, googlesyndication, googleadservices, 2mdn, ...) são pulados antes de consultar a lista, então mesmo uma lista de anúncios posta por engano não muda nada ali;
+- a lista embutida (`app/filters/privacy.txt`, escrita para este projeto) tem só hosts de analytics e gravação de sessão de terceiros. Mais regras vão em `privacy-list.txt` no perfil (só listas de privacidade: decisão do mantenedor, e o E7 mede o custo de uma completa);
+- a requisição bloqueada recebe um 403 vazio. Com `--measure`, cada host bloqueado é impresso uma vez (`tracker_blocked=<host>`), então uma rodada mostra o que foi pego. Se nada for bloqueado no site, o filtro não tem ganho e é candidato a sair, qualquer que seja o custo por requisição.
+- Situação: o código COM compila e a lógica da lista tem testes unitários; **o filtro não foi executado**. O handler roda na thread de UI a cada subrecurso desses tipos, então E6/E7 medem esse custo também. Não travou.
+
+**Instalador** (`app/tauri.conf.json` → `bundle`, `app/installer-hooks.nsh`): bundler NSIS do Tauri, por usuário (sem admin; instala em `%LOCALAPPDATA%\Programs\feathertune`), WebView2 `downloadBootstrapper` (não aumenta o instalador; baixa o bootstrapper só onde falta o runtime, o que não é o caso do Windows 11 nem de um Windows 10 atualizado; `embedBootstrapper` somaria ~1,8 MB para instalação offline), inglês e português do Brasil conforme o idioma do sistema. O CI gera com `build -- --profile dist --locked` (job `dist`; artefato `feathertune-<sha>`, instalador em `bundle/nsis/*-setup.exe`). À mão: `cd app; npx @tauri-apps/cli@2.12.3 build -- --profile dist`.
+
+- **Atalho e AUMID:** o template padrão cria `Start Menu\Programs\feathertune.lnk` e grava nele o identificador do bundle como AppUserModelID, que é `dev.feathertune.desktop`, o ID que o `smtc.rs` põe no processo. É o mesmo caminho que o app escreve quando o atalho não existe, então não duplica, e o desinstalador o remove (quando ainda aponta para o exe instalado), além da jump list e da entrada "Iniciar com o Windows".
+- **Perfil:** o checkbox "excluir dados do aplicativo" do template limpa pastas com o nome do identificador do bundle, não `%LOCALAPPDATA%\feathertune`; por isso o `installer-hooks.nsh` limpa o perfil de verdade (login, `config.toml`, fila do Last.fm) e a credencial do Last.fm (`cmdkey /delete:lastfm-session.feathertune`, nome do alvo deduzido do código da crate `keyring`, **a confirmar**) só quando a caixa está marcada. Desmarcada, nada do usuário é removido.
+- **Conferência de instalação do mantenedor** ("instala e desinstala limpo"), no Windows:
+  1. instalar e abrir pelo Menu Iniciar: a janela abre, o login funciona (ou o perfil logado vale), o flyout de mídia mostra o nome do app, o atalho tem o AUMID (`dev.feathertune.desktop`);
+  2. instalar de novo por cima do app aberto: pede para fechá-lo, o perfil sobrevive;
+  3. desinstalar **desmarcado**: pasta de instalação, atalho e entrada Run somem; `%LOCALAPPDATA%\feathertune` continua; reinstalar mantém o login;
+  4. desinstalar **marcado**: a pasta do perfil some, e `cmdkey /list | findstr lastfm` volta vazio.
+
+**Tabela final: cliente Electron × feathertune.** Build `--profile dist`, 3 rodadas, mediana, mesmo critério acima. Electron: `./measure.ps1 -Name electron-open-$_ -Exe <exe do cliente> -ArgumentList <args dele>` com a mesma faixa tocando; feathertune: `-Exe app/target/dist/feathertune.exe`. Preencha com a saída do `median.ps1`.
+
+| | Cliente Electron | feathertune (dist) | Meta |
+|---|---|---|---|
+| Tocando, janela aberta: CPU | pendente | pendente | ≤ 4% |
+| Tocando, janela aberta: privado | pendente | pendente | ≤ 480 MB |
+| Tocando, janela aberta: WS | pendente | pendente | ≤ 750 MB |
+| Tocando, na bandeja: WS | pendente | pendente | ≤ 260 MB |
+| Processos | pendente | pendente | — |
+| Abertura até a barra do player / conteúdo | pendente | pendente | ≤ 2,0 s |
+| Tamanho do instalador | pendente | pendente | poucos MB |
+
+**Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` rodam no Linux; o job `dist` do CI gera o instalador no Windows. Nada foi executado. Pendente para o mantenedor: a base e os E1–E8, a tabela final, o roteiro de instalação, as conferências da Fase 3 que já estavam pendentes e as notas dos títulos das Fases 3 e 4.
 
 ## Depois da Fase 4: plugins (futuro, fora do escopo atual)
 
@@ -179,9 +244,12 @@ $a = '--measure', '<url da faixa>'
 ./measure.ps1 -Name playing -ArgumentList $a
 ./measure.ps1 -Name tray -ArgumentList $a -HideAfter 25 -Wait 50
 ./measure.ps1 -Name tray-1h -ArgumentList $a -HideAfter 25 -Minutes 60
-./measure.ps1 -Name final -Exe app/target/dist/feathertune.exe -ArgumentList $a   # tabela da Fase 4
+1..3 | % { ./measure.ps1 -Name final-$_ -Exe app/target/dist/feathertune.exe -ArgumentList $a }   # tabela da Fase 4
+./median.ps1 -Prefix final-                                                                       # mediana das 3 rodadas
 ./measure.ps1 -Name spike -Exe spike/target/release/spike.exe -ArgumentList '"<url>"', 'spike/data/x'
 ```
+
+`median.ps1 -Prefix <p>` imprime a mediana e a faixa min–max de cada `results/<p>*.json`, para as linhas de 3 rodadas das tabelas.
 
 `-HideAfter` manda WM_CLOSE para a janela (o app vai para a bandeja). O app usa o perfil real, então mede logado.
 

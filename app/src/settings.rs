@@ -17,6 +17,12 @@
 //! [lastfm]
 //! api_key = ""                     # off while either is empty
 //! api_secret = ""
+//!
+//! [browser]                        # Phase 4 experiments: Chromium features to turn off, added to the
+//! disable_features = []            # built-in list (see main.rs), e.g. ["SpareRendererForSitePerProcess"]
+//!
+//! [privacy]
+//! tracker_filter = false           # privacy.rs; extra rules go in privacy-list.txt in the profile
 //! ```
 
 use std::path::Path;
@@ -30,6 +36,8 @@ pub struct Settings {
     pub notifications: Notifications,
     pub discord: Discord,
     pub lastfm: LastFm,
+    pub browser: Browser,
+    pub privacy: Privacy,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +83,32 @@ pub struct LastFm {
     pub api_secret: String,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct Browser {
+    pub disable_features: Vec<String>,
+}
+
+impl Browser {
+    /// The names that are safe to put in the command line: Chromium feature names are plain
+    /// identifiers, and anything else (a space, a comma, a quote) could smuggle in another flag.
+    pub fn disabled_features(&self) -> impl Iterator<Item = &str> {
+        self.disable_features.iter().map(|f| f.trim()).filter(|f| {
+            let ok = !f.is_empty() && f.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            if !ok {
+                eprintln!("config.toml: ignoring invalid feature name {f:?}");
+            }
+            ok
+        })
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct Privacy {
+    pub tracker_filter: bool,
+}
+
 impl Settings {
     /// Missing file or sections give the defaults. A file that does not parse is reported by
     /// `injections::Config::load` and is not touched here either.
@@ -83,5 +117,17 @@ impl Settings {
             .ok()
             .and_then(|text| toml::from_str(&text).ok())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feature_names_cannot_carry_flags() {
+        let browser =
+            Browser { disable_features: ["Good_1", "a b", "x,y", " ok ", "--evil", ""].map(String::from).to_vec() };
+        assert_eq!(browser.disabled_features().collect::<Vec<_>>(), ["Good_1", "ok"]);
     }
 }

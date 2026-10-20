@@ -2,7 +2,7 @@
 
 *English: [README.md](README.md)*
 
-> **Em desenvolvimento, experimental.** É um projeto pessoal que ainda estou testando muito. Coisas quebram, mudam ou são reescritas sem aviso. Ainda não há releases, instalador nem suporte. Use por sua conta e risco.
+> **Em desenvolvimento, experimental.** É um projeto pessoal que ainda estou testando muito. Coisas quebram, mudam ou são reescritas sem aviso. Ainda não há releases nem suporte; o CI gera um instalador, mas ele ainda não foi testado. Use por sua conta e risco.
 
 Uma casca desktop leve para Windows de um player de música na web, escrita em Rust com Tauri 2. Em vez de embutir um Chromium (como os apps Electron), usa o runtime WebView2 que já vem no Windows e cuida das partes de desktop de forma nativa: ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, e redução de memória enquanto escondido.
 
@@ -21,7 +21,7 @@ Medido até agora (árvore de processos, tocando): ~410 MB de memória privada e
 | 1. Casca: janela, bandeja, redução de memória | concluída |
 | 2. Ponte de estado do player, teclas de mídia, flyout | concluída |
 | 3. Integrações (instância única, autostart, atalhos, Discord, Last.fm) | código escrito, em teste |
-| 4. Dieta e instalador | planejada |
+| 4. Dieta e instalador | código escrito, medições e conferência de instalação pendentes |
 
 ## Compilar
 
@@ -34,6 +34,8 @@ cargo build --release
 ```
 
 `cargo check` é o ciclo rápido enquanto edita; `cargo build --profile dist` é o build lento e totalmente otimizado, para releases.
+
+Instalador (NSIS, por usuário, sem admin): `cd app; npx @tauri-apps/cli@2.12.3 build -- --profile dist`, ou baixe da execução do CI. Ao desinstalar, ele pergunta se também apaga seus dados (login, `config.toml`); ficam guardados se a caixa não for marcada.
 
 ## Configuração
 
@@ -54,6 +56,15 @@ client_id = ""               # o id do seu próprio aplicativo do Discord; sem e
 [lastfm]
 api_key = ""                 # sua própria conta de API do Last.fm; desligado se um dos dois estiver vazio
 api_secret = ""
+
+[injections]
+performance = false          # CSS que remove animações, transições e blur; um experimento, veja docs/PLAN.pt-BR.md
+
+[browser]
+disable_features = []        # features extras do Chromium a desligar (experimentos, veja docs/PLAN.pt-BR.md)
+
+[privacy]
+tracker_filter = false       # bloqueia requisições de analytics de terceiros; nunca anúncios (docs/PLAN.pt-BR.md)
 ```
 
 Os itens "Start with Windows" e "Connect Last.fm" ficam no menu da bandeja. O login do Last.fm acontece no navegador; a session key fica no Windows Credential Manager, nunca em arquivo.

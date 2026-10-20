@@ -119,7 +119,7 @@ Result: playing 408 MB private and 2.8% CPU, tray 167 MB WS, startup to the play
 
 - `core` injection (always on, main frame only) → single command `player_state` → `Player` (`app/src/player.rs`, API documented at the top). Capability `app/capabilities/player-bridge.json`: only that command, only window `main`, only the site's origin, nothing for local origins. `frontendDist` was removed from `tauri.conf.json`: with it, Tauri treated the remote site as a *local* origin, and any future local capability would leak to the page.
 - WebView2's own SMTC entry showed as `msedgewebview2.exe`, so it is turned off (`HardwareMediaKeyHandling`) and the app publishes its own (`app/src/smtc.rs`, tied to the main window).
-- **Flyout name:** a bare exe shows as "Unknown app". The fix is a process AppUserModelID (`dev.feathertune.desktop`) plus a Start menu shortcut carrying the same ID. The app creates `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` if missing; in Phase 4 the installer must create it with the same AUMID and the uninstaller must remove it.
+- **Flyout name:** a bare exe shows as "Unknown app". The fix is a process AppUserModelID (`dev.feathertune.desktop`) plus a Start menu shortcut carrying the same ID. The app creates `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` if missing; the Phase 4 installer creates it with the same AUMID and the uninstaller removes it (see Phase 4).
 - Media keys with the app in the tray: play/pause ≤ 16 ms, next ~0.5 s, previous ~0.2 s until the new state reaches Rust. CPU playing: median 3.6%, 408 MB private.
 
 ### Phase 3: Integrations (Sonnet 5.5 high) — code written 2026-10-20, maintainer checks and measurement pending
@@ -147,14 +147,79 @@ Implementation notes (`app/src/{settings,shortcuts,notify,discord,lastfm}.rs`; e
 - **Last.fm:** the tray item connects or disconnects. Sign-in opens the browser and polls `auth.getSession` every 5 s for 5 min; the session key goes to the Credential Manager (service `feathertune`). The scrobble point counts played time only (pauses excluded) and a timer wakes the thread at that moment. Replaying the same track (position goes back after the scrobble) counts as a new listen. Failed scrobbles wait in `lastfm-queue.json` in the profile (batches of 10, retried every 5 min, at startup and at the next scrobble; entries older than 14 days are dropped because Last.fm ignores them). A rejected session key (error 9) drops the session and asks for a new sign-in.
 - **Cloud session limits:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` and `cargo fmt --check` pass from Linux; the app was not run. Pending for the maintainer, on Windows: each item in the tray, the Discord check, a real scrobble, and `measure.ps1` (3 runs, median) for the two rows above. When all of it passes, replace the heading note with "Phase 3: done on <date>" and fill the table.
 
-### Phase 4: Slimming and delivery (Sonnet 5.5 high)
+### Phase 4: Slimming and delivery (Sonnet 5.5 high) — code written 2026-10-20, maintainer measurements and install check pending
 
-- Experiments one at a time, each measured with `measure.ps1` (3 runs, median). Only what shows a gain stays:
-  - CSS that removes animations, transitions and `backdrop-filter`, as a `performance` injection module;
-  - flags for features the app does not use.
-- Tracker filter: WebView2 `WebResourceRequested` (via `with_webview`) + the `adblock` crate with a **privacy list only**, never an ad list, and nothing that changes what the player plays. The only COM interop item of the phase: if it stalls, hand just this item back to Opus.
-- Tauri NSIS installer with the WebView2 bootstrapper, built with `--profile dist`.
-- **Done when:** the final Electron client × feathertune table is here (3 runs, same criterion), the installer installs and uninstalls cleanly, and uninstall removes the profile only if the user asks.
+Everything below is implemented; nothing in it has been run. The cloud session cannot start the app, run `measure.ps1` or install, so every measured cell is `pending` and the phase is **not** marked done. Heading note to replace with "Phase 4: done on <date>" once the tables are filled and the install checklist passes.
+
+**Experiments** (one at a time, each measured with `measure.ps1`, 3 runs, median; only what shows a gain stays). Every switch is in the profile's `config.toml`, so the whole table needs **one** build:
+
+```toml
+[injections]
+performance = true                 # CSS: no animation, transition, smooth scroll or backdrop-filter
+[browser]
+disable_features = ["Name1", "Name2"]   # added to the single --disable-features (names: letters, digits, _)
+[privacy]
+tracker_filter = true              # the tracker filter below
+```
+
+```powershell
+cd app; cargo build --release; cd ..                     # once for the whole phase
+$a = '--measure', '<track url>'
+1..3 | % { ./measure.ps1 -Name base-open-$_ -ArgumentList $a }                         # window open
+./median.ps1 -Prefix base-open-
+1..3 | % { ./measure.ps1 -Name base-tray-$_ -ArgumentList $a -HideAfter 25 -Wait 50 }  # in the tray
+./median.ps1 -Prefix base-tray-
+```
+
+Repeat with a new prefix (`e1-open-`, `e1-tray-`, ...) after changing only that experiment's line in `config.toml`, and put the two `median.ps1` outputs in the table. **Rule:** a change stays only if its median beats the baseline by more than the baseline's own min–max spread (Phase 2: CPU 3.1–3.9%) *and* sign-in and playback still work. A feature name Chromium does not know is ignored without an error, so "no change" can also mean the name does not exist in the installed runtime. After the single experiments, measure the kept ones together once.
+
+| # | Experiment (switch) | Open: CPU / private / WS | Tray: WS | Decision |
+|---|---|---|---|---|
+| E0 | Baseline: current app, everything below off | pending | pending | — |
+| E1 | CSS `performance` module (`performance = true`) | pending | pending | pending |
+| E2 | `SpareRendererForSitePerProcess`: no pre-created spare renderer process | pending | pending | pending |
+| E3 | `Prerender2`: no page prerendering | pending | pending | pending |
+| E4 | `MediaRouter`, `DialMediaRouteProvider`: no Cast discovery | pending | pending | pending |
+| E5 | `OptimizationHints`, `OptimizationGuideModelDownloading`, `OptimizationHintsFetching`, `OptimizationTargetPrediction`: no hints/model downloads | pending | pending | pending |
+| E6 | Tracker filter, bundled list (`tracker_filter = true`) | pending | pending | pending |
+| E7 | Tracker filter + a privacy list in `privacy-list.txt` (for example EasyPrivacy) | pending | pending | pending |
+| E8 | Everything that stayed, together | pending | pending | — |
+
+Considered and **not** tried, on purpose: site isolation off (`site-per-process`, weakens isolation of an untrusted page); `--disable-component-update` (could freeze the runtime's media components and break playback); Privacy Sandbox / ad-related features (touch ads); `--disable-gpu` and V8 lite mode (already out, see Measured weight); `CalculateNativeWinOcclusion` (the tray already hides the view explicitly, and this one would make hidden windows count as visible). A feature that stays moves from `disable_features` into `DISABLED_FEATURES` in `app/src/main.rs`; a module or experiment that does not is deleted, and its row here keeps the numbers.
+
+**`performance` module** (`app/injections/performance/style.css`): sets animation/transition durations and delays to `0s` (not `animation: none`, so `animationend`/`transitionend` handlers still fire), `scroll-behavior: auto`, `backdrop-filter: none`. Presentation only. Off by default until E1 shows a gain. Loading spinners stop by design; anything else that looks broken in E1 (or an element living in a native shadow root, which a page-level selector does not reach) is a reason to drop the module.
+
+**Tracker filter** (`app/src/privacy.rs`, `[privacy] tracker_filter`, off by default): WebView2 `WebResourceRequested` through `with_webview` + the `adblock` crate (0.13, default features) with cosmetic rules dropped, so it can only block requests, never change the page. Built to be unable to touch ads or playback, in code and not by trusting the list:
+
+- the handler is registered only for scripts, images, XHR/fetch, pings and "other"; documents, frames, media, fonts and stylesheets never reach it;
+- hosts on the player's domains, any Google domain and Google's ad-delivery domains (doubleclick, googlesyndication, googleadservices, 2mdn, ...) are skipped before the list is asked, so even an ad list dropped in by mistake changes nothing there;
+- the bundled list (`app/filters/privacy.txt`, written for this project) has only third-party analytics and session-recording hosts. More rules go in `privacy-list.txt` in the profile (privacy lists only: the maintainer's call, and E7 measures the cost of a full one);
+- a blocked request gets an empty 403. Under `--measure` each blocked host is printed once (`tracker_blocked=<host>`), so a run shows what was caught. If nothing is ever blocked on the site, the filter has no gain and is a candidate for removal, whatever it costs per request.
+- Status: the COM code compiles and the list logic has unit tests; **the filter was not run**. Its handler is called on the UI thread for every subresource of those kinds, so E6/E7 measure that cost too. It did not stall.
+
+**Installer** (`app/tauri.conf.json` → `bundle`, `app/installer-hooks.nsh`): Tauri's NSIS bundler, per-user (no admin; installs to `%LOCALAPPDATA%\Programs\feathertune`), WebView2 `downloadBootstrapper` (adds nothing to the installer; fetches the bootstrapper only where the runtime is missing, which Windows 11 and an updated Windows 10 are not; `embedBootstrapper` would add ~1.8 MB for offline installs), English and Brazilian Portuguese by system language. CI builds it with `build -- --profile dist --locked` (the `dist` job; artifact `feathertune-<sha>`, installer at `bundle/nsis/*-setup.exe`). By hand: `cd app; npx @tauri-apps/cli@2.12.3 build -- --profile dist`.
+
+- **Shortcut and AUMID:** the stock template creates `Start Menu\Programs\feathertune.lnk` and stamps it with the bundle identifier as AppUserModelID, which is `dev.feathertune.desktop`, the ID `smtc.rs` sets on the process. It is the same path the app writes when the shortcut is missing, so there is no duplicate, and the uninstaller removes it (when it still points at the installed exe), plus the jump list and the "Start with Windows" entry.
+- **Profile:** the template's "delete application data" checkbox clears folders named after the bundle identifier, not `%LOCALAPPDATA%\feathertune`, so `installer-hooks.nsh` clears the real profile (sign-in, `config.toml`, Last.fm queue) and the Last.fm credential (`cmdkey /delete:lastfm-session.feathertune`, target name derived from the `keyring` crate source, **to be confirmed**) only when the box is ticked. Unticked, nothing of the user's is removed.
+- **Install check for the maintainer** ("installs and uninstalls cleanly"), on Windows:
+  1. install, start from the Start menu: window opens, signed-in profile or sign-in works, the media flyout shows the app name, the shortcut has the AUMID (`dev.feathertune.desktop`);
+  2. install again over the running app: it asks to close it, the profile survives;
+  3. uninstall **unticked**: install folder, shortcut and Run entry gone; `%LOCALAPPDATA%\feathertune` still there; reinstall keeps the sign-in;
+  4. uninstall **ticked**: profile folder gone, and `cmdkey /list | findstr lastfm` empty.
+
+**Final table: Electron client × feathertune.** `--profile dist` build, 3 runs, median, same criterion as above. Electron: `./measure.ps1 -Name electron-open-$_ -Exe <client exe> -ArgumentList <its args>` with the same track playing; feathertune: `-Exe app/target/dist/feathertune.exe`. Fill in `median.ps1` output.
+
+| | Electron client | feathertune (dist) | Target |
+|---|---|---|---|
+| Playing, window open: CPU | pending | pending | ≤ 4% |
+| Playing, window open: private | pending | pending | ≤ 480 MB |
+| Playing, window open: WS | pending | pending | ≤ 750 MB |
+| Playing, in the tray: WS | pending | pending | ≤ 260 MB |
+| Processes | pending | pending | — |
+| Startup to the player bar / content | pending | pending | ≤ 2.0 s |
+| Installer size | pending | pending | a few MB |
+
+**Cloud session limits:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` and `cargo fmt --check` run from Linux; the CI `dist` job builds the installer on Windows. Nothing was run. Pending for the maintainer: the baseline and E1–E8, the final table, the install checklist, the Phase 3 checks that were already pending, and filling the Phase 3 and 4 heading notes.
 
 ## After Phase 4: plugins (future, out of current scope)
 
@@ -179,9 +244,12 @@ $a = '--measure', '<track url>'
 ./measure.ps1 -Name playing -ArgumentList $a
 ./measure.ps1 -Name tray -ArgumentList $a -HideAfter 25 -Wait 50
 ./measure.ps1 -Name tray-1h -ArgumentList $a -HideAfter 25 -Minutes 60
-./measure.ps1 -Name final -Exe app/target/dist/feathertune.exe -ArgumentList $a   # Phase 4 table
+1..3 | % { ./measure.ps1 -Name final-$_ -Exe app/target/dist/feathertune.exe -ArgumentList $a }   # Phase 4 table
+./median.ps1 -Prefix final-                                                                       # median of the 3 runs
 ./measure.ps1 -Name spike -Exe spike/target/release/spike.exe -ArgumentList '"<url>"', 'spike/data/x'
 ```
+
+`median.ps1 -Prefix <p>` prints the median and the min–max range of every `results/<p>*.json`, for the 3-run rows of the tables.
 
 `-HideAfter` sends WM_CLOSE to the window (the app goes to the tray). The app uses the real profile, so it measures signed in.
 

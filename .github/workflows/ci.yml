@@ -37,7 +37,8 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
-  # Fully optimized exe, downloadable from the run page. Not on pull requests.
+  # Fully optimized exe and the NSIS installer (Tauri CLI, `--profile dist`), downloadable from the
+  # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock.
   dist:
     if: github.event_name != 'pull_request'
     needs: check
@@ -49,9 +50,11 @@ jobs:
         with:
           workspaces: app
           key: dist
-      - run: cargo build --profile dist --locked
+      - run: npx --yes @tauri-apps/cli@2.12.3 build -- --profile dist --locked
       - uses: actions/upload-artifact@v7
         with:
           name: feathertune-${{ github.sha }}
-          path: app/target/dist/feathertune.exe
+          path: |
+            app/target/dist/feathertune.exe
+            app/target/dist/bundle/nsis/*-setup.exe
           retention-days: 14

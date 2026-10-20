@@ -18,11 +18,11 @@
 //! api_key = ""                     # off while either is empty
 //! api_secret = ""
 //!
-//! [browser]                        # Phase 4 experiments: Chromium features to turn off, added to the
-//! disable_features = []            # built-in list (see main.rs), e.g. ["SpareRendererForSitePerProcess"]
+//! [browser]                        # extra Chromium features to turn off, added to the built-in list
+//! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
 //!
 //! [privacy]
-//! tracker_filter = false           # privacy.rs; extra rules go in privacy-list.txt in the profile
+//! tracker_filter = true            # privacy.rs; extra rules go in privacy-list.txt in the profile
 //! ```
 
 use std::path::Path;
@@ -103,10 +103,16 @@ impl Browser {
     }
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 #[serde(default)]
 pub struct Privacy {
     pub tracker_filter: bool,
+}
+
+impl Default for Privacy {
+    fn default() -> Self {
+        Privacy { tracker_filter: true }
+    }
 }
 
 impl Settings {

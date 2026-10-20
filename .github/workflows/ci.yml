@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artifacts never get reused on a fresh runner and only bloat the cache.
+  CARGO_INCREMENTAL: 0
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  # Fully optimized exe, downloadable from the run page. Not on pull requests.
+  dist:
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+          key: dist
+      - run: cargo build --profile dist --locked
+      - uses: actions/upload-artifact@v7
+        with:
+          name: feathertune-${{ github.sha }}
+          path: app/target/dist/feathertune.exe
+          retention-days: 14

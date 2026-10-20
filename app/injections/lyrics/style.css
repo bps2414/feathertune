@@ -1,0 +1,41 @@
+/* Synced lyrics: the timed lines replace the site's own lyrics while the Lyrics tab is open (the
+   attribute is set by lyrics/page.js only then, and only when LRCLIB had lyrics). */
+ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
+  display: none;
+}
+
+#feathertune-lyrics {
+  padding: 24px 20px 45vh;
+}
+
+#feathertune-lyrics .ft-line {
+  margin: 0;
+  padding: 6px 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+#feathertune-lyrics .ft-gap {
+  min-height: 1.35em;
+}
+
+#feathertune-lyrics .ft-line.ft-current {
+  color: #fff;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--feathertune-accent, #fff) 55%, transparent);
+}
+
+#feathertune-lyrics .ft-credit {
+  margin: 28px 0 0;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #feathertune-lyrics .ft-line {
+    transition:
+      color 0.25s ease,
+      text-shadow 0.25s ease;
+  }
+}

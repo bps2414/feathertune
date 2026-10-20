@@ -6,8 +6,11 @@
 //! - Opening it hides the main window (memory Low, as in the tray); "back" shows the main window and
 //!   closes it; close leaves the app in the tray. It exists only while open.
 //! - The artwork URL comes from the validated state (https, one of the site's image hosts). A worker
-//!   thread downloads it (no redirects, at most 4 MB) and decodes it with WIC into a small premultiplied
-//!   BGRA buffer; the window turns that into a Direct2D bitmap when it paints.
+//!   thread loads it through artwork.rs (download and WIC decode into a small premultiplied BGRA
+//!   buffer); the window turns that into a Direct2D bitmap when it paints.
+//! - With the `album_color` plugin the background is the artwork's ink with a few static glows of its
+//!   colors (gfx::Theme); a change of theme flows in over `gfx::fading()`, on a timer that exists only
+//!   during the flow. Without a theme the background stays flat.
 //! - The worker also wakes once per second while playing to move the progress bar.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -17,7 +20,6 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::error::RecvError;
-use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT};
 use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_PROPERTIES, ID2D1Bitmap};
@@ -30,23 +32,20 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromWindow, ScreenToClient,
 };
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory, WICBitmapDitherTypeNone,
-    WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
-};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetClientRect, GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, IDC_ARROW, LoadCursorW, PostMessageW,
-    RegisterClassExW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    WM_APP, WM_DESTROY, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY,
-    WM_NCHITTEST, WM_NCMOUSEMOVE, WM_PAINT, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    GetClientRect, GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, IDC_ARROW, KillTimer, LoadCursorW,
+    PostMessageW, RegisterClassExW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WM_APP, WM_DESTROY, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCMOUSEMOVE, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
 
-use crate::gfx::{self, ICON_FONT, TEXT_FONT, rect};
+use crate::artwork::{self, Art};
+use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
 use crate::player::{Event, Player, State};
 use crate::settings::Live;
 
@@ -54,10 +53,14 @@ use crate::settings::Live;
 const WIDTH: f32 = 340.0;
 const HEIGHT: f32 = 96.0;
 const ART: f32 = 80.0;
-/// Decoded artwork side in pixels: the 80 DIP square at up to 200% scale.
-const ART_PIXELS: u32 = 160;
-const MAX_ART_BYTES: u64 = 4 * 1024 * 1024;
+/// The static glows of a theme: center, radii (DIPs) and strength, kept soft so the white text stays
+/// readable (the glows' luminance is capped in album_color.rs).
+const GLOWS: [(f32, f32, f32, f32, f32); 3] =
+    [(290.0, 0.0, 190.0, 110.0, 0.55), (130.0, HEIGHT, 170.0, 70.0, 0.45), (WIDTH, HEIGHT, 140.0, 60.0, 0.4)];
 const WM_UPDATE: u32 = WM_APP + 1;
+const TIMER: usize = 0xfea9;
+/// 30 fps, like the title bar; only while a theme flow runs.
+const FRAME_MS: u32 = 33;
 use crate::titlebar::WM_MOUSELEAVE;
 
 /// The open window, 0 when closed. Only the main thread creates and destroys it.
@@ -100,8 +103,7 @@ pub fn toggle(app: &AppHandle) {
     if is_open() { crate::show_main(app) } else { open(app) }
 }
 
-/// Repaints it (after a theme color change).
-#[allow(dead_code)] // with gfx::set_theme_color, for Phase 6
+/// Repaints it and starts the flow to a new theme (after `gfx::set_theme`). Any thread.
 pub fn refresh() {
     let hwnd = WINDOW.load(Ordering::Relaxed);
     if hwnd != 0 {
@@ -115,16 +117,8 @@ pub fn refresh() {
 #[derive(Default)]
 struct Data {
     state: Option<State>,
-    art: Option<Art>,
+    art: Option<Arc<Art>>,
     closed: bool,
-}
-
-struct Art {
-    url: String,
-    width: u32,
-    height: u32,
-    /// Premultiplied BGRA, `width * 4` bytes per row.
-    pixels: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -148,6 +142,10 @@ struct Mini {
     small_icons: IDWriteTextFormat,
     /// The artwork as a bitmap of the current target: URL and target generation it was made for.
     bitmap: Option<(String, u32, ID2D1Bitmap)>,
+    /// The glow brushes of the themes on screen.
+    glows: gfx::GlowSets,
+    /// The frame timer of a theme flow is running.
+    ticking: bool,
     hover: Option<Button>,
     pressed: Option<Button>,
     tracking: bool,
@@ -198,6 +196,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         icons: font(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         small_icons: font(ICON_FONT, 10.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         bitmap: None,
+        glows: gfx::GlowSets::default(),
+        ticking: false,
         hover: None,
         pressed: None,
         tracking: false,
@@ -256,17 +256,6 @@ unsafe fn place(app: &AppHandle, hwnd: HWND) {
 }
 
 fn worker(hwnd: isize, data: Arc<Mutex<Data>>, mut rx: Receiver<Event>) {
-    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .tls_config(
-                TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build(),
-            )
-            .user_agent(concat!("feathertune/", env!("CARGO_PKG_VERSION")))
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(15)))
-            .build(),
-    );
     let post = || unsafe {
         let _ = PostMessageW(Some(HWND(hwnd as _)), WM_UPDATE, WPARAM(0), LPARAM(0));
     };
@@ -282,7 +271,7 @@ fn worker(hwnd: isize, data: Arc<Mutex<Data>>, mut rx: Receiver<Event>) {
         };
         if wanted != fetched {
             fetched = wanted.clone();
-            let art = wanted.and_then(|url| match fetch(&agent, &url) {
+            let art = wanted.and_then(|url| match artwork::load(&url) {
                 Ok(a) => Some(a),
                 Err(e) => {
                     eprintln!("mini player: artwork not loaded: {e}");
@@ -307,50 +296,6 @@ fn worker(hwnd: isize, data: Arc<Mutex<Data>>, mut rx: Receiver<Event>) {
     }
 }
 
-fn fetch(agent: &ureq::Agent, url: &str) -> std::result::Result<Art, String> {
-    // Same check as the page payload: https on one of the site's image hosts, nothing else.
-    let url = crate::player::artwork(url).ok_or("not an artwork URL")?;
-    let mut response = agent.get(&url).call().map_err(|e| e.to_string())?;
-    if response.status() != 200 {
-        return Err(format!("HTTP {}", response.status()));
-    }
-    let bytes = response.body_mut().with_config().limit(MAX_ART_BYTES).read_to_vec().map_err(|e| e.to_string())?;
-    let (width, height, pixels) = decode(&bytes).map_err(|e| e.to_string())?;
-    Ok(Art { url, width, height, pixels })
-}
-
-/// Any format WIC knows, scaled to fit `ART_PIXELS` and converted to premultiplied BGRA.
-fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
-    unsafe {
-        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let stream = wic.CreateStream()?;
-        stream.InitializeFromMemory(bytes)?;
-        let decoder = wic.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
-        let frame = decoder.GetFrame(0)?;
-        let (mut w, mut h) = (0, 0);
-        frame.GetSize(&mut w, &mut h)?;
-        if w == 0 || h == 0 {
-            return Err(windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL));
-        }
-        let fit = (ART_PIXELS as f32 / w.min(h) as f32).min(1.0);
-        let (w, h) = (((w as f32 * fit).round() as u32).max(1), ((h as f32 * fit).round() as u32).max(1));
-        let scaler = wic.CreateBitmapScaler()?;
-        scaler.Initialize(&frame, w, h, WICBitmapInterpolationModeFant)?;
-        let converter = wic.CreateFormatConverter()?;
-        converter.Initialize(
-            &scaler,
-            &GUID_WICPixelFormat32bppPBGRA,
-            WICBitmapDitherTypeNone,
-            None,
-            0.0,
-            WICBitmapPaletteTypeCustom,
-        )?;
-        let mut pixels = vec![0u8; (w * h * 4) as usize];
-        converter.CopyPixels(std::ptr::null(), w * 4, &mut pixels)?;
-        Ok((w, h, pixels))
-    }
-}
-
 impl Mini {
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Button>) {
         if hover.is_some() && !self.tracking {
@@ -368,12 +313,35 @@ impl Mini {
         }
     }
 
+    /// Runs the frame timer only while the colors flow to a new theme.
+    fn schedule(&mut self, hwnd: HWND) {
+        let run = gfx::fading();
+        if run == self.ticking {
+            return;
+        }
+        self.ticking = run;
+        unsafe {
+            if run {
+                SetTimer(Some(hwnd), TIMER, FRAME_MS, None);
+            } else {
+                let _ = KillTimer(Some(hwnd), TIMER);
+            }
+        }
+    }
+
     fn paint(&mut self, hwnd: HWND) {
         let mut client = RECT::default();
         unsafe {
             let _ = GetClientRect(hwnd, &mut client);
         }
         let pal = gfx::palette();
+        let themes = gfx::blend();
+        // Both themes of a flow are drawn, each at its share of the opacity.
+        let layers: Vec<(gfx::Theme, f32)> = [(themes.from, 1.0 - themes.t), (themes.to, themes.t)]
+            .into_iter()
+            .filter_map(|(theme, share)| theme.map(|t| (t, share)))
+            .collect();
+        let sets = &mut self.glows;
         let data = self.data.clone();
         let data = data.lock().unwrap();
         let state = data.state.as_ref();
@@ -384,6 +352,20 @@ impl Mini {
         let art = data.art.as_ref().filter(|a| Some(&a.url) == state.and_then(|s| s.track.artwork.as_ref()));
         self.surface.paint(hwnd, client, |c| {
             c.fill(rect(0.0, 0.0, WIDTH, HEIGHT), pal.background);
+            let themes: Vec<gfx::Theme> = layers.iter().map(|(t, _)| *t).collect();
+            sets.prepare(c, &themes);
+            for (theme, share) in &layers {
+                let Some(set) = sets.get(theme) else { continue };
+                for (brush, (x, y, rx, ry, alpha)) in set.iter().zip(GLOWS) {
+                    unsafe {
+                        brush.SetCenter(point(x, y));
+                        brush.SetRadiusX(rx);
+                        brush.SetRadiusY(ry);
+                        brush.SetOpacity(alpha * share);
+                    }
+                    c.fill_with(rect(0.0, 0.0, WIDTH, HEIGHT), brush);
+                }
+            }
             let art_rect = rect(8.0, 8.0, 8.0 + ART, 8.0 + ART);
             // The surface may have been rebuilt since the bitmap was made (device lost).
             let fresh = |b: &(String, u32, ID2D1Bitmap), a: &Art| b.0 == a.url && b.1 == generation;
@@ -534,7 +516,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 m.paint(hwnd);
                 return LRESULT(0);
             }
-            WM_UPDATE => invalidate(hwnd),
+            WM_UPDATE => {
+                m.schedule(hwnd);
+                invalidate(hwnd);
+            }
+            WM_TIMER if wparam.0 == TIMER => {
+                invalidate(hwnd);
+                m.schedule(hwnd);
+                return LRESULT(0);
+            }
             WM_DPICHANGED => {
                 let r = &*(lparam.0 as *const RECT);
                 let _ = SetWindowPos(
@@ -549,6 +539,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return LRESULT(0);
             }
             WM_DESTROY => {
+                let _ = KillTimer(Some(hwnd), TIMER);
                 let mut r = RECT::default();
                 if GetWindowRect(hwnd, &mut r).is_ok() {
                     *LAST_POSITION.lock().unwrap() = Some((r.left, r.top));

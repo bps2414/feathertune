@@ -23,7 +23,7 @@ Measured so far (process tree, playing): ~410 MB private memory and ~3% of one C
 | 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | tray and shortcuts checked; Discord and Last.fm still to be confirmed on a real profile |
 | 4. Slimming and installer | measured (~400 MB private, ~3.3% CPU, ~190 MB in the tray); silent install/uninstall checked; Electron comparison and the "delete data" uninstall path open |
 | 5. Native shell: own title bar, settings window and plugins, mini player | built and measured (~430 MB private, ~4.5% CPU open, above Phase 4 pending a same-day baseline); snap/150%/second monitor and Last.fm sign-in on a CI build to be confirmed by the maintainer |
-| 6. Look: album color, synced lyrics, ambient mode | planned |
+| 6. Look: album color, synced lyrics, ambient mode | built and measured (~433 MB private, ~4.4% CPU open with album color and lyrics on; ambient mode off by default, about +25 MB); animated fade, light mode and 150% scaling to be confirmed by the maintainer |
 
 ## Build
 
@@ -53,6 +53,9 @@ discord = true               # also needs client_id below
 lastfm = true                # also needs your account connected
 mini_player = true
 animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
+album_color = true            # title bar, mini player and site take the cover's colors (once per track)
+synced_lyrics = true          # LRCLIB time-synced lyrics in the Lyrics tab; one request per track, cached
+ambient_mode = false          # blurred, glowing cover behind the site; off by default
 
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"

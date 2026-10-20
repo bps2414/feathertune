@@ -98,6 +98,37 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "album_color",
+        name: "Album color",
+        description: "Colors the title bar, the mini player and the site's player with the colors of the current \
+                      cover. Taken once per track; text stays readable.",
+        cost: "No measurable cost: +1 MB private and +0.1 points of CPU against off, inside the noise (Phase 6).",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
+        id: "synced_lyrics",
+        name: "Synced lyrics",
+        description: "Shows time-synced lyrics from LRCLIB in the site's Lyrics tab, with the current line \
+                      highlighted. One request per track, cached on disk; when LRCLIB has none, the site's own \
+                      lyrics stay.",
+        cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the Phase 4 spread (Phase 6).",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
+        id: "ambient_mode",
+        name: "Ambient mode",
+        description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \
+                      window is hidden or minimized and with reduced motion.",
+        cost: "About +25 MB private and +15 MB WS against off (one run); the CPU difference is inside the noise of one run (Phase 6).",
+        default_on: false,
+        live: false,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

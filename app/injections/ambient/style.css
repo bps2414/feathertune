@@ -1,0 +1,88 @@
+/* Ambient mode (see ambient/page.js): the cover, enlarged, blurred and saturated, behind the site, and a
+   halo of it right behind the cover on the player page that fades out in every direction, so the picture
+   seems to go on forever. The site's page backgrounds turn transparent while it is on, so the glow
+   shows through, and a dark scrim keeps the site's white text readable. The slow drift of the
+   background steps at about 10 frames a second (the blur is the costly part); it pauses while the window
+   is hidden, minimized or in the background (`ft-still`) and does not run with reduced motion. The halo
+   does not move on its own. */
+#feathertune-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: #030303;
+}
+
+#feathertune-ambient .ft-layer {
+  position: absolute;
+  background-position: center;
+  background-size: cover;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+
+#feathertune-ambient .ft-layer.ft-show {
+  opacity: 1;
+}
+
+#feathertune-ambient .ft-bg .ft-layer {
+  inset: -20%;
+  filter: blur(60px) saturate(1.9) brightness(0.8);
+  transform: scale(1.2);
+}
+
+#feathertune-ambient .ft-bg .ft-layer.ft-show {
+  opacity: 0.85;
+}
+
+#feathertune-ambient .ft-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(3, 3, 3, 0.35), rgba(3, 3, 3, 0.7));
+}
+
+#feathertune-ambient .ft-halo {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+  filter: blur(40px) saturate(2.2) brightness(1.2);
+  mask-image: radial-gradient(closest-side, #000 45%, transparent 100%);
+}
+
+#feathertune-ambient .ft-halo.ft-on {
+  opacity: 0.9;
+}
+
+#feathertune-ambient .ft-halo .ft-layer {
+  inset: 0;
+}
+
+html[data-feathertune-ambient] {
+  --ytmusic-background: transparent;
+  --ytmusic-player-page-background: transparent;
+  --ytmusic-nav-bar: rgba(3, 3, 3, 0.55);
+}
+
+html[data-feathertune-ambient] ytmusic-player-bar {
+  --ytmusic-player-bar-background: rgba(3, 3, 3, 0.65);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #feathertune-ambient .ft-bg .ft-layer.ft-show {
+    animation: ft-drift 90s steps(900) infinite alternate;
+  }
+
+  #feathertune-ambient.ft-still .ft-bg .ft-layer {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes ft-drift {
+  from {
+    transform: scale(1.2) translate3d(-3%, -2%, 0) rotate(0deg);
+  }
+  to {
+    transform: scale(1.35) translate3d(3%, 2%, 0) rotate(5deg);
+  }
+}

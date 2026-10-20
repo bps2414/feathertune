@@ -9,7 +9,18 @@
 //! module runs inside its own `try/catch`, so a module that throws does not take the others down.
 //! Modules share the `feathertune` namespace object (`window.__feathertune`), which is how Rust reaches them.
 //!
+//! Rust gives a module data with `send(app, module, &json)`: it calls `window.__feathertune.<module>.set(data)`
+//! with the data parsed from a JSON string, so the page only ever receives data, never code built from
+//! strings, and the page asks for nothing. The last data of each module is kept and sent again when the
+//! page finishes loading (a sign-in or a reload loses the page's copy).
+//!
 //! To add a module: create its folder, add one entry to `INJECTIONS` and its plugin to `PLUGINS`.
+
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+use serde_json::Value;
+use tauri::{AppHandle, Manager, Webview};
 
 use crate::settings::Settings;
 
@@ -29,7 +40,53 @@ const INJECTIONS: &[Injection] = &[
         css: None,
         plugin: Some("controls"),
     },
+    Injection {
+        id: "theme",
+        js: Some(include_str!("../injections/theme/page.js")),
+        css: Some(include_str!("../injections/theme/style.css")),
+        plugin: Some("album_color"),
+    },
+    Injection {
+        id: "lyrics",
+        js: Some(include_str!("../injections/lyrics/page.js")),
+        css: Some(include_str!("../injections/lyrics/style.css")),
+        plugin: Some("synced_lyrics"),
+    },
+    Injection {
+        id: "ambient",
+        js: Some(include_str!("../injections/ambient/page.js")),
+        css: Some(include_str!("../injections/ambient/style.css")),
+        plugin: Some("ambient_mode"),
+    },
 ];
+
+/// The last data `send` gave each module (as JSON text).
+#[derive(Default)]
+pub struct PageData(Mutex<BTreeMap<&'static str, String>>);
+
+/// Gives `module` (a `feathertune.<module>` object with a `set` function) its data. `Value::Null` clears.
+/// Callable from any thread.
+pub fn send(app: &AppHandle, module: &'static str, data: &Value) {
+    let json = data.to_string();
+    app.state::<PageData>().0.lock().unwrap().insert(module, json.clone());
+    if let Some(site) = app.get_webview("site") {
+        push(&site, module, &json);
+    }
+}
+
+/// Sends every module its last data again (the page finished loading).
+pub fn resend(site: &Webview) {
+    let all: Vec<_> = site.state::<PageData>().0.lock().unwrap().iter().map(|(m, j)| (*m, j.clone())).collect();
+    for (module, json) in all {
+        push(site, module, &json);
+    }
+}
+
+fn push(site: &Webview, module: &str, json: &str) {
+    // `module` is one of our constant ids; the data goes in as a string literal that the page parses.
+    let literal = serde_json::to_string(json).expect("a string serializes");
+    let _ = site.eval(format!("window.__feathertune?.{module}?.set(JSON.parse({literal}))"));
+}
 
 /// Builds the single initialization script with every enabled module.
 pub fn script(settings: &Settings) -> String {

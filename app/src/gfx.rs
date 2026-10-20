@@ -1,5 +1,6 @@
 //! Direct2D/DirectWrite drawing shared by the native title bar (titlebar.rs) and the mini player
-//! (miniplayer.rs), plus their colors: system light/dark and an optional theme color.
+//! (miniplayer.rs), plus their colors: system light/dark and the album theme (`Theme`, set by
+//! album_color.rs, with a short fade between two themes).
 //!
 //! Each window paints in WM_PAINT through a DC render target bound to the paint HDC, so the drawing
 //! is clipped like GDI (the title bar never draws over the child webview below it). Everything is in
@@ -8,6 +9,7 @@
 
 use std::cell::OnceCell;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
@@ -30,7 +32,10 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::core::{HSTRING, Result, w};
+use windows::Win32::UI::WindowsAndMessaging::{
+    SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+};
+use windows::core::{BOOL, HSTRING, Result, w};
 use windows_numerics::Vector2;
 
 pub const ICON_FONT: &str = "Segoe MDL2 Assets";
@@ -135,33 +140,97 @@ pub struct Palette {
     /// Button hover and other soft fills.
     pub hover: D2D1_COLOR_F,
     pub pressed: D2D1_COLOR_F,
+    /// The "app mode" of Windows, whatever the theme.
+    pub system_dark: bool,
 }
 
-/// The theme color set by `set_theme_color` (Phase 6: taken from the artwork).
-static THEME_COLOR: Mutex<Option<u32>> = Mutex::new(None);
-
-pub fn theme_color() -> Option<u32> {
-    *THEME_COLOR.lock().unwrap()
+/// The colors of the "ink in water" look, taken from the artwork: a deep ink and the four glows (the
+/// first is the dominant color). The ink is always dark, so the white text on it is readable.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Theme {
+    pub ink: u32,
+    pub glows: [u32; 4],
 }
 
-/// Sets or clears the theme color of the title bar and the mini player. The caller repaints them.
-#[allow(dead_code)] // the hook Phase 6 (album color) uses
-pub fn set_theme_color(color: Option<u32>) {
-    *THEME_COLOR.lock().unwrap() = color;
+/// How long the colors take to flow from one theme to the next.
+const FADE: Duration = Duration::from_millis(700);
+
+struct Fade {
+    from: Option<Theme>,
+    to: Option<Theme>,
+    /// `None`: settled on `to`.
+    start: Option<Instant>,
+}
+
+static THEME: Mutex<Fade> = Mutex::new(Fade { from: None, to: None, start: None });
+
+/// The theme being shown and the one it flows from (`None`: the default look), with the progress `t`
+/// (0..1, eased) of the flow.
+pub struct Blend {
+    pub from: Option<Theme>,
+    pub to: Option<Theme>,
+    pub t: f32,
+}
+
+pub fn blend() -> Blend {
+    let f = THEME.lock().unwrap();
+    let t = f.start.map_or(1.0, |s| (s.elapsed().as_secs_f32() / FADE.as_secs_f32()).min(1.0));
+    Blend { from: f.from, to: f.to, t: t * t * (3.0 - 2.0 * t) }
+}
+
+/// Whether the colors are still flowing (the callers' frame timers run only then).
+pub fn fading() -> bool {
+    THEME.lock().unwrap().start.is_some_and(|s| s.elapsed() < FADE)
+}
+
+/// Sets or clears (`None`: the default look) the album theme. The new colors flow in; clearing, or
+/// Windows animation effects off, is instant. The caller repaints the title bar and the mini player.
+pub fn set_theme(theme: Option<Theme>) {
+    let mut f = THEME.lock().unwrap();
+    if f.to == theme {
+        return;
+    }
+    f.from = f.to;
+    f.to = theme;
+    f.start = (theme.is_some() && motion_allowed()).then(Instant::now);
+}
+
+/// Windows' "Animation effects" (Settings > Accessibility > Visual effects).
+pub fn motion_allowed() -> bool {
+    let mut on = BOOL(1);
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut BOOL as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_err() || on.as_bool()
+}
+
+pub fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |shift: u32| {
+        let (x, y) = (((a >> shift) & 0xff) as f32, ((b >> shift) & 0xff) as f32);
+        (x + (y - x) * t).round() as u32
+    };
+    ch(16) << 16 | ch(8) << 8 | ch(0)
 }
 
 pub fn palette() -> Palette {
-    let (background, dark) = match *THEME_COLOR.lock().unwrap() {
-        Some(c) => (rgb(c), luminance(c) < 0.5),
-        None if dark_mode() => (rgb(0x202020), true),
-        None => (rgb(0xf3f3f3), false),
+    let system_dark = dark_mode();
+    let b = blend();
+    let base = if system_dark { 0x202020 } else { 0xf3f3f3 };
+    let (background, dark) = match b.to {
+        Some(to) => (rgb(lerp_color(b.from.map_or(base, |f| f.ink), to.ink, b.t)), luminance(to.ink) < 0.5),
+        None => (rgb(base), system_dark),
     };
     let text = if dark { rgb(0xffffff) } else { rgb(0x000000) };
-    Palette { background, text, hover: with_alpha(text, 0.08), pressed: with_alpha(text, 0.05) }
+    Palette { background, text, hover: with_alpha(text, 0.08), pressed: with_alpha(text, 0.05), system_dark }
 }
 
 /// Relative luminance of an sRGB color, 0..1 (WCAG).
-fn luminance(c: u32) -> f32 {
+pub fn luminance(c: u32) -> f32 {
     let channel = |shift: u32| {
         let v = ((c >> shift) & 0xff) as f32 / 255.0;
         if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
@@ -285,6 +354,37 @@ impl Canvas<'_> {
                 DWRITE_MEASURING_MODE_NATURAL,
             );
         }
+    }
+}
+
+/// Glow brushes per theme, kept between frames: a fade draws the old and the new theme's glows at
+/// partial opacity instead of rebuilding brushes every frame. Rebuilt with the render target.
+#[derive(Default)]
+pub struct GlowSets {
+    generation: u32,
+    sets: Vec<(Theme, Vec<ID2D1RadialGradientBrush>)>,
+}
+
+impl GlowSets {
+    /// Keeps a brush set for each of `themes` (built once) and drops the others.
+    pub fn prepare(&mut self, c: &Canvas, themes: &[Theme]) {
+        if self.generation != c.generation {
+            self.sets.clear();
+            self.generation = c.generation;
+        }
+        self.sets.retain(|(t, _)| themes.contains(t));
+        for theme in themes {
+            if self.sets.iter().any(|(t, _)| t == theme) {
+                continue;
+            }
+            if let Some(set) = theme.glows.iter().map(|g| c.radial(rgb(*g))).collect::<Option<Vec<_>>>() {
+                self.sets.push((*theme, set));
+            }
+        }
+    }
+
+    pub fn get(&self, theme: &Theme) -> Option<&[ID2D1RadialGradientBrush]> {
+        self.sets.iter().find(|(t, _)| t == theme).map(|(_, set)| set.as_slice())
     }
 }
 

@@ -1,0 +1,24 @@
+/* Album color: the cover's colors (set by theme/page.js) on the site's own color variables. The ink is
+   always dark, so the site's white text on it stays readable; the accent is light enough to stand out
+   from the ink (the progress bar). */
+html[data-feathertune-theme] {
+  --ytmusic-background: var(--feathertune-ink);
+  --ytmusic-player-page-background: var(--feathertune-ink);
+  --ytmusic-general-background-c: var(--feathertune-ink);
+  --ytmusic-nav-bar: color-mix(in srgb, var(--feathertune-ink), #fff 3%);
+  --ytmusic-playback-progress-color: var(--feathertune-accent);
+}
+
+/* The player bar defines its own background from the general one; this sits a little above the page. */
+html[data-feathertune-theme] ytmusic-player-bar {
+  --ytmusic-player-bar-background: color-mix(in srgb, var(--feathertune-ink), #fff 7%);
+}
+
+/* The change of cover flows in; with reduced motion it is instant. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-feathertune-theme] ytmusic-player-page,
+  html[data-feathertune-theme] ytmusic-player-bar,
+  html[data-feathertune-theme] #nav-bar-background {
+    transition: background-color 0.7s ease;
+  }
+}

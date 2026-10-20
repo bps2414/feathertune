@@ -10,18 +10,20 @@
 //!   right click opens the system menu).
 //! - The caption buttons are clicked on the non-client mouse messages, which are not passed on:
 //!   DefWindowProc would draw the classic buttons over the strip.
-//! - Sizes are DIPs scaled by the window's DPI; colors follow the system light/dark setting and the
-//!   theme color (`gfx::set_theme_color` + `refresh`, for Phase 6).
+//! - Sizes are DIPs scaled by the window's DPI; colors follow the system light/dark setting and, with
+//!   the `album_color` plugin, the artwork's theme (`gfx::set_theme`, then `refresh`).
 //! - WM_SIZE moves the site webview below the strip right away, through its WebView2 controller.
 //! - The look is "ink in water": soft color glows on deep ink under a glass sheen, laid out from the
 //!   current track's id, so every track gets its own shape. A track change flows from the old shape to
-//!   the new one in `MORPH`.
+//!   the new one in `MORPH`; the glows' colors come from the artwork when `album_color` is on, and flow
+//!   from the old theme to the new one the same way (the old and the new set of brushes are drawn at
+//!   partial opacity, so nothing is rebuilt per frame).
 //! - With the `animated_title_bar` plugin the glows also drift slowly. Performance rules: one 30 fps
 //!   timer that runs only while there is something to move (a track change, or the drift while the
 //!   window is visible, not minimized and in front, and Windows animation effects are on); the clock
 //!   stops while paused, so it resumes where it was; only the strip is invalidated; brushes and the
 //!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
-//!   track or the width change.
+//!   track or the width change. A theme or shape flow also runs only while the window is on screen.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,7 +36,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush};
+use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1SolidColorBrush};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
@@ -45,13 +47,11 @@ use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindow
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
     IsWindowVisible, IsZoomed, KillTimer, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SIZE_MINIMIZED,
-    SPI_GETCLIENTAREAANIMATION, SWP_NOACTIVATE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, SystemParametersInfoW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
-    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SETTINGCHANGE,
-    WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, WM_ACTIVATE, WM_APP, WM_CLOSE,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST,
+    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS,
+    WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
-use windows::core::BOOL;
 
 use crate::gfx::{self, ICON_FONT, point, rect};
 use crate::player::{Event, Player, State};
@@ -151,26 +151,11 @@ fn drift(g: Glow, i: usize, time: f32) -> Glow {
     }
 }
 
-/// Windows' "Animation effects" (Settings > Accessibility > Visual effects).
-fn motion_allowed() -> bool {
-    let mut on = BOOL(1);
-    let ok = unsafe {
-        SystemParametersInfoW(
-            SPI_GETCLIENTAREAANIMATION,
-            0,
-            Some(&mut on as *mut BOOL as *mut _),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-    };
-    ok.is_err() || on.as_bool()
-}
-
-/// Glow and glass brushes, kept between frames and rebuilt with the render target or on a light/dark
+/// Glass and text brushes, kept between frames and rebuilt with the render target or on a light/dark
 /// change.
 struct Brushes {
     generation: u32,
     dark: bool,
-    glows: Vec<ID2D1RadialGradientBrush>,
     sheen: ID2D1LinearGradientBrush,
     /// The artist's color in the track line (a drawing effect of its layout).
     dim: ID2D1SolidColorBrush,
@@ -178,11 +163,10 @@ struct Brushes {
 
 impl Brushes {
     fn new(c: &gfx::Canvas, dark: bool) -> Option<Brushes> {
-        let glows = GLOWS.iter().map(|(color, _)| c.radial(gfx::rgb(*color))).collect::<Option<Vec<_>>>()?;
         let sheen = if dark { 0.10 } else { 0.45 };
         let sheen =
             c.linear(point(0.0, 0.0), point(0.0, HEIGHT * 0.55), gfx::rgba(0xffffff, sheen), gfx::rgba(0xffffff, 0.0))?;
-        Some(Brushes { generation: c.generation, dark, glows, sheen, dim: c.solid(gfx::rgb(0))? })
+        Some(Brushes { generation: c.generation, dark, sheen, dim: c.solid(gfx::rgb(0))? })
     }
 }
 
@@ -250,6 +234,8 @@ struct TitleBar {
     ticking: bool,
     motion: bool,
     brushes: Option<Brushes>,
+    /// The glow brushes of the themes on screen.
+    glows: gfx::GlowSets,
     /// Bumped when `brushes` is rebuilt (the track line holds one of them).
     brushes_id: u32,
     line: Option<TrackLine>,
@@ -318,8 +304,9 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             time: 0.0,
             last_frame: None,
             ticking: false,
-            motion: motion_allowed(),
+            motion: gfx::motion_allowed(),
             brushes: None,
+            glows: gfx::GlowSets::default(),
             brushes_id: 0,
             line: None,
             active: true,
@@ -356,12 +343,9 @@ pub fn set_animated(app: &AppHandle, on: bool) {
     }
 }
 
-/// Repaints the strip (after a theme color change).
-#[allow(dead_code)] // with gfx::set_theme_color, for Phase 6
-pub fn refresh(window: &Window) {
-    if let Ok(hwnd) = window.hwnd() {
-        invalidate(HWND(hwnd.0));
-    }
+/// Repaints the strip and starts the flow to a new theme (after `gfx::set_theme`). Any thread.
+pub fn refresh(app: &AppHandle) {
+    set_animated(app, ANIMATED.load(Ordering::Relaxed));
 }
 
 fn invalidate(hwnd: HWND) {
@@ -458,11 +442,9 @@ impl TitleBar {
 
     /// Starts or stops the frame timer: it runs only while there is something to move on screen.
     fn schedule(&mut self, hwnd: HWND) {
-        let drifting = ANIMATED.load(Ordering::Relaxed)
-            && self.motion
-            && self.active
-            && unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
-        let run = self.morph.is_some() || drifting;
+        let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
+        let drifting = ANIMATED.load(Ordering::Relaxed) && self.motion && self.active && on_screen;
+        let run = ((self.morph.is_some() || gfx::fading()) && on_screen) || drifting;
         if run == self.ticking {
             return;
         }
@@ -503,12 +485,19 @@ impl TitleBar {
         let maximized = unsafe { IsZoomed(hwnd) }.as_bool();
         let pal = gfx::palette();
         let dark = pal.text.r > 0.5;
-        let themed = gfx::theme_color().is_some();
-        let ink = if themed { pal.background } else { gfx::rgb(if dark { INK_DARK } else { INK_LIGHT }) };
+        let themes = gfx::blend();
+        let themed = themes.to.is_some();
+        // The default look, for the side of a flow that has no album theme.
+        let default = gfx::Theme {
+            ink: if pal.system_dark { INK_DARK } else { INK_LIGHT },
+            glows: GLOWS.map(|(color, _)| color),
+        };
+        let (from, to) = (themes.from.unwrap_or(default), themes.to.unwrap_or(default));
+        let ink = gfx::rgb(gfx::lerp_color(from.ink, to.ink, themes.t));
         let full = if themed { pal.text } else { gfx::rgb(if dark { 0xf4f2ff } else { 0x1a1530 }) };
         let text = if self.active { full } else { gfx::with_alpha(full, 0.5) };
         let strength = (if dark { 1.0 } else { 0.5 }) * if self.active { 1.0 } else { 0.45 };
-        // Smoothstep of the flow's progress.
+        // Smoothstep of the shape flow's progress.
         let t = self.morph.map_or(1.0, |start| (start.elapsed().as_secs_f32() / MORPH.as_secs_f32()).min(1.0));
         let t = t * t * (3.0 - 2.0 * t);
         let drifting = ANIMATED.load(Ordering::Relaxed) && self.motion;
@@ -526,6 +515,9 @@ impl TitleBar {
         };
         let (name, icons, track) = (&self.name, &self.icons, &self.track);
         let (brushes, brushes_id, line) = (&mut self.brushes, &mut self.brushes_id, &mut self.line);
+        let sets = &mut self.glows;
+        // The theme flow draws both sets of glows, each at its share of the opacity.
+        let layers = if from == to { vec![(to, 1.0)] } else { vec![(from, 1.0 - themes.t), (to, themes.t)] };
         self.surface.paint(hwnd, area, |c| {
             let strip = rect(0.0, 0.0, width, HEIGHT);
             c.fill(strip, ink);
@@ -534,14 +526,18 @@ impl TitleBar {
                 *brushes_id = brushes_id.wrapping_add(1);
             }
             let Some(b) = brushes.as_ref() else { return };
-            for ((g, (_, alpha)), brush) in shape.iter().zip(GLOWS).zip(&b.glows) {
-                unsafe {
-                    brush.SetCenter(point(g.x * width, g.y * HEIGHT));
-                    brush.SetRadiusX(g.rx * width);
-                    brush.SetRadiusY(g.ry * HEIGHT);
-                    brush.SetOpacity(alpha * strength);
+            sets.prepare(c, &[from, to]);
+            for (theme, share) in &layers {
+                let Some(set) = sets.get(theme) else { continue };
+                for ((g, (_, alpha)), brush) in shape.iter().zip(GLOWS).zip(set) {
+                    unsafe {
+                        brush.SetCenter(point(g.x * width, g.y * HEIGHT));
+                        brush.SetRadiusX(g.rx * width);
+                        brush.SetRadiusY(g.ry * HEIGHT);
+                        brush.SetOpacity(alpha * strength * share);
+                    }
+                    c.fill_with(strip, brush);
                 }
-                c.fill_with(strip, brush);
             }
             // Glass: a sheen on the upper half and a lit bottom edge.
             c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
@@ -729,7 +725,7 @@ unsafe extern "system" fn subclass(
             invalidate(hwnd);
         }
         WM_SETTINGCHANGE => {
-            bar.motion = motion_allowed();
+            bar.motion = gfx::motion_allowed();
             bar.schedule(hwnd);
             invalidate(hwnd);
         }

@@ -23,7 +23,7 @@ Medido até agora (árvore de processos, tocando): ~410 MB de memória privada e
 | 3. Integrações (instância única, autostart, atalhos, Discord, Last.fm) | bandeja e atalhos conferidos; Discord e Last.fm ainda a confirmar num perfil real |
 | 4. Dieta e instalador | medida (~400 MB privados, ~3,3% de CPU, ~190 MB na bandeja); instalação/desinstalação silenciosa conferida; comparação com o Electron e o caminho "excluir dados" da desinstalação em aberto |
 | 5. Casca nativa: barra de título própria, janela de configurações e plugins, mini player | feita e medida (~430 MB privados, ~4,5% de CPU aberta, acima da Fase 4 até uma base no mesmo dia); snap/150%/segundo monitor e o login do Last.fm num build do CI a confirmar pelo mantenedor |
-| 6. Visual: cor do álbum, letras sincronizadas, modo ambiente | planejada |
+| 6. Visual: cor do álbum, letras sincronizadas, modo ambiente | feita e medida (~433 MB privados, ~4,4% de CPU aberta com cor do álbum e letras ligadas; modo ambiente desligado por padrão, cerca de +25 MB); fluxo animado, modo claro e escala de 150% a confirmar pelo mantenedor |
 
 ## Compilar
 
@@ -53,6 +53,9 @@ discord = true               # também precisa do client_id abaixo
 lastfm = true                # também precisa conectar a conta
 mini_player = true
 animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
+album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
+synced_lyrics = true          # letras sincronizadas do LRCLIB na aba Letra; uma requisição por faixa, com cache
+ambient_mode = false          # capa desfocada e brilhante atrás do site; desligado por padrão
 
 [shortcuts]                  # globais; "" desliga um
 play_pause = "Ctrl+Alt+Space"

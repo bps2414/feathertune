@@ -10,10 +10,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod album_color;
+mod artwork;
 mod discord;
 mod gfx;
 mod injections;
 mod lastfm;
+mod lyrics;
 mod miniplayer;
 mod notify;
 mod player;
@@ -108,6 +111,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::Builder::new().arg("--hidden").build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(player::Player::new())
+        .manage(injections::PageData::default())
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
@@ -133,6 +137,12 @@ fn main() {
                     .data_directory(profile.clone())
                     .additional_browser_args(&args)
                     .initialization_script(script)
+                    // A page that (re)loaded lost the data Rust gave its modules; give it again.
+                    .on_page_load(|site, payload| {
+                        if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                            injections::resend(&site);
+                        }
+                    })
                     .on_navigation({
                         let handle = handle.clone();
                         move |url| allowed(url) || open_external(&handle, url)
@@ -166,6 +176,12 @@ fn main() {
             };
             if let Some(l) = &lastfm {
                 app.manage(l.clone());
+            }
+            if live.plugin("album_color") {
+                album_color::start(app.handle());
+            }
+            if live.plugin("synced_lyrics") {
+                lyrics::start(app.handle(), &profile);
             }
             tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {

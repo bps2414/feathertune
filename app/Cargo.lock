@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "feathertune"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "adblock",
  "discord-rich-presence",

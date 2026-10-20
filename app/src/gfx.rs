@@ -10,23 +10,27 @@ use std::cell::OnceCell;
 use std::sync::Mutex;
 
 use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND, RECT};
-use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
-    ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+    D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+    D2D1_GAMMA_1_0, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
+    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
     DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT, DWRITE_TRIMMING,
     DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory,
-    IDWriteTextFormat,
+    IDWriteTextFormat, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::core::{HSTRING, Result, w};
+use windows_numerics::Vector2;
 
 pub const ICON_FONT: &str = "Segoe MDL2 Assets";
 pub const TEXT_FONT: &str = "Segoe UI";
@@ -85,6 +89,16 @@ pub fn text_format(
     }
 }
 
+/// A text layout of `text` in a box of `width` × `height` DIPs, for styling ranges of it.
+pub fn text_layout(text: &str, format: &IDWriteTextFormat, width: f32, height: f32) -> Result<IDWriteTextLayout> {
+    let text: Vec<u16> = text.encode_utf16().collect();
+    unsafe { factories()?.dwrite.CreateTextLayout(&text, format, width, height) }
+}
+
+pub const fn point(x: f32, y: f32) -> Vector2 {
+    Vector2 { X: x, Y: y }
+}
+
 pub const fn rect(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
     D2D_RECT_F { left, top, right, bottom }
 }
@@ -124,6 +138,10 @@ pub struct Palette {
 
 /// The theme color set by `set_theme_color` (Phase 6: taken from the artwork).
 static THEME_COLOR: Mutex<Option<u32>> = Mutex::new(None);
+
+pub fn theme_color() -> Option<u32> {
+    *THEME_COLOR.lock().unwrap()
+}
 
 /// Sets or clears the theme color of the title bar and the mini player. The caller repaints them.
 #[allow(dead_code)] // the hook Phase 6 (album color) uses
@@ -186,6 +204,65 @@ impl Canvas<'_> {
         unsafe {
             self.brush.SetColor(&color);
             self.target.FillRectangle(&r, self.brush);
+        }
+    }
+
+    pub fn pill(&self, r: D2D_RECT_F, radius: f32, color: D2D1_COLOR_F) {
+        let rounded = D2D1_ROUNDED_RECT { rect: r, radiusX: radius, radiusY: radius };
+        unsafe {
+            self.brush.SetColor(&color);
+            self.target.FillRoundedRectangle(&rounded, self.brush);
+        }
+    }
+
+    /// A soft elliptical glow over `area`: `color` at the center, fading out at the radii.
+    pub fn glow(&self, area: D2D_RECT_F, center: Vector2, rx: f32, ry: f32, color: D2D1_COLOR_F) {
+        let stops = [
+            D2D1_GRADIENT_STOP { position: 0.0, color },
+            D2D1_GRADIENT_STOP { position: 0.45, color: with_alpha(color, 0.55) },
+            D2D1_GRADIENT_STOP { position: 1.0, color: with_alpha(color, 0.0) },
+        ];
+        let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+            center,
+            gradientOriginOffset: point(0.0, 0.0),
+            radiusX: rx,
+            radiusY: ry,
+        };
+        unsafe {
+            let Ok(stops) = self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP)
+            else {
+                return;
+            };
+            if let Ok(brush) = self.target.CreateRadialGradientBrush(&props, None, &stops) {
+                self.target.FillRectangle(&area, &brush);
+            }
+        }
+    }
+
+    /// `r` filled with a vertical gradient from `top` to `bottom`.
+    pub fn vertical(&self, r: D2D_RECT_F, top: D2D1_COLOR_F, bottom: D2D1_COLOR_F) {
+        let stops =
+            [D2D1_GRADIENT_STOP { position: 0.0, color: top }, D2D1_GRADIENT_STOP { position: 1.0, color: bottom }];
+        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+            startPoint: point(r.left, r.top),
+            endPoint: point(r.left, r.bottom),
+        };
+        unsafe {
+            let Ok(stops) = self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP)
+            else {
+                return;
+            };
+            if let Ok(brush) = self.target.CreateLinearGradientBrush(&props, None, &stops) {
+                self.target.FillRectangle(&r, &brush);
+            }
+        }
+    }
+
+    /// A text layout drawn at `origin`; ranges without their own brush use `color`.
+    pub fn layout(&self, layout: &IDWriteTextLayout, origin: Vector2, color: D2D1_COLOR_F) {
+        unsafe {
+            self.brush.SetColor(&color);
+            self.target.DrawTextLayout(origin, layout, self.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
     }
 

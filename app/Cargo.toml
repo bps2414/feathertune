@@ -35,6 +35,8 @@ toml_edit = "0.25"
 adblock = "0.13"
 webview2-com = "0.39"
 windows-core = "0.62"
+# Direct2D points (Vector2); already in the tree through `windows`.
+windows-numerics = "0.3"
 windows = { version = "0.62", features = [
     "Foundation",
     "Media",

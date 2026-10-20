@@ -3,8 +3,9 @@
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
 // one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
 // click on a line seeks the <video> to it. While the song plays and the window is in front, the list scrolls
-// on its own, slowly and in time: the middle of the view moves from the current line toward the next one
-// as the line goes by, and eases to a new place after a seek, a click or a manual scroll (one animation
+// on its own, in time: the view parks on the current line and moves on to the next one around the
+// switch (eased, a little before and a little after), and eases to a new place after a seek, a click or
+// a manual scroll (one animation
 // frame loop, only while that is so; it writes the scroll only when it moves by a whole device pixel).
 // Otherwise each new line scrolls smoothly to the middle. With no data the site's own lyrics are left
 // alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
@@ -14,7 +15,14 @@ const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MANUAL_SCROLL_MS = 4000;
 // How fast the scroll catches up with where it should be (seconds to cover about two thirds of the way).
-const FOLLOW_S = 0.35;
+const FOLLOW_S = 0.25;
+// The move from one line to the next takes this share of the line that ends (at most the cap) and this
+// share of the line that starts, so when a line ends the view is still a little short of the middle
+// between the two.
+const MOVE_BEFORE = 0.4;
+const MOVE_BEFORE_MAX_MS = 1600;
+const MOVE_AFTER = 0.45;
+const MOVE_AFTER_MAX_MS = 1800;
 
 let lines = null; // [{ ms, text }], sorted by ms
 let box = null; // our container, first child of the tab renderer
@@ -200,15 +208,29 @@ const center = (i) => {
   return centers[i] ?? 0;
 };
 
-// Where the middle of the view should be now: from the current line toward the next one as it goes by.
+// The move from line k-1 to line k, in the time around the switch to k: it starts before the switch
+// (a share of line k-1, capped) and ends after it (a share of line k, capped). In between the view parks
+// on the current line; lines shorter than that keep the view moving all the time.
+const move = (k) => {
+  const before = lines[k].ms - lines[k - 1].ms;
+  const after = k + 1 < lines.length ? lines[k + 1].ms - lines[k].ms : MOVE_AFTER_MAX_MS;
+  const from = lines[k].ms - Math.min(MOVE_BEFORE_MAX_MS, before * MOVE_BEFORE);
+  return { from, to: lines[k].ms + Math.min(MOVE_AFTER_MAX_MS, after * MOVE_AFTER) };
+};
+
+// Where the middle of the view should be now: parked on the current line, or on the way between two.
 const goal = (ms) => {
   const i = indexAt(lines, ms);
   if (i < 0) return center(0);
-  const next = i + 1 < lines.length ? i + 1 : -1;
-  if (next < 0) return center(i);
-  const span = lines[next].ms - lines[i].ms;
-  const p = span > 0 ? Math.min(1, Math.max(0, (ms - lines[i].ms) / span)) : 1;
-  return center(i) + (center(next) - center(i)) * p;
+  // The move to the next line may have started; the one to this line may not have ended.
+  for (const k of [i + 1, i]) {
+    if (k < 1 || k >= lines.length) continue;
+    const { from, to } = move(k);
+    if (ms < from || ms >= to) continue;
+    const p = (ms - from) / (to - from);
+    return center(k - 1) + (center(k) - center(k - 1)) * p * p * (3 - 2 * p);
+  }
+  return center(i);
 };
 
 const media = () => document.querySelector('video');

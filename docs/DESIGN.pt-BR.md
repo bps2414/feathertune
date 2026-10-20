@@ -33,6 +33,8 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 ├─ instância única, autostart, atalhos globais        └─ webview de configurações: página nossa num
 ├─ Discord, Last.fm, avisos de faixa, letras LRCLIB       esquema próprio, sem acesso ao site
 ├─ cores do álbum (decodificação WIC da capa)
+├─ botões da barra de tarefas, menu da bandeja no tema, letra flutuante (Direct2D)
+├─ estatísticas de escuta (um arquivo no perfil)
 └─ filtro de rastreadores (só listas de privacidade)
 ```
 
@@ -45,7 +47,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 ### Segurança
 
 - A capability da webview do site (`capabilities/player-bridge.json`) dá só `player_state`, só à webview `site` e só para a origem do site. `frontendDist` não é usado: com ele, o Tauri trata o site remoto como origem local.
-- A webview de configurações (`capabilities/settings-window.json`) é `local: true` e dá só os três comandos `settings_*`. O Tauri casa capabilities por label **e** origem, então nenhuma página alcança os comandos da outra; nenhuma tem permissões `core:*`. Os comandos também conferem o label de quem chama.
+- A webview de configurações (`capabilities/settings-window.json`) é `local: true` e dá só os quatro comandos `settings_*`. O quarto, `settings_stats`, entrou para a aba Stats: devolve um resumo do histórico de escuta, que é dado do próprio usuário neste PC, só para a nossa página; recebe um período e um fuso, ambos conferidos, e não muda nada. O Tauri casa capabilities por label **e** origem, então nenhuma página alcança os comandos da outra; nenhuma tem permissões `core:*`. Os comandos também conferem o label de quem chama.
 - Esquemas próprios são registrados em toda webview (limitação do Tauri), então o handler responde 403 a tudo que não for a webview de configurações. A página de configurações tem CSP estrita e monta o DOM só com `textContent`.
 - A navegação fica presa aos domínios do site e de login; o resto abre no navegador padrão.
 
@@ -65,12 +67,24 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 | `album_color` | ligado | +1 MB privado, dentro do ruído |
 | `synced_lyrics` (LRCLIB) | ligado | ~+5 MB, dentro da variação (uma rodada); a transição e o scroll ainda não medidos |
 | `ambient_mode` | ligado | ~+25 MB privados, +15 MB de WS (uma rodada) |
+| `taskbar_controls` | ligado | ainda não medido: atualiza o progresso a cada 1–5 s tocando com a janela visível |
+| `themed_tray_menu` | ligado | ainda não medido: nada enquanto fechado |
+| `desktop_lyrics` | ligado (aberta pela bandeja) | ainda não medido: nada enquanto fechada; um redesenho por troca de linha ou palavra |
+| `listening_stats` | ligado | ainda não medido: uma thread parada, uma linha gravada por faixa |
 
 **Filtro de rastreadores:** `WebResourceRequested` do WebView2 e o crate `adblock` sem regras cosméticas, então ele só consegue bloquear requisições. Só vê scripts, imagens, XHR/fetch, pings e "outros" (nunca documentos, frames, mídia, fontes ou folhas de estilo), e pula os domínios do player, todo domínio do Google e os domínios de entrega de anúncios do Google antes de consultar a lista, então nem uma lista de anúncios colocada por engano muda algo ali. A lista embutida (`app/filters/privacy.txt`) tem só analytics de terceiros; neste site ela bloqueia um host.
 
 **Last.fm:** autenticação desktop (`auth.getToken` → navegador → `auth.getSession`, consultado em intervalos); a session key fica no Gerenciador de Credenciais do Windows. Os builds de release da CI embutem a API key do mantenedor a partir dos secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` do repositório (`option_env!`); chaves no `config.toml` têm prioridade. O ponto do scrobble conta só o tempo tocado; scrobbles que falham esperam em `lastfm-queue.json` (nova tentativa a cada 5 min, descartados depois de 14 dias).
 
-**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. As linhas fazem transição cruzada (a antiga esmaece devagar, a nova entra mais rápido). Enquanto a música toca e a janela está em primeiro plano, um laço de animation frame rola a lista no ritmo: o meio da vista vai da linha atual em direção à próxima conforme a linha passa, desliza suave para um novo lugar depois de um seek, um clique ou uma rolagem manual, e só escreve o scroll quando ele anda um pixel inteiro do dispositivo; nesse tempo ele também troca as linhas e palavras. Fora disso, cada linha nova rola suave até o meio. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
+**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. As linhas fazem transição cruzada (a antiga esmaece devagar, a nova entra mais rápido). Enquanto a música toca e a janela está em primeiro plano, um laço de animation frame rola a lista no ritmo: a vista estaciona na linha atual e passa para a próxima em volta da troca (de 40% da linha que termina, no máximo 1,6 s, antes dela, até 45% da nova, no máximo 1,8 s, depois, com suavização), então uma linha que termina ainda não chegou à metade do caminho e linhas curtas mantêm a vista andando; desliza suave para um novo lugar depois de um seek, um clique ou uma rolagem manual, e só escreve o scroll quando ele anda um pixel inteiro do dispositivo; nesse tempo ele também troca as linhas e palavras. Fora disso, cada linha nova rola suave até o meio. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
+
+**Letra flutuante:** uma janela layered nativa (Direct2D num bitmap de 32 bits, `UpdateLayeredWindow`) com a linha atual, acesa palavra por palavra quando a entrada tem tempo por palavra, e a próxima mais apagada, com contorno para ler sobre qualquer fundo. As linhas vêm do Rust (`lyrics::Lyrics`), então funciona com `synced_lyrics` desligado; o tempo é `position_now()` com o adiantamento de 250 ms da página. Um timer de disparo único vai para a próxima linha ou palavra, e um timer de 60 fps roda só durante a transição de 320 ms. Travada, os cliques passam por ela (`WS_EX_TRANSPARENT`); destravada (bandeja), mostra um painel para arrastar e um botão de travar. Some com a música pausada ou sem letra sincronizada. Aberta ou não e a posição ficam em `desktop-lyrics.json` no perfil.
+
+**Barra de tarefas:** `ITaskbarList3` a partir de um subclass da janela principal: anterior / play-pause / próxima na miniatura (ícones de glifo brancos desenhados uma vez com Direct2D no tamanho de ícone pequeno do DPI) e o progresso da faixa no botão da barra, amarelo quando pausado. Os botões são adicionados a cada "TaskbarButtonCreated" (janela mostrada da bandeja, Explorer reiniciado). O progresso atualiza uma vez a cada 1% da faixa (1–5 s) tocando com a janela visível.
+
+**Menu da bandeja no tema:** um popup nativo na tinta e nos brilhos do álbum (ou nas cores do sistema) com a faixa e os controles em cima e os itens da bandeja embaixo; fecha ao perder o foco, no Esc, num clique fora ou depois de um item. Leitores de tela não o veem como menu, ao contrário do menu do Windows: desligar o plugin traz aquele de volta.
+
+**Estatísticas de escuta:** cada audição com pelo menos 10 s tocados (contados como o ponto do scrobble) vira uma linha JSON em `stats/plays.jsonl` no perfil; conta como play com metade da faixa ou 30 s, menos que isso é pulo. A aba Stats da janela de configurações pede a `settings_stats` um período (7 dias, 30 dias, 12 meses, tudo) e recebe totais, uma série por dia ou mês, um mapa hora × dia da semana, sequências e os artistas, faixas e álbuns mais ouvidos, calculados em Rust a partir do arquivo inteiro. Exportar grava um CSV em Downloads; "clear history" apaga o arquivo. A audição em andamento é gravada na troca de faixa e ao sair ou reiniciar pelo app; um travamento ou o desligamento do Windows a perde.
 
 **Launcher:** numa abertura interativa (sem `--hidden`, `--mini-player` ou `--measure`) uma tela de abertura nativa pequena (Direct2D) aparece primeiro e diz o que o app está fazendo. A janela principal é criada escondida, então o site carrega enquanto isso; ela é mostrada quando a checagem de atualização termina e o site desenhou o primeiro conteúdo (uma sonda na página, no máximo 8 s depois do `load`, 20 s no total), nunca numa página em branco. A checagem é um `GET` do último release do repositório na API do GitHub. O instalador de um release mais novo é baixado, o SHA-256 dele é comparado com o que o GitHub lista para o arquivo (o instalador não é assinado, então hash ausente ou diferente interrompe a atualização) e executado em silêncio (`/S /R /UPDATE`: ele fecha o app, substitui e abre de novo). Só uma cópia instalada se atualiza (o exe está na pasta do perfil, onde o instalador o coloca); um build de `target/` nunca. Qualquer falha, inclusive sem internet, só abre a versão atual.
 
@@ -130,15 +144,16 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 - O caminho "apagar dados" do desinstalador.
 - A transição de 0,7 s entre capas, o Windows em modo claro, uma falta no LRCLIB, e um recarregamento mantendo tema e letras.
 - Uma base no mesmo dia para saber se a casca nativa custa memória e CPU, e o plugin `animated_title_bar` medido ligado e desligado.
-- A transição e o scroll no ritmo da letra no app rodando (suavidade, rolagem manual e seeks) e o custo de CPU deles.
+- A transição e o scroll no ritmo da letra no app rodando (suavidade, rolagem manual e seeks) e o custo de CPU deles; os tempos do novo scroll que estaciona.
+- No app rodando: os botões e o progresso da barra de tarefas (também depois de reiniciar o Explorer e rodando como administrador); o menu da bandeja no tema (posição em cada borda da barra, fechar com clique fora, teclado, escala de 150%); a letra flutuante (legibilidade, tempo das palavras contra o site, arrastar, segundo monitor); a aba Stats com um histórico real e a exportação CSV.
+- O custo dos quatro plugins novos.
 
 ## Ideias
 
 | Ideia | Tipo |
 |---|---|
 | Mais visuais (fontes, modo compacto, capa grande) | CSS |
-| Menu da bandeja no tema do app (hoje é o menu nativo do Windows) | Rust (Win32) |
-| Botões de mídia na miniatura da barra de tarefas | Rust (Win32) |
+| Compartilhar letra como imagem: uma janela nativa para escolher quaisquer linhas (pulando algumas) e gerar um cartão com a capa | Rust (Direct2D, WIC) |
 | Equalizador e compressor (Web Audio no `<video>`): antes decidir se quebra o "nunca mexer no que o player toca" | JS |
 
 ## Referências

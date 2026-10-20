@@ -13,8 +13,12 @@
 //!   `words` (`[[ms, text], ...]`) is there only when the lyrics are in Enhanced LRC, with a time
 //!   before each word (`<mm:ss.xx>`); most LRCLIB entries are timed by line only.
 //! - Plain (unsynced) lyrics are ignored: the site already shows those.
+//! - The lines of the current track are also kept in Rust (`Lyrics`, managed state) for the floating
+//!   lyrics (desktop_lyrics.rs). The lookup runs when either plugin is on; the page gets the lines only
+//!   with `synced_lyrics` on.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -38,16 +42,37 @@ const NOT_FOUND_TTL: u64 = 7 * 24 * 3600;
 const MAX_FILES: usize = 400;
 const KEEP_FILES: usize = 300;
 
-type Words = Vec<(u32, String)>;
+pub type Words = Vec<(u32, String)>;
 type Lines = Vec<Line>;
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Line {
-    ms: u32,
-    text: String,
+pub struct Line {
+    pub ms: u32,
+    pub text: String,
     /// Each word with its own time and the spaces after it; empty when the line is timed as a whole.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    words: Words,
+    pub words: Words,
+}
+
+/// The synced lines of the track `key` (`track_key`).
+pub struct Synced {
+    pub key: String,
+    pub lines: Vec<Line>,
+}
+
+/// The synced lyrics of the current track, `None` while there are none (managed state).
+#[derive(Default)]
+pub struct Lyrics(Mutex<Option<Arc<Synced>>>);
+
+impl Lyrics {
+    pub fn current(&self) -> Option<Arc<Synced>> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn set(&self, synced: Option<Synced>) {
+        *self.0.lock().unwrap() = synced.map(Arc::new);
+        crate::desktop_lyrics::refresh();
+    }
 }
 
 impl Line {
@@ -64,7 +89,8 @@ struct Entry {
     lines: Option<Lines>,
 }
 
-pub fn start(app: &AppHandle, profile: &Path) {
+/// `page`: the `synced_lyrics` plugin is on, so the page gets the lines too.
+pub fn start(app: &AppHandle, profile: &Path, page: bool) {
     let app = app.clone();
     let dir = profile.join("lyrics-cache");
     let mut rx = app.state::<Player>().subscribe();
@@ -95,7 +121,10 @@ pub fn start(app: &AppHandle, profile: &Path) {
             if key != current {
                 current = key;
                 asked = false;
-                crate::injections::send(&app, "lyrics", &Value::Null);
+                app.state::<Lyrics>().set(None);
+                if page {
+                    crate::injections::send(&app, "lyrics", &Value::Null);
+                }
             }
             // The duration arrives after the title, in a later event.
             if asked || state.track.duration <= 0.0 {
@@ -106,15 +135,18 @@ pub fn start(app: &AppHandle, profile: &Path) {
             // The track may have changed during the request.
             let still = app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current);
             if let (Some(lines), true) = (lines, still) {
-                let lines: Vec<Value> = lines.iter().map(Line::to_json).collect();
-                let payload = json!({ "id": state.track.id, "lines": lines });
-                crate::injections::send(&app, "lyrics", &payload);
+                if page {
+                    let json: Vec<Value> = lines.iter().map(Line::to_json).collect();
+                    let payload = json!({ "id": state.track.id, "lines": json });
+                    crate::injections::send(&app, "lyrics", &payload);
+                }
+                app.state::<Lyrics>().set(Some(Synced { key: current.clone(), lines }));
             }
         }
     });
 }
 
-fn track_key(t: &Track) -> String {
+pub fn track_key(t: &Track) -> String {
     t.id.clone().unwrap_or_else(|| format!("{}\n{}", t.title, t.artist))
 }
 

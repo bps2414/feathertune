@@ -6,21 +6,26 @@
 //! is clipped like GDI (the title bar never draws over the child webview below it). Everything is in
 //! DIPs: the target gets the window's DPI. Icons are glyphs of "Segoe MDL2 Assets" (Windows 10 and 11).
 //! Both windows live on the main thread, so the factories are per thread.
+//!
+//! `Offscreen` is the same drawing into a 32-bit bitmap with alpha, for what Windows takes as pixels:
+//! the floating lyrics (a layered window) and the taskbar's thumbnail button icons.
 
 use std::cell::OnceCell;
+use std::ptr::null_mut;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
+    D2D_RECT_F, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+    D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
     D2D1_GAMMA_1_0, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
-    D2D1CreateFactory, ID2D1Brush, ID2D1DCRenderTarget, ID2D1Factory, ID2D1LinearGradientBrush,
-    ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Brush, ID2D1DCRenderTarget, ID2D1Factory,
+    ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
@@ -29,10 +34,13 @@ use windows::Win32::Graphics::DirectWrite::{
     IDWriteTextFormat, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC,
+    DeleteObject, EndPaint, GdiFlush, HBITMAP, HDC, HGDIOBJ, PAINTSTRUCT, SelectObject,
+};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::core::{HSTRING, Result, w};
+use windows::core::{Error, HSTRING, Result, w};
 use windows_numerics::Vector2;
 
 pub const ICON_FONT: &str = "Segoe MDL2 Assets";
@@ -399,20 +407,7 @@ impl Surface {
         draw: impl FnOnce(&Canvas),
     ) -> Result<()> {
         if self.target.is_none() {
-            let props = D2D1_RENDER_TARGET_PROPERTIES {
-                r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                pixelFormat: D2D1_PIXEL_FORMAT {
-                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
-                },
-                dpiX: 0.0,
-                dpiY: 0.0,
-                usage: D2D1_RENDER_TARGET_USAGE_NONE,
-                minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
-            };
-            let target = unsafe { factories()?.d2d.CreateDCRenderTarget(&props)? };
-            let brush = unsafe { target.CreateSolidColorBrush(&rgb(0), None)? };
-            self.target = Some((target, brush));
+            self.target = Some(dc_target(D2D1_ALPHA_MODE_IGNORE)?);
             self.generation = self.generation.wrapping_add(1);
         }
         let (target, brush) = self.target.as_ref().expect("just set");
@@ -423,6 +418,117 @@ impl Surface {
             target.BeginDraw();
             draw(&Canvas { target, brush, generation: self.generation });
             target.EndDraw(None, None)
+        }
+    }
+}
+
+/// A DC render target and its one solid brush.
+fn dc_target(alpha: D2D1_ALPHA_MODE) -> Result<(ID2D1DCRenderTarget, ID2D1SolidColorBrush)> {
+    let props = D2D1_RENDER_TARGET_PROPERTIES {
+        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: alpha },
+        dpiX: 0.0,
+        dpiY: 0.0,
+        usage: D2D1_RENDER_TARGET_USAGE_NONE,
+        minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+    };
+    let target = unsafe { factories()?.d2d.CreateDCRenderTarget(&props)? };
+    let brush = unsafe { target.CreateSolidColorBrush(&rgb(0), None)? };
+    Ok((target, brush))
+}
+
+/// A top-down 32-bit premultiplied BGRA bitmap selected in a memory DC, drawn with Direct2D. Its size
+/// is fixed; make a new one for another size. Main thread only (the factories are per thread).
+pub struct Offscreen {
+    dc: HDC,
+    bitmap: HBITMAP,
+    old: HGDIOBJ,
+    bits: *mut u8,
+    pub width: i32,
+    pub height: i32,
+    target: Option<(ID2D1DCRenderTarget, ID2D1SolidColorBrush)>,
+    /// Bumped whenever the target is rebuilt, as in `Surface`.
+    pub generation: u32,
+}
+
+impl Offscreen {
+    pub fn new(width: i32, height: i32) -> Result<Offscreen> {
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+            if dc.is_invalid() {
+                return Err(Error::from_thread());
+            }
+            let mut bits = null_mut();
+            let bitmap = match CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = DeleteDC(dc);
+                    return Err(e);
+                }
+            };
+            let old = SelectObject(dc, bitmap.into());
+            Ok(Offscreen { dc, bitmap, old, bits: bits.cast(), width, height, target: None, generation: 0 })
+        }
+    }
+
+    /// Clears the bitmap to transparent and draws it with `draw`, in DIPs at `scale`. Text is grayscale
+    /// antialiased (ClearType needs an opaque background).
+    pub fn draw(&mut self, scale: f32, draw: impl FnOnce(&Canvas)) -> Result<()> {
+        if self.target.is_none() {
+            self.target = Some(dc_target(D2D1_ALPHA_MODE_PREMULTIPLIED)?);
+            self.generation = self.generation.wrapping_add(1);
+        }
+        let (target, brush) = self.target.as_ref().expect("just set");
+        let area = RECT { left: 0, top: 0, right: self.width, bottom: self.height };
+        let result = unsafe {
+            target.BindDC(self.dc, &area)?;
+            target.SetDpi(scale * 96.0, scale * 96.0);
+            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            target.BeginDraw();
+            target.Clear(Some(&rgba(0, 0.0)));
+            draw(&Canvas { target, brush, generation: self.generation });
+            let result = target.EndDraw(None, None);
+            let _ = GdiFlush();
+            result
+        };
+        if result.as_ref().is_err_and(|e| e.code() == D2DERR_RECREATE_TARGET) {
+            self.target = None;
+        }
+        result
+    }
+
+    pub fn dc(&self) -> HDC {
+        self.dc
+    }
+
+    pub fn bitmap(&self) -> HBITMAP {
+        self.bitmap
+    }
+
+    /// The pixels, BGRA premultiplied, row after row from the top.
+    pub fn pixels(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.bits, (self.width * self.height * 4) as usize) }
+    }
+}
+
+impl Drop for Offscreen {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.old);
+            let _ = DeleteObject(self.bitmap.into());
+            let _ = DeleteDC(self.dc);
         }
     }
 }

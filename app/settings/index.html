@@ -16,6 +16,7 @@
       <button role="tab" type="button" data-tab="general" aria-selected="true">General</button>
       <button role="tab" type="button" data-tab="look">Look</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
+      <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
       <button role="tab" type="button" data-tab="advanced">Advanced</button>
     </nav>
@@ -37,6 +38,8 @@
       <div class="card" data-plugin="mini_player">
         <div class="actions"><button id="mini-player" type="button" class="secondary">Open mini player</button></div>
       </div>
+      <div class="card" data-plugin="taskbar_controls"></div>
+      <div class="card" data-plugin="themed_tray_menu"></div>
       <div class="card" data-plugin="track_notifications"></div>
       <div class="card" data-plugin="controls"></div>
       <div class="card" data-plugin="tracker_filter"></div>
@@ -45,6 +48,12 @@
     <section role="tabpanel" data-panel="look" hidden>
       <div class="card" data-plugin="album_color"></div>
       <div class="card" data-plugin="synced_lyrics"></div>
+      <div class="card" data-plugin="desktop_lyrics">
+        <div class="actions">
+          <button id="desktop-lyrics" type="button" class="secondary">Show floating lyrics</button>
+          <button id="desktop-lyrics-lock" type="button" class="secondary" hidden>Unlock to move</button>
+        </div>
+      </div>
       <div class="card" data-plugin="ambient_mode"></div>
       <div class="card" data-plugin="animated_title_bar"></div>
     </section>
@@ -67,6 +76,36 @@
       <div class="card" data-plugin="discord">
         <label>Application id <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Digits only"></label>
         <p class="hint">Rich Presence is off while this is empty. Discord must be open on this PC.</p>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="stats" hidden>
+      <div class="segmented" id="stats-range" role="group" aria-label="Period">
+        <button type="button" data-range="week">7 days</button>
+        <button type="button" data-range="month" aria-pressed="true">30 days</button>
+        <button type="button" data-range="year">12 months</button>
+        <button type="button" data-range="all">All time</button>
+      </div>
+      <p id="stats-off" class="notice" hidden>Listening stats are off, or were turned on since the last start: nothing is recorded until the next start.</p>
+      <div id="stats-body">
+        <div class="tiles" id="stats-tiles"></div>
+        <div class="card">
+          <div class="name">Listening time</div>
+          <div class="bars" id="stats-series"></div>
+        </div>
+        <div class="card">
+          <div class="name">When you listen</div>
+          <div class="heat" id="stats-heat"></div>
+        </div>
+        <div class="card"><div class="name">Top artists</div><ol class="top" id="stats-artists"></ol></div>
+        <div class="card"><div class="name">Top tracks</div><ol class="top" id="stats-tracks"></ol></div>
+        <div class="card"><div class="name">Top albums</div><ol class="top" id="stats-albums"></ol></div>
+      </div>
+      <div class="card" data-plugin="listening_stats">
+        <div class="actions">
+          <button id="stats-export" type="button" class="secondary">Export CSV</button>
+          <button id="stats-clear" type="button" class="secondary">Clear history</button>
+        </div>
       </div>
     </section>
 

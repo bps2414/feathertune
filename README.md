@@ -21,6 +21,10 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
 - Time-synced lyrics from LRCLIB in the site's Lyrics tab: lines (or words) light up as they are sung, cross-fade into each other, and the list scrolls slowly in time with the song.
+- Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
+- Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
+- A tray menu in the app's look, with the track and its controls.
+- Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
 - Ambient mode: the blurred, glowing cover behind the site.
 - A privacy filter for third-party analytics (never ads).
 - Every feature is on out of the box and is a plugin you can switch off in the settings window. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
@@ -61,6 +65,10 @@ animated_title_bar = true     # slow color drift; pauses when hidden, minimized 
 album_color = true            # title bar, mini player and site take the cover's colors (once per track)
 synced_lyrics = true          # LRCLIB time-synced lyrics in the Lyrics tab, scrolling in time; one request per track, cached
 ambient_mode = true           # blurred, glowing cover behind the site
+taskbar_controls = true       # buttons on the taskbar thumbnail, progress on the taskbar button
+themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
+desktop_lyrics = true         # floating lyrics over the desktop (open it from the tray)
+listening_stats = true        # history in stats/plays.jsonl in the profile, shown in the Stats tab
 
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"

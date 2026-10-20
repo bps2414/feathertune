@@ -4,5 +4,5 @@
   "description": "The settings window (our own page on the feathertune scheme) may read and change the settings. Only that webview, only local origins: the site webview never matches.",
   "local": true,
   "webviews": ["settings"],
-  "permissions": ["allow-settings-get", "allow-settings-set", "allow-settings-action"]
+  "permissions": ["allow-settings-get", "allow-settings-set", "allow-settings-action", "allow-settings-stats"]
 }

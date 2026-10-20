@@ -22,14 +22,18 @@ use serde_json::{Value, json};
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, UriSchemeContext, Url, Webview, WebviewUrl, WebviewWindowBuilder, Wry};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_opener::OpenerExt;
 
 use windows::Win32::Foundation::{COLORREF, HWND};
 use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DwmSetWindowAttribute};
+use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 
 use crate::gfx;
 use crate::lastfm::LastFm;
 use crate::plugins::{self, PLUGINS};
 use crate::settings::{Live, valid_feature};
+use crate::stats::Stats;
 
 pub const SCHEME: &str = "feathertune";
 const LABEL: &str = "settings";
@@ -145,6 +149,9 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         },
         "browser": { "disable_features": s.browser.disable_features },
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
+        "desktop_lyrics": { "open": crate::desktop_lyrics::is_open(), "locked": crate::desktop_lyrics::is_locked() },
+        // false: the plugin was off at startup, so nothing is recorded.
+        "stats_running": app.try_state::<Stats>().is_some(),
         "restart_needed": live.restart_needed(),
     }))
 }
@@ -172,6 +179,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             match id {
                 "global_shortcuts" => crate::shortcuts::register(&app),
                 "mini_player" if !on => crate::miniplayer::close(&app),
+                "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 _ => {}
             }
@@ -219,20 +227,54 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
     }
 }
 
-/// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`, `restart`.
+/// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`, `desktop_lyrics` (open or close),
+/// `desktop_lyrics_lock` (lock or unlock), `stats_export`, `stats_clear`, `restart`.
 #[tauri::command]
 pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Result<(), String> {
     guard(&webview)?;
     let lastfm = || app.try_state::<LastFm>().ok_or("Last.fm is not running; restart after setting it up");
+    let stats = || app.try_state::<Stats>().ok_or("Listening stats are not running; turn them on and restart");
     match action.as_str() {
         "lastfm_connect" => lastfm()?.connect(&app),
         "lastfm_disconnect" => lastfm()?.disconnect(),
         "mini_player" => crate::miniplayer::open(&app),
+        "desktop_lyrics" => crate::desktop_lyrics::toggle(&app),
+        "desktop_lyrics_lock" => crate::desktop_lyrics::set_locked(!crate::desktop_lyrics::is_locked()),
+        "stats_export" => {
+            let file = downloads()?.join("feathertune-listening-history.csv");
+            stats()?.export(&file)?;
+            app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string())?;
+        }
+        "stats_clear" => stats()?.clear()?,
         // The single-instance lock is released on exit, before the new process starts.
-        "restart" => app.request_restart(),
+        "restart" => {
+            crate::stats::flush(&app);
+            app.request_restart()
+        }
         _ => return Err("unknown action".into()),
     }
     Ok(())
+}
+
+/// The Stats tab: see `Stats::summary`. `offset` is the page's time zone offset in minutes.
+#[tauri::command]
+pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i64) -> Result<Value, String> {
+    guard(&webview)?;
+    if !matches!(range.as_str(), "week" | "month" | "year" | "all") || !(-1440..=1440).contains(&offset) {
+        return Err("invalid range".into());
+    }
+    let stats = app.try_state::<Stats>().ok_or("Listening stats are not running; turn them on and restart")?;
+    Ok(stats.summary(&range, offset))
+}
+
+/// The user's Downloads folder.
+fn downloads() -> Result<std::path::PathBuf, String> {
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None).map_err(|e| e.to_string())?;
+        let text = path.to_string().map_err(|e| e.to_string());
+        CoTaskMemFree(Some(path.0 as _));
+        Ok(text?.into())
+    }
 }
 
 fn text(value: &Value, max: usize) -> Result<String, String> {

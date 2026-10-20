@@ -33,6 +33,8 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 ├─ single instance, autostart, global shortcuts      └─ settings webview: our own page on a
 ├─ Discord, Last.fm, track toasts, LRCLIB lyrics         custom scheme, no access to the site
 ├─ album colors (WIC decode of the cover)
+├─ taskbar buttons, themed tray menu, floating lyrics (Direct2D)
+├─ listening stats (a file in the profile)
 └─ tracker filter (privacy lists only)
 ```
 
@@ -45,7 +47,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 ### Security
 
 - The site webview's capability (`capabilities/player-bridge.json`) grants only `player_state`, only to the `site` webview and only for the site's origin. `frontendDist` is not used: with it, Tauri treats the remote site as a local origin.
-- The settings webview (`capabilities/settings-window.json`) is `local: true` and grants only the three `settings_*` commands. Tauri matches capabilities by label **and** origin, so neither page can reach the other's commands; neither has `core:*` permissions. The commands also check the caller's label.
+- The settings webview (`capabilities/settings-window.json`) is `local: true` and grants only the four `settings_*` commands. The fourth, `settings_stats`, was added for the Stats tab: it returns a summary of the listening history, which is the user's own data on this PC, to our own page only; it takes a period and a time zone offset, both checked, and changes nothing. Tauri matches capabilities by label **and** origin, so neither page can reach the other's commands; neither has `core:*` permissions. The commands also check the caller's label.
 - Custom schemes are registered for every webview (a Tauri limitation), so the scheme handler answers 403 to anything but the settings webview. The settings page has a strict CSP and builds its DOM with `textContent` only.
 - Navigation is pinned to the site and sign-in domains; everything else opens in the default browser.
 
@@ -65,12 +67,24 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 | `album_color` | on | +1 MB private, inside the noise |
 | `synced_lyrics` (LRCLIB) | on | ~+5 MB, inside the spread (one run); the cross-fade and scroll not measured yet |
 | `ambient_mode` | on | ~+25 MB private, +15 MB WS (one run) |
+| `taskbar_controls` | on | not measured yet: a progress update every 1–5 s while playing with the window shown |
+| `themed_tray_menu` | on | not measured yet: nothing while closed |
+| `desktop_lyrics` | on (opened from the tray) | not measured yet: nothing while closed; a repaint per line or word change |
+| `listening_stats` | on | not measured yet: one idle thread, one line appended per track |
 
 **Tracker filter:** WebView2 `WebResourceRequested` and the `adblock` crate with cosmetic rules dropped, so it can only block requests. It only sees scripts, images, XHR/fetch, pings and "other" (never documents, frames, media, fonts or stylesheets), and skips the player's domains, every Google domain and Google's ad-delivery domains before the list is asked, so even an ad list dropped in by mistake changes nothing there. The bundled list (`app/filters/privacy.txt`) has only third-party analytics; on this site it blocks one host.
 
 **Last.fm:** desktop auth (`auth.getToken` → browser → `auth.getSession`, polled); the session key lives in the Windows Credential Manager. CI release builds embed the maintainer's API key from the repository secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` (`option_env!`); keys in `config.toml` take priority. The scrobble point counts played time only; failed scrobbles wait in `lastfm-queue.json` (retried every 5 min, dropped after 14 days).
 
-**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Lines cross-fade (the old one dims slowly, the new one comes in faster). While the song plays and the window is in front, an animation-frame loop scrolls the list in time: the middle of the view moves from the current line toward the next one as the line goes by, eases to a new place after a seek, a click or a manual scroll, and writes the scroll only when it moves by a whole device pixel; it also drives the line and word changes then. Otherwise each new line scrolls smoothly to the middle. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
+**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Lines cross-fade (the old one dims slowly, the new one comes in faster). While the song plays and the window is in front, an animation-frame loop scrolls the list in time: the view parks on the current line and moves on to the next one around the switch (from 40% of the ending line, at most 1.6 s, before it, to 45% of the new one, at most 1.8 s, after it, eased), so a line that ends is still a little short of halfway and short lines keep the view moving; it eases to a new place after a seek, a click or a manual scroll, and writes the scroll only when it moves by a whole device pixel; it also drives the line and word changes then. Otherwise each new line scrolls smoothly to the middle. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
+
+**Floating lyrics:** a native layered window (Direct2D into a 32-bit bitmap, `UpdateLayeredWindow`) with the current line, lit word by word when the entry has word times, and the next one dimmer, outlined so it reads on any background. Its lines come from Rust (`lyrics::Lyrics`), so it works with `synced_lyrics` off; the time is `position_now()` with the page's 250 ms lead. A one-shot timer is set to the next line or word, and a 60 fps timer runs only for the 320 ms cross-fade. Locked it is click-through (`WS_EX_TRANSPARENT`); unlocked (tray) it shows a panel to drag and a lock button. Hidden while paused or without synced lyrics. Open state and position live in `desktop-lyrics.json` in the profile.
+
+**Taskbar:** `ITaskbarList3` from a subclass of the main window: previous / play-pause / next on the thumbnail (white glyph icons drawn once with Direct2D at the small icon size of the DPI) and the track's progress on the taskbar button, yellow while paused. The buttons are added on each "TaskbarButtonCreated" (the window shown from the tray, Explorer restarted). Progress updates once per 1% of the track (1–5 s) while playing with the window shown.
+
+**Themed tray menu:** a native popup in the album's ink and glows (or the system colors) with the track and its controls on top and the tray items below; it closes on focus loss, Esc, a click outside or after an item. It is not exposed to screen readers as a menu, which the Windows menu is: switching the plugin off brings that one back.
+
+**Listening stats:** each listen of at least 10 s of played time (counted like the scrobble point) is one JSON line in `stats/plays.jsonl` in the profile; a play is half the track or 30 s, less is a skip. The Stats tab of the settings window asks `settings_stats` for a period (7 days, 30 days, 12 months, all) and gets totals, a daily or monthly series, an hour × weekday map, streaks and the top artists, tracks and albums, computed in Rust from the whole file. Export writes a CSV to Downloads; "clear history" deletes the file. The listen in progress is written on a track change and on quit or restart from the app; a crash or a Windows shutdown loses it.
 
 **Launcher:** on an interactive start (not `--hidden`, `--mini-player` or `--measure`) a small native start screen (Direct2D) opens first and says what the app is doing. The main window is created hidden, so the site loads meanwhile; the window is shown when the update check is done and the site has drawn its first content (a probe on the page, at most 8 s after `load`, 20 s overall), never on a blank page. The update check is one `GET` of the repository's latest release on the GitHub API. A newer release's installer is downloaded, its SHA-256 compared with the one GitHub lists for the asset (the installer is not signed, so a missing or different hash stops the update), and run silently (`/S /R /UPDATE`: it closes the app, replaces it and starts it again). Only an installed copy updates itself (the exe is in the profile folder, where the installer puts it); a build from `target/` never does. Any failure, offline included, just starts the current version.
 
@@ -130,15 +144,16 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 - The "delete data" uninstall path.
 - The 0.7 s color flow between covers, light-mode Windows, an LRCLIB miss, and a reload keeping the theme and lyrics.
 - A same-day baseline to tell whether the native shell costs memory and CPU, and the `animated_title_bar` plugin measured on and off.
-- The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost.
+- The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost; the new parked scroll's timings.
+- In the running app: the taskbar buttons and progress (also after Explorer restarts and when running elevated); the themed tray menu (position on each taskbar edge, closing on a click outside, keyboard, 150% scaling); the floating lyrics (readability, word timing against the site, dragging, a second monitor); the Stats tab with a real history and the CSV export.
+- The cost of the four new plugins.
 
 ## Ideas
 
 | Idea | Type |
 |---|---|
 | More looks (fonts, compact mode, large artwork) | CSS |
-| Tray menu in the app's theme (today the native Windows menu) | Rust (Win32) |
-| Media buttons on the taskbar thumbnail | Rust (Win32) |
+| Share lyrics as an image: a native window to pick any lines (skipping some) and render a card with the cover | Rust (Direct2D, WIC) |
 | Equalizer and compressor (Web Audio on the `<video>`): first decide whether it breaks "never touch what the player plays" | JS |
 
 ## References

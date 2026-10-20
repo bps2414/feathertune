@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settings-stats"
+description = "Enables the settings_stats command without any pre-configured scope."
+commands.allow = ["settings_stats"]
+
+[[permission]]
+identifier = "deny-settings-stats"
+description = "Denies the settings_stats command without any pre-configured scope."
+commands.deny = ["settings_stats"]

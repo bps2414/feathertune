@@ -12,6 +12,7 @@
 
 mod album_color;
 mod artwork;
+mod desktop_lyrics;
 mod discord;
 mod gfx;
 mod injections;
@@ -27,7 +28,10 @@ mod settings_window;
 mod shortcuts;
 mod smtc;
 mod splash;
+mod stats;
+mod taskbar;
 mod titlebar;
+mod traymenu;
 mod updater;
 
 use std::path::PathBuf;
@@ -116,6 +120,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(player::Player::new())
         .manage(injections::PageData::default())
+        .manage(lyrics::Lyrics::default())
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
@@ -124,6 +129,7 @@ fn main() {
             settings_window::settings_get,
             settings_window::settings_set,
             settings_window::settings_action,
+            settings_window::settings_stats,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -161,6 +167,9 @@ fn main() {
                 LogicalSize::new(size.width, (size.height - top).max(0.0)),
             )?;
             titlebar::install(app.handle(), &window, &site)?;
+            if app.state::<settings::Live>().plugin("taskbar_controls") {
+                taskbar::install(app.handle(), &window);
+            }
             if hidden || mini {
                 set_hidden(app.handle(), true);
             }
@@ -186,8 +195,13 @@ fn main() {
             if live.plugin("album_color") {
                 album_color::start(app.handle());
             }
-            if live.plugin("synced_lyrics") {
-                lyrics::start(app.handle(), &profile);
+            let page_lyrics = live.plugin("synced_lyrics");
+            if page_lyrics || live.plugin("desktop_lyrics") {
+                lyrics::start(app.handle(), &profile, page_lyrics);
+            }
+            desktop_lyrics::start(app.handle());
+            if live.plugin("listening_stats") {
+                stats::start(app.handle(), &profile);
             }
             tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {
@@ -261,7 +275,35 @@ fn open_external(app: &AppHandle, url: &Url) -> bool {
     false
 }
 
+/// The tray icon. Left click shows or hides the window; right click opens our themed menu
+/// (traymenu.rs), or the native one when the `themed_tray_menu` plugin is off.
 fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
+    let themed = app.state::<settings::Live>().plugin("themed_tray_menu");
+    let mut builder = TrayIconBuilder::with_id("main")
+        .icon(app.default_window_icon().cloned().expect("app icon"))
+        .tooltip("feathertune")
+        .show_menu_on_left_click(false);
+    if !themed {
+        builder = builder.menu(&native_menu(app, lastfm.as_ref())?).on_menu_event(|app, event| {
+            tray_command(app, event.id.as_ref());
+        });
+    }
+    builder
+        .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click { button, button_state: MouseButtonState::Up, .. } = event {
+                match button {
+                    MouseButton::Left => toggle(tray.app_handle()),
+                    MouseButton::Right if themed => traymenu::open(tray.app_handle()),
+                    _ => {}
+                }
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// The Windows menu, used when the themed one is off.
+fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Result<Menu<tauri::Wry>> {
     let autostart = CheckMenuItem::with_id(
         app,
         "autostart",
@@ -274,24 +316,26 @@ fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
     let lastfm_item = MenuItem::with_id(
         app,
         "lastfm",
-        lastfm_label(lastfm.as_ref().map(lastfm::LastFm::connected)),
+        lastfm_label(lastfm.map(lastfm::LastFm::connected)),
         lastfm.is_some(),
         None::<&str>,
     )?;
-    if let Some(lastfm) = &lastfm {
+    if let Some(lastfm) = lastfm {
         let item = lastfm_item.clone();
         lastfm.on_change(move |connected| {
             let _ = item.set_text(lastfm_label(Some(connected)));
         });
     }
     app.manage(AutostartItem(autostart.clone()));
-    let menu = Menu::with_items(
+    Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?,
             &MenuItem::with_id(app, "play_pause", "Play / pause", true, None::<&str>)?,
             &MenuItem::with_id(app, "next", "Next", true, None::<&str>)?,
             &MenuItem::with_id(app, "mini_player", "Mini player", true, None::<&str>)?,
+            &MenuItem::with_id(app, "desktop_lyrics", "Floating lyrics", true, None::<&str>)?,
+            &MenuItem::with_id(app, "desktop_lyrics_lock", "Lock / unlock floating lyrics", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &autostart,
             &lastfm_item,
@@ -299,47 +343,43 @@ fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
         ],
-    )?;
-    // This handler gets every menu event of the app, the title bar menu's too (same ids).
-    TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().cloned().expect("app icon"))
-        .tooltip("feathertune")
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| match event.id.as_ref() {
-            "toggle" => toggle(app),
-            "play_pause" => player(app, "playPause"),
-            "next" => player(app, "next"),
-            "mini_player" => miniplayer::toggle(app),
-            "settings" => settings_window::open(app),
-            "autostart" => {
-                // The item has already flipped itself when the event arrives.
-                let on = autostart.is_checked().unwrap_or(false);
-                let manager = app.autolaunch();
-                if let Err(e) = if on { manager.enable() } else { manager.disable() } {
-                    eprintln!("autostart change failed: {e}");
-                    let _ = autostart.set_checked(!on);
-                }
+    )
+}
+
+/// What a tray menu item does (both menus use these ids).
+pub(crate) fn tray_command(app: &AppHandle, id: &str) {
+    match id {
+        "toggle" => toggle(app),
+        "previous" => player(app, "previous"),
+        "play_pause" => player(app, "playPause"),
+        "next" => player(app, "next"),
+        "mini_player" => miniplayer::toggle(app),
+        "desktop_lyrics" => desktop_lyrics::toggle(app),
+        "desktop_lyrics_lock" => desktop_lyrics::set_locked(!desktop_lyrics::is_locked()),
+        "settings" => settings_window::open(app),
+        "autostart" => {
+            let manager = app.autolaunch();
+            let on = !manager.is_enabled().unwrap_or(false);
+            if let Err(e) = if on { manager.enable() } else { manager.disable() } {
+                eprintln!("autostart change failed: {e}");
             }
-            "lastfm" => {
-                if let Some(lastfm) = &lastfm {
-                    if lastfm.connected() { lastfm.disconnect() } else { lastfm.connect(app) }
-                }
+            sync_autostart_item(app);
+        }
+        "lastfm" => {
+            if let Some(lastfm) = app.try_state::<lastfm::LastFm>() {
+                if lastfm.connected() { lastfm.disconnect() } else { lastfm.connect(app) }
             }
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                toggle(tray.app_handle());
-            }
-        })
-        .build(app)?;
-    Ok(())
+        }
+        "quit" => {
+            stats::flush(app);
+            app.exit(0)
+        }
+        _ => {}
+    }
 }
 
 /// `None`: the keys are not configured.
-fn lastfm_label(connected: Option<bool>) -> &'static str {
+pub(crate) fn lastfm_label(connected: Option<bool>) -> &'static str {
     match connected {
         None => "Last.fm: add the keys to config.toml",
         Some(true) => "Disconnect Last.fm",
@@ -347,7 +387,7 @@ fn lastfm_label(connected: Option<bool>) -> &'static str {
     }
 }
 
-/// The tray's "Start with Windows" item, kept in step with the settings window.
+/// The native tray menu's "Start with Windows" item, kept in step with the settings window.
 struct AutostartItem(CheckMenuItem<tauri::Wry>);
 
 pub(crate) fn sync_autostart_item(app: &AppHandle) {

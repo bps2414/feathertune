@@ -41,6 +41,7 @@ const tabs = [...document.querySelectorAll('[role="tab"]')];
 const showTab = (name) => {
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of document.querySelectorAll('[role="tabpanel"]')) p.hidden = p.dataset.panel !== name;
+  if (name === 'stats') loadStats();
 };
 for (const t of tabs) t.addEventListener('click', () => showTab(t.dataset.tab));
 
@@ -110,12 +111,110 @@ const renderLastFm = (l) => {
     : 'This build has no API keys of its own: add yours (from last.fm/api).';
 };
 
+const renderDesktopLyrics = (d) => {
+  $('desktop-lyrics').textContent = d.open ? 'Hide floating lyrics' : 'Show floating lyrics';
+  $('desktop-lyrics-lock').hidden = !d.open;
+  $('desktop-lyrics-lock').textContent = d.locked ? 'Unlock to move' : 'Lock in place';
+};
+
+// Stats: everything comes from settings_stats as numbers and names, shown with textContent only.
+let statsRange = 'month';
+let statsRunning = true;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const duration = (seconds) => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h ? `${h} h ${m} min` : `${m} min`;
+};
+const tile = (value, label) => {
+  const t = el('div', 'tile');
+  t.append(el('div', 'value', value), el('div', 'label', label));
+  return t;
+};
+const renderTop = (list, items) => {
+  const max = items[0]?.seconds || 1;
+  list.replaceChildren(
+    ...items.map((item) => {
+      const li = el('li');
+      li.style.setProperty('--share', String(item.seconds / max));
+      const text = el('div', 'body');
+      text.append(el('div', 'title', item.name));
+      if (item.detail) text.append(el('div', 'detail', item.detail));
+      li.append(text, el('div', 'amount', `${duration(item.seconds)} · ${item.plays} plays`));
+      return li;
+    }),
+  );
+  if (!items.length) list.append(el('li', 'empty', 'Nothing yet.'));
+};
+// A point of the series: a day (days since 1970, local) or a month.
+const pointLabel = (p) => (p.day !== undefined ? String(new Date(p.day * 86400000).getUTCDate()) : MONTHS[p.month - 1]);
+const pointTitle = (p) =>
+  p.day !== undefined
+    ? new Date(p.day * 86400000).toLocaleDateString(undefined, { timeZone: 'UTC' })
+    : `${MONTHS[p.month - 1]} ${p.year}`;
+const renderStats = (s) => {
+  $('stats-tiles').replaceChildren(
+    tile(duration(s.seconds), 'listened'),
+    tile(String(s.plays), `plays (${s.skips} skipped)`),
+    tile(String(s.artists), s.new_artists ? `artists, ${s.new_artists} new` : 'artists'),
+    tile(`${s.streak} d`, `streak (best ${s.longest_streak} d)`),
+  );
+  const max = Math.max(1, ...s.series.map((p) => p.seconds));
+  $('stats-series').replaceChildren(
+    ...s.series.map((p) => {
+      const bar = el('div', 'bar');
+      bar.title = `${pointTitle(p)}: ${duration(p.seconds)}`;
+      const fill = el('i');
+      fill.style.height = `${(p.seconds / max) * 100}%`;
+      bar.append(fill, el('span', '', pointLabel(p)));
+      return bar;
+    }),
+  );
+  const hottest = Math.max(1, ...s.heat.flat());
+  const heat = $('stats-heat');
+  heat.replaceChildren();
+  s.heat.forEach((hours, d) => {
+    heat.append(el('span', 'day', DAYS[d]));
+    hours.forEach((seconds, h) => {
+      const cell = el('i');
+      cell.style.opacity = String(0.08 + 0.92 * (seconds / hottest));
+      cell.title = `${DAYS[d]} ${h}:00: ${duration(seconds)}`;
+      heat.append(cell);
+    });
+  });
+  renderTop($('stats-artists'), s.top_artists);
+  renderTop($('stats-tracks'), s.top_tracks);
+  renderTop($('stats-albums'), s.top_albums);
+};
+const loadStats = async () => {
+  $('stats-off').hidden = statsRunning;
+  $('stats-body').hidden = !statsRunning;
+  if (!statsRunning) return;
+  try {
+    renderStats(await invoke('settings_stats', { range: statsRange, offset: new Date().getTimezoneOffset() }));
+    showError('');
+  } catch (e) {
+    showError(String(e));
+  }
+};
+for (const b of document.querySelectorAll('#stats-range button')) {
+  b.addEventListener('click', () => {
+    statsRange = b.dataset.range;
+    for (const o of document.querySelectorAll('#stats-range button')) o.setAttribute('aria-pressed', String(o === b));
+    loadStats();
+  });
+}
+
 const load = async () => {
   try {
     const s = await invoke('settings_get');
     applyTheme(s.theme);
     renderPlugins(s.plugins);
     renderLastFm(s.lastfm);
+    renderDesktopLyrics(s.desktop_lyrics);
+    statsRunning = s.stats_running;
+    if (!document.querySelector('[data-panel="stats"]').hidden) loadStats();
     $('restart').hidden = !s.restart_needed;
     for (const input of document.querySelectorAll('[data-key]')) {
       if (input === document.activeElement) continue;
@@ -195,6 +294,21 @@ $('lastfm-button').addEventListener('click', async (e) => {
   setTimeout(load, 500);
 });
 $('mini-player').addEventListener('click', () => action('mini_player'));
+for (const [id, name] of [
+  ['desktop-lyrics', 'desktop_lyrics'],
+  ['desktop-lyrics-lock', 'desktop_lyrics_lock'],
+]) {
+  $(id).addEventListener('click', async () => {
+    await action(name);
+    setTimeout(load, 200);
+  });
+}
+$('stats-export').addEventListener('click', () => action('stats_export'));
+$('stats-clear').addEventListener('click', async () => {
+  if (!confirm('Delete the whole listening history? This cannot be undone.')) return;
+  await action('stats_clear');
+  loadStats();
+});
 $('restart-button').addEventListener('click', () => action('restart'));
 
 // The Last.fm sign-in finishes in the browser, and the track (its colors) may change: refresh when

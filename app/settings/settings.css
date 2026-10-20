@@ -151,6 +151,37 @@ details { margin-top: 10px; }
 summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 summary:hover { color: var(--text); }
 
+/* Stats */
+.segmented { display: flex; gap: 4px; padding: 4px; margin-bottom: 12px; border-radius: 12px; background: var(--glass); border: 1px solid var(--edge); }
+.segmented button { flex: 1; color: var(--muted); background: transparent; box-shadow: none; border-radius: 8px; padding: 5px 8px; }
+.segmented button:hover { color: var(--text); background: var(--glass-hover); }
+.segmented button[aria-pressed="true"] { color: var(--text); background: rgba(255, 255, 255, 0.14); }
+
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
+.tile { background: var(--glass); border: 1px solid var(--edge); border-radius: 14px; padding: 12px 14px; }
+.tile .value { font: 600 22px/1.2 "Segoe UI Variable Display", "Segoe UI", sans-serif; }
+.tile .label { color: var(--muted); font-size: 12px; }
+
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 128px; margin-top: 10px; }
+.bar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.bar i { display: block; width: 100%; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--accent); }
+.bar span { font-size: 10px; color: var(--muted); margin-top: 4px; height: 14px; overflow: hidden; }
+
+.heat { display: grid; grid-template-columns: 32px repeat(24, 1fr); gap: 2px; margin-top: 10px; align-items: center; }
+.heat .day { font-size: 11px; color: var(--muted); }
+.heat i { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--accent); }
+
+.top { list-style: none; margin: 8px 0 0; padding: 0; counter-reset: top; }
+.top li { position: relative; z-index: 0; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; counter-increment: top; overflow: hidden; }
+.top li::before { content: counter(top); width: 18px; color: var(--muted); font-size: 12px; text-align: right; flex: none; }
+.top li::after { content: ""; position: absolute; inset: 0; width: calc(var(--share, 0) * 100%); background: rgba(255, 255, 255, 0.06); z-index: -1; }
+.top li.empty::before, .top li.empty::after { content: none; }
+.top .body { flex: 1; min-width: 0; }
+.top .title, .top .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .detail { color: var(--muted); font-size: 12px; }
+.top .amount { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.actions button + button { margin-left: 6px; }
+
 /* An author `display` would otherwise beat the `hidden` attribute (the restart banner always showed). */
 [hidden] { display: none !important; }
 

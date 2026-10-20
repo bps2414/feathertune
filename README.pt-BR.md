@@ -21,6 +21,10 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
 - Letras sincronizadas do LRCLIB na aba Letra do site: as linhas (ou palavras) acendem conforme são cantadas, uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
+- Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
+- Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
+- Um menu da bandeja no visual do app, com a faixa e os controles.
+- Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.
 - Modo ambiente: a capa desfocada e brilhante atrás do site.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Todo recurso vem ligado e é um plugin que você desliga na janela de configurações. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
@@ -61,6 +65,10 @@ animated_title_bar = true     # cores derivando devagar; pausa escondida, minimi
 album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
 synced_lyrics = true          # letras sincronizadas do LRCLIB na aba Letra, rolando no ritmo; uma requisição por faixa, com cache
 ambient_mode = true           # capa desfocada e brilhante atrás do site
+taskbar_controls = true       # botões na miniatura da barra de tarefas, progresso no botão da barra
+themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
+desktop_lyrics = true         # letra flutuante sobre a área de trabalho (abra pela bandeja)
+listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na aba Stats
 
 [shortcuts]                  # globais; "" desliga um
 play_pause = "Ctrl+Alt+Space"

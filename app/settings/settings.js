@@ -294,6 +294,7 @@ $('lastfm-button').addEventListener('click', async (e) => {
   setTimeout(load, 500);
 });
 $('mini-player').addEventListener('click', () => action('mini_player'));
+$('share-lyrics').addEventListener('click', () => action('share_lyrics'));
 for (const [id, name] of [
   ['desktop-lyrics', 'desktop_lyrics'],
   ['desktop-lyrics-lock', 'desktop_lyrics_lock'],

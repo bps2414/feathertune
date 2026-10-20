@@ -228,7 +228,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
 }
 
 /// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`, `desktop_lyrics` (open or close),
-/// `desktop_lyrics_lock` (lock or unlock), `stats_export`, `stats_clear`, `restart`.
+/// `desktop_lyrics_lock` (lock or unlock), `share_lyrics` (open), `stats_export`, `stats_clear`, `restart`.
 #[tauri::command]
 pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Result<(), String> {
     guard(&webview)?;
@@ -240,6 +240,7 @@ pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Resu
         "mini_player" => crate::miniplayer::open(&app),
         "desktop_lyrics" => crate::desktop_lyrics::toggle(&app),
         "desktop_lyrics_lock" => crate::desktop_lyrics::set_locked(!crate::desktop_lyrics::is_locked()),
+        "share_lyrics" => crate::share_lyrics::open(&app),
         "stats_export" => {
             let file = downloads()?.join("feathertune-listening-history.csv");
             stats()?.export(&file)?;
@@ -268,7 +269,7 @@ pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i
 }
 
 /// The user's Downloads folder.
-fn downloads() -> Result<std::path::PathBuf, String> {
+pub(crate) fn downloads() -> Result<std::path::PathBuf, String> {
     unsafe {
         let path = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None).map_err(|e| e.to_string())?;
         let text = path.to_string().map_err(|e| e.to_string());

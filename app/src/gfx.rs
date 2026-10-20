@@ -8,7 +8,7 @@
 //! Both windows live on the main thread, so the factories are per thread.
 //!
 //! `Offscreen` is the same drawing into a 32-bit bitmap with alpha, for what Windows takes as pixels:
-//! the floating lyrics (a layered window) and the taskbar's thumbnail button icons.
+//! the floating lyrics (a layered window), the taskbar's thumbnail button icons and the lyrics cards.
 
 use std::cell::OnceCell;
 use std::ptr::null_mut;

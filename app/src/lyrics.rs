@@ -72,6 +72,7 @@ impl Lyrics {
     fn set(&self, synced: Option<Synced>) {
         *self.0.lock().unwrap() = synced.map(Arc::new);
         crate::desktop_lyrics::refresh();
+        crate::share_lyrics::refresh();
     }
 }
 

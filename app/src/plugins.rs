@@ -101,7 +101,8 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "themed_tray_menu",
         name: "Themed tray menu",
-        description: "The tray icon's right-click menu in the app's look, with the track and its controls on                       top. Off: the Windows menu, which screen readers read as a menu.",
+        description: "The tray icon's right-click menu in the app's look, with the track and its controls on \
+                      top. Off: the Windows menu, which screen readers read as a menu.",
         cost: "Not measured yet: nothing while closed; a small window while open.",
         default_on: true,
         live: false,
@@ -110,8 +111,10 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "taskbar_controls",
         name: "Taskbar controls",
-        description: "Previous, play/pause and next on the window's taskbar thumbnail, and the track's progress                       on its taskbar button (yellow while paused).",
-        cost: "Not measured yet: a progress update every 1 to 5 s while a track plays and the window is shown;                nothing otherwise.",
+        description: "Previous, play/pause and next on the window's taskbar thumbnail, and the track's progress \
+                      on its taskbar button (yellow while paused).",
+        cost: "Not measured yet: a progress update every 1 to 5 s while a track plays and the window is shown; \
+               nothing otherwise.",
         default_on: true,
         live: false,
         legacy: None,
@@ -119,8 +122,11 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "desktop_lyrics",
         name: "Floating lyrics",
-        description: "The current line of the synced lyrics (and the next one) over the desktop, in a window that                       clicks pass through. Open it from the tray or below; unlock it in the tray to move it.                       Uses LRCLIB like Synced lyrics, even with that one off.",
-        cost: "Not measured yet: nothing while closed. Open: a repaint per line or word change and a short                fade; hidden while paused.",
+        description: "The current line of the synced lyrics (and the next one) over the desktop, in a window that \
+                      clicks pass through. Open it from the tray or below; unlock it in the tray to move it. \
+                      Uses LRCLIB like Synced lyrics, even with that one off.",
+        cost: "Not measured yet: nothing while closed. Open: a repaint per line or word change and a short \
+               fade; hidden while paused.",
         default_on: true,
         live: false,
         legacy: None,
@@ -128,8 +134,20 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "listening_stats",
         name: "Listening stats",
-        description: "Keeps a history of what you play (only on this PC, in the profile) and shows it in the                       Stats tab: listening time, top artists, tracks and albums, when you listen and streaks.",
+        description: "Keeps a history of what you play (only on this PC, in the profile) and shows it in the \
+                      Stats tab: listening time, top artists, tracks and albums, when you listen and streaks.",
         cost: "Not measured yet: one idle thread and one line appended to a file per track.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
+        id: "share_lyrics",
+        name: "Share lyrics",
+        description: "Makes a picture card of the synced lyrics: pick any lines (skipped ones are marked), choose \
+                      a look (cover colors, album ink, dark or paper), then copy it or save it as a PNG. Open it \
+                      from the tray or below. Uses LRCLIB like Synced lyrics, even with that one off.",
+        cost: "Not measured yet: nothing until opened; the window repaints only on input.",
         default_on: true,
         live: false,
         legacy: None,

@@ -70,6 +70,7 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 | `taskbar_controls` | on | not measured yet: a progress update every 1–5 s while playing with the window shown |
 | `themed_tray_menu` | on | not measured yet: nothing while closed |
 | `desktop_lyrics` | on (opened from the tray) | not measured yet: nothing while closed; a repaint per line or word change |
+| `share_lyrics` | on (opened from the tray or settings) | not measured yet: nothing until opened; repaints only on input |
 | `listening_stats` | on | not measured yet: one idle thread, one line appended per track |
 
 **Tracker filter:** WebView2 `WebResourceRequested` and the `adblock` crate with cosmetic rules dropped, so it can only block requests. It only sees scripts, images, XHR/fetch, pings and "other" (never documents, frames, media, fonts or stylesheets), and skips the player's domains, every Google domain and Google's ad-delivery domains before the list is asked, so even an ad list dropped in by mistake changes nothing there. The bundled list (`app/filters/privacy.txt`) has only third-party analytics; on this site it blocks one host.
@@ -79,6 +80,8 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 **Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Lines cross-fade (the old one dims slowly, the new one comes in faster). While the song plays and the window is in front, an animation-frame loop scrolls the list in time: the view parks on the current line and moves on to the next one around the switch (from 40% of the ending line, at most 1.6 s, before it, to 45% of the new one, at most 1.8 s, after it, eased), so a line that ends is still a little short of halfway and short lines keep the view moving; it eases to a new place after a seek, a click or a manual scroll, and writes the scroll only when it moves by a whole device pixel; it also drives the line and word changes then. Otherwise each new line scrolls smoothly to the middle. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
 
 **Floating lyrics:** a native layered window (Direct2D into a 32-bit bitmap, `UpdateLayeredWindow`) with the current line, lit word by word when the entry has word times, and the next one dimmer, outlined so it reads on any background. Its lines come from Rust (`lyrics::Lyrics`), so it works with `synced_lyrics` off; the time is `position_now()` with the page's 250 ms lead. A one-shot timer is set to the next line or word, and a 60 fps timer runs only for the 320 ms cross-fade. Locked it is click-through (`WS_EX_TRANSPARENT`); unlocked (tray) it shows a panel to drag and a lock button. Hidden while paused or without synced lyrics. Open state and position live in `desktop-lyrics.json` in the profile.
+
+**Share lyrics:** a native window (Direct2D) lists the synced lines of the track (from `lyrics::Lyrics`, so it works with `synced_lyrics` off) and previews a card. Any lines can be picked, up to 8, with a click, or a range with Shift-click; lines skipped between two picks show as three dots on the card. Looks: Cover (a soft field of the cover's colors: its center square shrunk to 5×5 and blown up with a cubic filter, with WIC, then darkened toward the bottom), Ink (the album theme's ink and glows), Dark and Paper. The card is drawn by one function, scaled into the preview and into a 32-bit bitmap at 3× (1080 px wide); it is opaque, so the clipboard gets it as a DIB and as "PNG", and Save writes a PNG (WIC) to Downloads. Nothing is uploaded anywhere.
 
 **Taskbar:** `ITaskbarList3` from a subclass of the main window: previous / play-pause / next on the thumbnail (white glyph icons drawn once with Direct2D at the small icon size of the DPI) and the track's progress on the taskbar button, yellow while paused. The buttons are added on each "TaskbarButtonCreated" (the window shown from the tray, Explorer restarted). Progress updates once per 1% of the track (1–5 s) while playing with the window shown.
 
@@ -146,14 +149,14 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 - A same-day baseline to tell whether the native shell costs memory and CPU, and the `animated_title_bar` plugin measured on and off.
 - The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost; the new parked scroll's timings.
 - In the running app: the taskbar buttons and progress (also after Explorer restarts and when running elevated); the themed tray menu (position on each taskbar edge, closing on a click outside, keyboard, 150% scaling); the floating lyrics (readability, word timing against the site, dragging, a second monitor); the Stats tab with a real history and the CSV export.
-- The cost of the four new plugins.
+- The share lyrics window in the running app (the looks on light and dark covers, pasting into chat apps, Save, 150% scaling).
+- The cost of the five new plugins.
 
 ## Ideas
 
 | Idea | Type |
 |---|---|
 | More looks (fonts, compact mode, large artwork) | CSS |
-| Share lyrics as an image: a native window to pick any lines (skipping some) and render a card with the cover | Rust (Direct2D, WIC) |
 | Equalizer and compressor (Web Audio on the `<video>`): first decide whether it breaks "never touch what the player plays" | JS |
 
 ## References

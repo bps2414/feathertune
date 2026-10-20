@@ -25,6 +25,7 @@ mod plugins;
 mod privacy;
 mod settings;
 mod settings_window;
+mod share_lyrics;
 mod shortcuts;
 mod smtc;
 mod splash;
@@ -196,7 +197,7 @@ fn main() {
                 album_color::start(app.handle());
             }
             let page_lyrics = live.plugin("synced_lyrics");
-            if page_lyrics || live.plugin("desktop_lyrics") {
+            if page_lyrics || live.plugin("desktop_lyrics") || live.plugin("share_lyrics") {
                 lyrics::start(app.handle(), &profile, page_lyrics);
             }
             desktop_lyrics::start(app.handle());
@@ -336,6 +337,7 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
             &MenuItem::with_id(app, "mini_player", "Mini player", true, None::<&str>)?,
             &MenuItem::with_id(app, "desktop_lyrics", "Floating lyrics", true, None::<&str>)?,
             &MenuItem::with_id(app, "desktop_lyrics_lock", "Lock / unlock floating lyrics", true, None::<&str>)?,
+            &MenuItem::with_id(app, "share_lyrics", "Share lyrics...", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &autostart,
             &lastfm_item,
@@ -356,6 +358,7 @@ pub(crate) fn tray_command(app: &AppHandle, id: &str) {
         "mini_player" => miniplayer::toggle(app),
         "desktop_lyrics" => desktop_lyrics::toggle(app),
         "desktop_lyrics_lock" => desktop_lyrics::set_locked(!desktop_lyrics::is_locked()),
+        "share_lyrics" => share_lyrics::open(app),
         "settings" => settings_window::open(app),
         "autostart" => {
             let manager = app.autolaunch();

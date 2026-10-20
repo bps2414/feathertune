@@ -22,6 +22,7 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
 - Time-synced lyrics from LRCLIB in the site's Lyrics tab: lines (or words) light up as they are sung, cross-fade into each other, and the list scrolls slowly in time with the song.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
+- Share lyrics as a picture card: pick any lines (skip the ones you don't want), choose a look, copy or save it.
 - Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
 - A tray menu in the app's look, with the track and its controls.
 - Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
@@ -68,6 +69,7 @@ ambient_mode = true           # blurred, glowing cover behind the site
 taskbar_controls = true       # buttons on the taskbar thumbnail, progress on the taskbar button
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
 desktop_lyrics = true         # floating lyrics over the desktop (open it from the tray)
+share_lyrics = true           # lyrics picture cards (open it from the tray)
 listening_stats = true        # history in stats/plays.jsonl in the profile, shown in the Stats tab
 
 [shortcuts]                  # global; "" turns one off

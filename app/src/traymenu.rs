@@ -127,6 +127,7 @@ fn entries(app: &AppHandle) -> Vec<Entry> {
         let label = if crate::desktop_lyrics::is_locked() { "Unlock floating lyrics" } else { "Lock floating lyrics" };
         list.push(item("desktop_lyrics_lock", label, None, true));
     }
+    list.push(item("share_lyrics", "Share lyrics...", None, live.plugin("share_lyrics")));
     list.extend([
         Entry::Separator,
         item("autostart", "Start with Windows", Some(app.autolaunch().is_enabled().unwrap_or(false)), true),

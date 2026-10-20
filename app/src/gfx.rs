@@ -139,7 +139,6 @@ pub struct Palette {
     pub text: D2D1_COLOR_F,
     /// Button hover and other soft fills.
     pub hover: D2D1_COLOR_F,
-    pub pressed: D2D1_COLOR_F,
     /// The "app mode" of Windows, whatever the theme.
     pub system_dark: bool,
 }
@@ -226,7 +225,7 @@ pub fn palette() -> Palette {
         None => (rgb(base), system_dark),
     };
     let text = if dark { rgb(0xffffff) } else { rgb(0x000000) };
-    Palette { background, text, hover: with_alpha(text, 0.08), pressed: with_alpha(text, 0.05), system_dark }
+    Palette { background, text, hover: with_alpha(text, 0.08), system_dark }
 }
 
 /// Relative luminance of an sRGB color, 0..1 (WCAG).

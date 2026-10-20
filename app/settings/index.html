@@ -8,58 +8,90 @@
   <script src="/settings.js" defer></script>
 </head>
 <body>
+  <div class="glows" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
   <header>
     <h1>Settings</h1>
-    <p id="restart" class="notice" hidden>Some changes apply after a restart: quit from the tray and open feathertune again.</p>
-    <p id="error" class="notice error" role="alert" hidden></p>
+    <nav role="tablist" aria-label="Sections">
+      <button role="tab" type="button" data-tab="general" aria-selected="true">General</button>
+      <button role="tab" type="button" data-tab="look">Look</button>
+      <button role="tab" type="button" data-tab="integrations">Integrations</button>
+      <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
+      <button role="tab" type="button" data-tab="advanced">Advanced</button>
+    </nav>
   </header>
 
-  <section>
-    <h2>Plugins</h2>
-    <p class="hint">Every optional feature, with what it costs. Switches marked "restart" apply on the next start.</p>
-    <ul id="plugins" class="plugins"></ul>
-  </section>
+  <main>
+    <p id="error" class="notice error" role="alert" hidden></p>
 
-  <section>
-    <h2>Last.fm</h2>
-    <div class="row">
-      <span id="lastfm-status">…</span>
-      <button id="lastfm-button" type="button" hidden></button>
-    </div>
-    <p class="hint">Connecting opens Last.fm in your browser; the session key stays in the Windows Credential Manager.
-      <span id="lastfm-keys"></span></p>
-    <label>API key <input data-key="lastfm.api_key" autocomplete="off" spellcheck="false"></label>
-    <label>API secret <input data-key="lastfm.api_secret" type="password" autocomplete="off" spellcheck="false"></label>
-  </section>
+    <section role="tabpanel" data-panel="general">
+      <div class="card">
+        <div class="row">
+          <div class="body">
+            <div class="name">Start with Windows</div>
+            <div class="description">Starts in the tray when you sign in.</div>
+          </div>
+          <input type="checkbox" class="switch" data-key="autostart" aria-label="Start with Windows">
+        </div>
+      </div>
+      <div class="card" data-plugin="mini_player">
+        <div class="actions"><button id="mini-player" type="button" class="secondary">Open mini player</button></div>
+      </div>
+      <div class="card" data-plugin="track_notifications"></div>
+      <div class="card" data-plugin="controls"></div>
+      <div class="card" data-plugin="tracker_filter"></div>
+    </section>
 
-  <section>
-    <h2>Discord</h2>
-    <label>Application id <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false"></label>
-    <p class="hint">Rich Presence is off while this is empty.</p>
-  </section>
+    <section role="tabpanel" data-panel="look" hidden>
+      <div class="card" data-plugin="album_color"></div>
+      <div class="card" data-plugin="synced_lyrics"></div>
+      <div class="card" data-plugin="ambient_mode"></div>
+      <div class="card" data-plugin="animated_title_bar"></div>
+    </section>
 
-  <section>
-    <h2>Shortcuts</h2>
-    <p class="hint">Global keys, such as Ctrl+Alt+Space or Ctrl+Shift+Left. Empty turns one off.</p>
-    <label>Play / pause <input data-key="shortcuts.play_pause" autocomplete="off" spellcheck="false"></label>
-    <label>Next <input data-key="shortcuts.next" autocomplete="off" spellcheck="false"></label>
-    <label>Previous <input data-key="shortcuts.previous" autocomplete="off" spellcheck="false"></label>
-    <label>Mini player <input data-key="shortcuts.mini_player" autocomplete="off" spellcheck="false"></label>
-  </section>
+    <section role="tabpanel" data-panel="integrations" hidden>
+      <div class="card" data-plugin="lastfm">
+        <div class="status-row">
+          <span class="dot" id="lastfm-dot"></span>
+          <span id="lastfm-status">…</span>
+          <button id="lastfm-button" type="button" hidden></button>
+        </div>
+        <p class="hint">Connecting opens Last.fm in your browser; the session key stays in the Windows Credential Manager.</p>
+        <details>
+          <summary>Your own API keys</summary>
+          <p class="hint" id="lastfm-keys"></p>
+          <label>API key <input data-key="lastfm.api_key" autocomplete="off" spellcheck="false"></label>
+          <label>API secret <input data-key="lastfm.api_secret" type="password" autocomplete="off" spellcheck="false"></label>
+        </details>
+      </div>
+      <div class="card" data-plugin="discord">
+        <label>Application id <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Digits only"></label>
+        <p class="hint">Rich Presence is off while this is empty. Discord must be open on this PC.</p>
+      </div>
+    </section>
 
-  <section>
-    <h2>Window</h2>
-    <label class="check"><input type="checkbox" data-key="autostart"> Start with Windows (in the tray)</label>
-    <div class="row">
-      <span>Mini player</span>
-      <button id="mini-player" type="button">Open</button>
-    </div>
-  </section>
+    <section role="tabpanel" data-panel="shortcuts" hidden>
+      <div class="card" data-plugin="global_shortcuts">
+        <p class="hint">Click a field and press the keys. Backspace clears it, Esc cancels.</p>
+        <label class="key">Play / pause <input data-key="shortcuts.play_pause" data-shortcut readonly></label>
+        <label class="key">Next <input data-key="shortcuts.next" data-shortcut readonly></label>
+        <label class="key">Previous <input data-key="shortcuts.previous" data-shortcut readonly></label>
+        <label class="key">Mini player <input data-key="shortcuts.mini_player" data-shortcut readonly></label>
+      </div>
+    </section>
 
-  <section>
-    <h2>Advanced</h2>
-    <label>Extra Chromium features to turn off <input data-key="browser.disable_features" data-list placeholder="Name1, Name2" autocomplete="off" spellcheck="false"></label>
-    <p class="hint">Experiments only (see the plan). Restart to apply.</p>
-  </section>
+    <section role="tabpanel" data-panel="advanced" hidden>
+      <div class="card">
+        <label>Extra Chromium features to turn off <input data-key="browser.disable_features" data-list placeholder="Name1, Name2" autocomplete="off" spellcheck="false"></label>
+        <p class="hint">Experiments only (see docs/DESIGN.md). Restart to apply.</p>
+      </div>
+      <div id="other-plugins"></div>
+    </section>
+  </main>
+
+  <footer id="restart" hidden>
+    <span>Some changes apply after a restart.</span>
+    <button id="restart-button" type="button">Restart now</button>
+  </footer>
 </body>
 </html>

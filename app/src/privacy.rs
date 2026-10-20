@@ -1,4 +1,4 @@
-//! Tracker filter (Phase 4, plugin `tracker_filter`, on by default: `[plugins] tracker_filter = false` in
+//! Tracker filter (plugin `tracker_filter`, on by default: `[plugins] tracker_filter = false` in
 //! `config.toml` turns it off).
 //!
 //! Third-party requests that match a *privacy* list (analytics, session recording) are answered

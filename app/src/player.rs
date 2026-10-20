@@ -94,7 +94,6 @@ impl Player {
         Player { current: Mutex::new(None), tx: broadcast::channel(32).0 }
     }
 
-    #[allow(dead_code)] // for the integrations (Phase 3)
     pub fn current(&self) -> Option<State> {
         self.current.lock().unwrap().clone()
     }

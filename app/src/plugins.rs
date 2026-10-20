@@ -11,7 +11,7 @@ pub struct Plugin {
     pub id: &'static str,
     pub name: &'static str,
     pub description: &'static str,
-    /// What it costs, from the plan's measurements (docs/PLAN.md).
+    /// What it costs, from the measurements in docs/DESIGN.md.
     pub cost: &'static str,
     pub default_on: bool,
     /// The switch takes effect at once; otherwise on the next start.
@@ -27,7 +27,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Player controls",
         description: "Page module that presses the player's buttons for the tray, media keys, shortcuts and the \
                       mini player. Without it those only show the track.",
-        cost: "No separate cost: on in every measurement since Phase 2.",
+        cost: "No separate cost: on in every measurement.",
         default_on: true,
         live: false,
         legacy: Some(("injections", "controls")),
@@ -36,7 +36,7 @@ pub const PLUGINS: &[Plugin] = &[
         id: "tracker_filter",
         name: "Tracker filter",
         description: "Blocks third-party analytics and session-recording requests (privacy lists only, never ads).",
-        cost: "Saves memory: -16 MB working set and lower CPU (Phase 4, E6).",
+        cost: "Saves memory: -16 MB working set and lower CPU (measured).",
         default_on: true,
         live: false,
         legacy: Some(("privacy", "tracker_filter")),
@@ -45,7 +45,7 @@ pub const PLUGINS: &[Plugin] = &[
         id: "track_notifications",
         name: "Track notifications",
         description: "A notification when the track changes while the window is hidden.",
-        cost: "No measurable cost (Phase 3 rows).",
+        cost: "No measurable cost.",
         default_on: true,
         live: true,
         legacy: Some(("notifications", "track_change")),
@@ -54,7 +54,7 @@ pub const PLUGINS: &[Plugin] = &[
         id: "global_shortcuts",
         name: "Global shortcuts",
         description: "Play/pause, next, previous and the mini player from anywhere (keys below).",
-        cost: "No measurable cost (Phase 3 rows).",
+        cost: "No measurable cost.",
         default_on: true,
         live: true,
         legacy: None,
@@ -82,7 +82,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Mini player",
         description: "A small always-on-top window with the artwork and the controls; opening it hides the main \
                       window.",
-        cost: "Nothing while closed. Open: see the mini player row in the plan.",
+        cost: "Nothing while closed. Open: about the same as the main window in the tray.",
         default_on: true,
         live: true,
         legacy: None,
@@ -103,7 +103,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Album color",
         description: "Colors the title bar, the mini player and the site's player with the colors of the current \
                       cover. Taken once per track; text stays readable.",
-        cost: "No measurable cost: +1 MB private and +0.1 points of CPU against off, inside the noise (Phase 6).",
+        cost: "No measurable cost: +1 MB private and +0.1 points of CPU against off, inside the noise.",
         default_on: true,
         live: false,
         legacy: None,
@@ -114,7 +114,7 @@ pub const PLUGINS: &[Plugin] = &[
         description: "Shows time-synced lyrics from LRCLIB in the site's Lyrics tab, with the current line \
                       highlighted. One request per track, cached on disk; when LRCLIB has none, the site's own \
                       lyrics stay.",
-        cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the Phase 4 spread (Phase 6).",
+        cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread.",
         default_on: true,
         live: false,
         legacy: None,
@@ -124,7 +124,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Ambient mode",
         description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \
                       window is hidden or minimized and with reduced motion.",
-        cost: "About +25 MB private and +15 MB WS against off (one run); the CPU difference is inside the noise of one run (Phase 6).",
+        cost: "About +25 MB private and +15 MB WS against off (one run); the CPU difference is inside the noise of one run.",
         default_on: false,
         live: false,
         legacy: None,

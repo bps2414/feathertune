@@ -1,104 +1,200 @@
+/* The title bar's "ink in water" look: deep ink with four soft glows of the current album (settings.js
+   sets the colors; these are the default look's), under glass cards. Nothing animates except short
+   state transitions, which reduced motion removes. The glows are plain gradients (no blur filter), so
+   they cost nothing once painted. */
 :root {
-  color-scheme: light dark;
-  --bg: #f3f3f3;
-  --card: #fbfbfb;
-  --text: #1a1a1a;
-  --muted: #5f5f5f;
-  --line: #e0e0e0;
-  --accent: #005fb8;
-  --accent-text: #ffffff;
-  --error: #c42b1c;
-  font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #202020;
-    --card: #2b2b2b;
-    --text: #ffffff;
-    --muted: #b5b5b5;
-    --line: #3a3a3a;
-    --accent: #60cdff;
-    --accent-text: #000000;
-    --error: #ff99a4;
-  }
+  color-scheme: dark;
+  --ink: #120f24;
+  --g1: #6b3bf0;
+  --g2: #f0508a;
+  --g3: #22c3d6;
+  --g4: #f5a85c;
+  --text: #f4f2ff;
+  --muted: rgba(244, 242, 255, 0.62);
+  --glass: rgba(255, 255, 255, 0.055);
+  --glass-hover: rgba(255, 255, 255, 0.08);
+  --edge: rgba(255, 255, 255, 0.09);
+  --field: rgba(0, 0, 0, 0.28);
+  --accent: var(--g1);
+  --error: #ff99a4;
+  font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
 
+html { background: var(--ink); }
+
 body {
   margin: 0;
-  padding: 20px 24px 32px;
-  background: var(--bg);
+  min-height: 100vh;
   color: var(--text);
+  background: var(--ink);
 }
 
-h1 { font-size: 24px; font-weight: 600; margin: 0 0 12px; }
-h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+.glows { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.glows i { position: absolute; display: block; border-radius: 50%; opacity: 0.55; }
+.glows i:nth-child(1) { width: 90vw; height: 70vh; left: -25vw; top: -30vh; background: radial-gradient(closest-side, var(--g1), transparent); }
+.glows i:nth-child(2) { width: 80vw; height: 60vh; right: -30vw; top: 10vh; background: radial-gradient(closest-side, var(--g2), transparent); opacity: 0.4; }
+.glows i:nth-child(3) { width: 90vw; height: 60vh; left: -20vw; bottom: -30vh; background: radial-gradient(closest-side, var(--g3), transparent); opacity: 0.35; }
+.glows i:nth-child(4) { width: 70vw; height: 50vh; right: -20vw; bottom: -20vh; background: radial-gradient(closest-side, var(--g4), transparent); opacity: 0.3; }
 
-section {
-  background: var(--card);
-  border: 1px solid var(--line);
+header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 18px 24px 12px;
+  /* Opaque enough that the cards scrolling under it do not show through the tabs. */
+  background: color-mix(in srgb, var(--ink) 94%, transparent);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--edge);
+}
+
+h1 { font: 600 22px/1.2 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 0 0 14px; }
+
+nav {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ink), #fff 7%);
+  border: 1px solid var(--edge);
+  overflow-x: auto;
+}
+
+nav button {
+  flex: 1;
+  color: var(--muted);
+  background: transparent;
   border-radius: 8px;
-  padding: 14px 16px;
-  margin-bottom: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
 }
+nav button:hover { color: var(--text); background: var(--glass-hover); }
+nav button[aria-selected="true"] { color: var(--text); background: rgba(255, 255, 255, 0.14); }
+
+main { padding: 16px 24px 88px; }
+
+.card {
+  background: var(--glass);
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.row { display: flex; align-items: flex-start; gap: 14px; }
+.row .body { flex: 1; min-width: 0; }
+.name { font-weight: 600; }
+.badge {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 0 7px;
+  margin-left: 6px;
+}
+.description { margin: 2px 0 0; color: rgba(244, 242, 255, 0.85); }
+.cost { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.extra:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edge); }
+.card.off .extra { opacity: 0.5; }
 
 .hint { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+.hint:last-child { margin-bottom: 0; }
 
-.notice {
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin: 0 0 12px;
-  background: var(--card);
-  border: 1px solid var(--accent);
-}
+.notice { border-radius: 10px; padding: 8px 12px; margin: 0 0 12px; background: var(--glass); border: 1px solid var(--edge); }
 .notice.error { border-color: var(--error); color: var(--error); }
 
-label { display: block; margin: 8px 0; }
-label input:not([type="checkbox"]) {
-  display: block;
-  width: 100%;
-  margin-top: 4px;
-}
-label.check { display: flex; align-items: center; gap: 8px; }
+label { display: block; margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+label input { display: block; width: 100%; margin-top: 4px; font-size: 14px; }
+label.key { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text); font-size: 14px; }
+label.key input { width: 190px; margin: 0; text-align: center; cursor: pointer; }
+label.key input.recording { border-color: var(--text); color: var(--muted); }
 
-input {
+input:not(.switch) {
   font: inherit;
-  color: inherit;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 5px 8px;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 7px 10px;
 }
-input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input::placeholder { color: rgba(244, 242, 255, 0.35); }
+input:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 input.invalid { border-color: var(--error); }
+input.saved { border-color: rgba(120, 230, 160, 0.7); }
 
 button {
   font: inherit;
-  color: var(--accent-text);
+  color: #fff;
   background: var(--accent);
   border: 0;
-  border-radius: 4px;
-  padding: 5px 14px;
+  border-radius: 999px;
+  padding: 6px 16px;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
+button:hover { filter: brightness(1.12); }
+button:active { filter: brightness(0.92); }
+button.secondary, nav button { box-shadow: none; }
+button.secondary { background: rgba(255, 255, 255, 0.12); }
 
-.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0; }
+.actions { margin-top: 12px; }
 
-.plugins { list-style: none; margin: 0; padding: 0; }
-.plugins li { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
-.plugins li:first-child { border-top: 0; }
-.plugins .body { flex: 1; }
-.plugins .name { font-weight: 600; }
-.plugins .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; margin-left: 6px; }
-.plugins .description { margin: 2px 0; }
-.plugins .cost { color: var(--muted); font-size: 12px; }
+.status-row { display: flex; align-items: center; gap: 8px; }
+.status-row button { margin-left: auto; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.3); flex: none; }
+.dot.on { background: #6fe3a0; box-shadow: 0 0 8px #6fe3a0; }
 
-/* Toggle switch */
-.switch { appearance: none; position: relative; width: 40px; height: 20px; flex: none; margin-top: 2px;
-  border: 1px solid var(--muted); border-radius: 10px; padding: 0; background: transparent; cursor: pointer; }
-.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px;
-  border-radius: 50%; background: var(--muted); transition: left 0.1s; }
-.switch:checked { background: var(--accent); border-color: var(--accent); }
-.switch:checked::after { left: 23px; background: var(--accent-text); }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+summary:hover { color: var(--text); }
+
+footer {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 999px;
+  background: rgba(20, 18, 34, 0.92);
+  border: 1px solid var(--edge);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+footer span { flex: 1; }
+
+/* Switch */
+.switch {
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--edge);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+  transition: transform 0.15s;
+}
+.switch:checked { background: var(--accent); border-color: transparent; }
+.switch:checked::after { transform: translateX(18px); background: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  .switch, .switch::after { transition: none; }
+}

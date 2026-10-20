@@ -6,7 +6,7 @@
 //!
 //! - WM_NCHITTEST: the top resize border comes from tao; on the strip the caption buttons answer
 //!   HTMINBUTTON/HTMAXBUTTON/HTCLOSE (HTMAXBUTTON is what shows the Windows 11 snap layouts), the
-//!   menu button is client area and the rest is HTCAPTION (drag, Aero Snap, double click maximizes,
+//!   mini player and settings buttons are client area and the rest is HTCAPTION (drag, Aero Snap, double click maximizes,
 //!   right click opens the system menu).
 //! - The caption buttons are clicked on the non-client mouse messages, which are not passed on:
 //!   DefWindowProc would draw the classic buttons over the strip.
@@ -29,8 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, Manager, PhysicalPosition, Webview, Window, Wry};
+use tauri::{AppHandle, Manager, Webview, Window};
 use tokio::sync::broadcast::error::RecvError;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
@@ -60,6 +59,11 @@ use crate::settings::Live;
 /// Strip height and button width, in DIPs (the Windows 11 caption metrics).
 pub const HEIGHT: f32 = 32.0;
 const BUTTON: f32 = 46.0;
+/// The mini player and settings buttons, left of the caption buttons with a small gap.
+const SMALL: f32 = 40.0;
+const GAP: f32 = 6.0;
+/// Left margin of the app name.
+const NAME_LEFT: f32 = 12.0;
 const SUBCLASS_ID: usize = 0xfea7;
 /// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
 pub const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -187,7 +191,7 @@ impl TrackLine {
         width: f32,
         dim: &ID2D1SolidColorBrush,
     ) -> Option<Self> {
-        let (left, right) = (BUTTON + 150.0, button_left(Button::Minimize, width) - 24.0);
+        let (left, right) = (NAME_LEFT + 150.0, button_left(Button::MiniPlayer, width) - 24.0);
         if title.is_empty() || right - left < 80.0 {
             return None;
         }
@@ -209,7 +213,8 @@ impl TrackLine {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Button {
-    Menu,
+    MiniPlayer,
+    Settings,
     Minimize,
     Maximize,
     Close,
@@ -218,11 +223,12 @@ enum Button {
 struct TitleBar {
     window: Window,
     controller: ICoreWebView2Controller,
-    menu: Menu<Wry>,
     surface: gfx::Surface,
     name: IDWriteTextFormat,
     track: IDWriteTextFormat,
     icons: IDWriteTextFormat,
+    /// Our buttons' glyphs: larger than the caption glyphs, which keep the Windows size.
+    big_icons: IDWriteTextFormat,
     now: Arc<Mutex<Now>>,
     /// The shape flows from `from` to `to` while `morph` runs.
     from: u64,
@@ -249,15 +255,6 @@ struct TitleBar {
 /// Subclasses the main window and lays the site webview out below the strip.
 pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Result<()> {
     let hwnd = window.hwnd()?.0 as isize;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
-            &MenuItem::with_id(app, "mini_player", "Mini player", true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
-        ],
-    )?;
     let window = window.clone();
     ANIMATED.store(app.state::<Live>().plugin("animated_title_bar"), Ordering::Relaxed);
     let player = app.state::<Player>();
@@ -284,19 +281,20 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             gfx::text_format(NAME_FONT, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING),
             gfx::text_format(TRACK_FONT, 12.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER),
             gfx::text_format(ICON_FONT, 10.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER),
+            gfx::text_format(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER),
         );
-        let (Ok(name), Ok(track), Ok(icons)) = formats else {
+        let (Ok(name), Ok(track), Ok(icons), Ok(big_icons)) = formats else {
             eprintln!("title bar: DirectWrite unavailable");
             return;
         };
         let bar = Box::new(TitleBar {
             window,
             controller: wv.controller(),
-            menu,
             surface: gfx::Surface::default(),
             name,
             track,
             icons,
+            big_icons,
             now,
             from: seed,
             to: seed,
@@ -377,9 +375,7 @@ impl TitleBar {
         if !(0.0..HEIGHT).contains(&y) {
             return None;
         }
-        [Button::Menu, Button::Minimize, Button::Maximize, Button::Close]
-            .into_iter()
-            .find(|b| (button_left(*b, width)..button_left(*b, width) + BUTTON).contains(&x))
+        BUTTONS.into_iter().find(|b| (button_left(*b, width)..button_left(*b, width) + button_width(*b)).contains(&x))
     }
 
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Button>, nonclient: bool) {
@@ -412,12 +408,8 @@ impl TitleBar {
             let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(c as usize), LPARAM(0));
         };
         match button {
-            Button::Menu => {
-                let below = (HEIGHT * gfx::scale(hwnd)).round() as i32;
-                if let Err(e) = self.window.popup_menu_at(&self.menu, PhysicalPosition::new(0, below)) {
-                    eprintln!("title bar menu: {e}");
-                }
-            }
+            Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
+            Button::Settings => crate::settings_window::open(self.window.app_handle()),
             Button::Minimize => command(SC_MINIMIZE),
             Button::Maximize if unsafe { IsZoomed(hwnd) }.as_bool() => command(SC_RESTORE),
             Button::Maximize => command(SC_MAXIMIZE),
@@ -513,7 +505,7 @@ impl TitleBar {
             let now = self.now.lock().unwrap();
             (now.title.clone(), now.artist.clone())
         };
-        let (name, icons, track) = (&self.name, &self.icons, &self.track);
+        let (name, icons, big_icons, track) = (&self.name, &self.icons, &self.big_icons, &self.track);
         let (brushes, brushes_id, line) = (&mut self.brushes, &mut self.brushes_id, &mut self.line);
         let sets = &mut self.glows;
         // The theme flow draws both sets of glows, each at its share of the opacity.
@@ -543,9 +535,10 @@ impl TitleBar {
             c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
             let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
             c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
-            for button in [Button::Menu, Button::Minimize, Button::Maximize, Button::Close] {
+            for button in BUTTONS {
                 let left = button_left(button, width);
-                let r = rect(left, 0.0, left + BUTTON, HEIGHT);
+                let right = left + button_width(button);
+                let r = rect(left, 0.0, right, HEIGHT);
                 let mut glyph = text;
                 if hover == Some(button) || pressed == Some(button) {
                     let down = pressed == Some(button);
@@ -553,21 +546,22 @@ impl TitleBar {
                         Button::Close => gfx::rgba(CLOSE_HOVER, if down { 0.8 } else { 1.0 }),
                         _ => gfx::with_alpha(full, if down { 0.1 } else { 0.16 }),
                     };
-                    c.pill(rect(left + 5.0, 4.0, left + BUTTON - 5.0, HEIGHT - 4.0), 7.0, fill);
+                    c.pill(rect(left + 5.0, 4.0, right - 5.0, HEIGHT - 4.0), 7.0, fill);
                     if button == Button::Close {
                         glyph = gfx::rgb(0xffffff);
                     }
                 }
                 let icon = match button {
-                    Button::Menu => "\u{e700}",
+                    Button::MiniPlayer => "\u{e8a7}",
+                    Button::Settings => "\u{e713}",
                     Button::Minimize => "\u{e921}",
                     Button::Maximize if maximized => "\u{e923}",
                     Button::Maximize => "\u{e922}",
                     Button::Close => "\u{e8bb}",
                 };
-                c.text(icon, icons, r, glyph);
+                c.text(icon, if ours(button) { big_icons } else { icons }, r, glyph);
             }
-            c.text("feathertune", name, rect(BUTTON + 2.0, 0.0, BUTTON + 140.0, HEIGHT), text);
+            c.text("feathertune", name, rect(NAME_LEFT, 0.0, NAME_LEFT + 140.0, HEIGHT), text);
             let key = (title, artist, width.to_bits(), *brushes_id);
             if line.as_ref().is_none_or(|l| l.key != key) {
                 *line = TrackLine::new(track, &key.0, &key.1, width, &b.dim).map(|l| TrackLine { key, ..l });
@@ -580,9 +574,21 @@ impl TitleBar {
     }
 }
 
+const BUTTONS: [Button; 5] = [Button::MiniPlayer, Button::Settings, Button::Minimize, Button::Maximize, Button::Close];
+
+/// The buttons that are client area (ours), not caption buttons.
+fn ours(b: Button) -> bool {
+    matches!(b, Button::MiniPlayer | Button::Settings)
+}
+
+fn button_width(b: Button) -> f32 {
+    if ours(b) { SMALL } else { BUTTON }
+}
+
 fn button_left(b: Button, width: f32) -> f32 {
     match b {
-        Button::Menu => 0.0,
+        Button::MiniPlayer => width - 3.0 * BUTTON - GAP - 2.0 * SMALL,
+        Button::Settings => width - 3.0 * BUTTON - GAP - SMALL,
         Button::Minimize => width - 3.0 * BUTTON,
         Button::Maximize => width - 2.0 * BUTTON,
         Button::Close => width - BUTTON,
@@ -641,7 +647,7 @@ unsafe extern "system" fn subclass(
                 Some(Button::Minimize) => HTMINBUTTON,
                 Some(Button::Maximize) => HTMAXBUTTON,
                 Some(Button::Close) => HTCLOSE,
-                Some(Button::Menu) => HTCLIENT,
+                Some(_) => HTCLIENT,
                 None => HTCAPTION,
             };
             return LRESULT(code as isize);
@@ -649,7 +655,7 @@ unsafe extern "system" fn subclass(
         WM_NCMOUSEMOVE => bar.set_hover(hwnd, caption_button(wparam.0), true),
         WM_MOUSEMOVE => {
             let (x, y) = client_dip(hwnd, lparam);
-            let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| *b == Button::Menu);
+            let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b));
             bar.set_hover(hwnd, hover, false);
         }
         WM_NCMOUSELEAVE | WM_MOUSELEAVE => {
@@ -676,15 +682,15 @@ unsafe extern "system" fn subclass(
         }
         WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_LBUTTONUP => {
             let (x, y) = client_dip(hwnd, lparam);
-            if bar.hit(x, y, width_dip(hwnd)) == Some(Button::Menu) {
+            if let Some(b) = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b)) {
                 if msg == WM_LBUTTONUP {
-                    let clicked = bar.pressed == Some(Button::Menu);
+                    let clicked = bar.pressed == Some(b);
                     bar.press(hwnd, None);
                     if clicked {
-                        bar.click(hwnd, Button::Menu);
+                        bar.click(hwnd, b);
                     }
                 } else {
-                    bar.press(hwnd, Some(Button::Menu));
+                    bar.press(hwnd, Some(b));
                 }
                 return LRESULT(0);
             }

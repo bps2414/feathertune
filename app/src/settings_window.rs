@@ -23,6 +23,10 @@ use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, UriSchemeContext, Url, Webview, WebviewUrl, WebviewWindowBuilder, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
+use windows::Win32::Foundation::{COLORREF, HWND};
+use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DwmSetWindowAttribute};
+
+use crate::gfx;
 use crate::lastfm::LastFm;
 use crate::plugins::{self, PLUGINS};
 use crate::settings::{Live, valid_feature};
@@ -71,6 +75,7 @@ pub fn open(app: &AppHandle) {
             .title("feathertune settings")
             .inner_size(560.0, 720.0)
             .min_inner_size(420.0, 400.0)
+            .theme(Some(tauri::Theme::Dark))
             .data_directory(live.profile.clone())
             .additional_browser_args(&live.browser_args)
             .on_navigation(|url| url.origin().ascii_serialization() == ORIGIN)
@@ -114,7 +119,15 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         })
         .collect();
     let lastfm = app.try_state::<LastFm>().map(|l| l.connected());
+    // The album theme of the title bar (null: the default look). Read again each time the window
+    // gets the focus, so the frame follows the track too.
+    let theme = gfx::blend().to;
+    if let Ok(hwnd) = webview.window().hwnd() {
+        color_frame(hwnd, theme.map(|t| t.ink));
+    }
+    let hex = |c: u32| format!("#{c:06x}");
     Ok(json!({
+        "theme": theme.map(|t| json!({ "ink": hex(t.ink), "glows": t.glows.map(hex) })),
         "plugins": plugins,
         "shortcuts": {
             "play_pause": s.shortcuts.play_pause,
@@ -206,7 +219,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
     }
 }
 
-/// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`.
+/// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`, `restart`.
 #[tauri::command]
 pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Result<(), String> {
     guard(&webview)?;
@@ -215,6 +228,8 @@ pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Resu
         "lastfm_connect" => lastfm()?.connect(&app),
         "lastfm_disconnect" => lastfm()?.disconnect(),
         "mini_player" => crate::miniplayer::open(&app),
+        // The single-instance lock is released on exit, before the new process starts.
+        "restart" => app.request_restart(),
         _ => return Err("unknown action".into()),
     }
     Ok(())
@@ -226,4 +241,18 @@ fn text(value: &Value, max: usize) -> Result<String, String> {
         return Err("too long or invalid".into());
     }
     Ok(s.to_owned())
+}
+
+/// Paints the system frame in the album ink with white text, or back to the default (`None`).
+fn color_frame(hwnd: HWND, ink: Option<u32>) {
+    // COLORREF is 0x00BBGGRR; 0xFFFFFFFF is DWMWA_COLOR_DEFAULT.
+    let bgr = |c: u32| ((c & 0xff) << 16) | (c & 0xff00) | ((c >> 16) & 0xff);
+    let (caption, text) = ink.map_or((0xffff_ffff, 0xffff_ffff), |c| (bgr(c), 0x00ff_ffff));
+    for (attribute, color) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)] {
+        let color = COLORREF(color);
+        unsafe {
+            let _ =
+                DwmSetWindowAttribute(hwnd, attribute, &color as *const _ as *const _, size_of::<COLORREF>() as u32);
+        }
+    }
 }

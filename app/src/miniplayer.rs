@@ -22,7 +22,7 @@ use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::error::RecvError;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT};
-use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_PROPERTIES, ID2D1Bitmap};
+use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapBrush};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING, IDWriteTextFormat,
@@ -43,6 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
+use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
 use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
@@ -53,6 +54,7 @@ use crate::settings::Live;
 const WIDTH: f32 = 340.0;
 const HEIGHT: f32 = 96.0;
 const ART: f32 = 80.0;
+const ART_RADIUS: f32 = 8.0;
 /// The static glows of a theme: center, radii (DIPs) and strength, kept soft so the white text stays
 /// readable (the glows' luminance is capped in album_color.rs).
 const GLOWS: [(f32, f32, f32, f32, f32); 3] =
@@ -140,8 +142,9 @@ struct Mini {
     artist: IDWriteTextFormat,
     icons: IDWriteTextFormat,
     small_icons: IDWriteTextFormat,
-    /// The artwork as a bitmap of the current target: URL and target generation it was made for.
-    bitmap: Option<(String, u32, ID2D1Bitmap)>,
+    /// The artwork as a bitmap brush of the current target (so it can fill a rounded square): URL and
+    /// target generation it was made for.
+    bitmap: Option<(String, u32, ID2D1BitmapBrush)>,
     /// The glow brushes of the themes on screen.
     glows: gfx::GlowSets,
     /// The frame timer of a theme flow is running.
@@ -154,9 +157,9 @@ struct Mini {
 fn button_rect(b: Button) -> windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F {
     let x = 8.0 + ART + 8.0;
     match b {
-        Button::Previous => rect(x, 54.0, x + 36.0, 86.0),
-        Button::PlayPause => rect(x + 36.0, 54.0, x + 72.0, 86.0),
-        Button::Next => rect(x + 72.0, 54.0, x + 108.0, 86.0),
+        Button::Previous => rect(x, 52.0, x + 36.0, 84.0),
+        Button::PlayPause => rect(x + 38.0, 52.0, x + 70.0, 84.0),
+        Button::Next => rect(x + 72.0, 52.0, x + 108.0, 84.0),
         Button::Back => rect(WIDTH - 60.0, 4.0, WIDTH - 32.0, 32.0),
         Button::Close => rect(WIDTH - 32.0, 4.0, WIDTH - 4.0, 32.0),
     }
@@ -368,7 +371,7 @@ impl Mini {
             }
             let art_rect = rect(8.0, 8.0, 8.0 + ART, 8.0 + ART);
             // The surface may have been rebuilt since the bitmap was made (device lost).
-            let fresh = |b: &(String, u32, ID2D1Bitmap), a: &Art| b.0 == a.url && b.1 == generation;
+            let fresh = |b: &(String, u32, ID2D1BitmapBrush), a: &Art| b.0 == a.url && b.1 == generation;
             match art {
                 Some(a) if bitmap.as_ref().is_none_or(|b| !fresh(b, a)) => {
                     let props = D2D1_BITMAP_PROPERTIES {
@@ -380,31 +383,39 @@ impl Mini {
                         dpiY: 96.0,
                     };
                     let size = D2D_SIZE_U { width: a.width, height: a.height };
-                    *bitmap = unsafe { c.target.CreateBitmap(size, Some(a.pixels.as_ptr() as _), a.width * 4, &props) }
-                        .ok()
-                        .map(|b| (a.url.clone(), generation, b));
+                    *bitmap = unsafe {
+                        c.target
+                            .CreateBitmap(size, Some(a.pixels.as_ptr() as _), a.width * 4, &props)
+                            .and_then(|b| c.target.CreateBitmapBrush(&b, None, None))
+                    }
+                    .ok()
+                    .map(|brush| {
+                        // Maps the center square of the image (video thumbnails are 16:9) onto the art.
+                        let side = a.width.min(a.height) as f32;
+                        let (x, y) = ((a.width as f32 - side) / 2.0, (a.height as f32 - side) / 2.0);
+                        let k = ART / side;
+                        let m = Matrix3x2 {
+                            M11: k,
+                            M12: 0.0,
+                            M21: 0.0,
+                            M22: k,
+                            M31: art_rect.left - x * k,
+                            M32: art_rect.top - y * k,
+                        };
+                        unsafe { brush.SetTransform(&m) };
+                        (a.url.clone(), generation, brush)
+                    });
                 }
                 Some(_) => {}
                 None => *bitmap = None,
             }
             match (art, bitmap.as_ref()) {
-                (Some(a), Some((_, _, b))) => {
-                    // Center square of the image (video thumbnails are 16:9).
-                    let side = a.width.min(a.height) as f32;
-                    let (x, y) = ((a.width as f32 - side) / 2.0, (a.height as f32 - side) / 2.0);
-                    let source = rect(x, y, x + side, y + side);
-                    unsafe {
-                        c.target.DrawBitmap(
-                            b,
-                            Some(&art_rect),
-                            1.0,
-                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                            Some(&source),
-                        );
-                    }
-                }
+                (Some(_), Some((_, _, b))) => unsafe {
+                    let rounded = D2D1_ROUNDED_RECT { rect: art_rect, radiusX: ART_RADIUS, radiusY: ART_RADIUS };
+                    c.target.FillRoundedRectangle(&rounded, b);
+                },
                 _ => {
-                    c.fill(art_rect, pal.hover);
+                    c.pill(art_rect, ART_RADIUS, pal.hover);
                     c.text("\u{e8d6}", icons, art_rect, gfx::with_alpha(pal.text, 0.6));
                 }
             }
@@ -419,12 +430,24 @@ impl Mini {
                 None => c.text("Nothing playing", title, rect(x, 8.0, text_right, 30.0), pal.text),
             }
 
+            // Glass pills on hover; play/pause is a solid disc in the text color with the glyph cut in
+            // the background's color.
             for b in BUTTONS {
                 let r = button_rect(b);
-                if pressed == Some(b) {
-                    c.fill(r, pal.pressed);
-                } else if hover == Some(b) {
-                    c.fill(r, pal.hover);
+                let mut glyph_color = pal.text;
+                if b == Button::PlayPause {
+                    let alpha = if pressed == Some(b) {
+                        0.75
+                    } else if hover == Some(b) {
+                        1.0
+                    } else {
+                        0.9
+                    };
+                    c.pill(r, (r.bottom - r.top) / 2.0, gfx::with_alpha(pal.text, alpha));
+                    glyph_color = pal.background;
+                } else if pressed == Some(b) || hover == Some(b) {
+                    let alpha = if pressed == Some(b) { 0.1 } else { 0.16 };
+                    c.pill(r, 8.0, gfx::with_alpha(pal.text, alpha));
                 }
                 let (glyph, format) = match b {
                     Button::Previous => ("\u{e892}", icons),
@@ -434,14 +457,19 @@ impl Mini {
                     Button::Back => ("\u{e73f}", small),
                     Button::Close => ("\u{e8bb}", small),
                 };
-                c.text(glyph, format, r, pal.text);
+                c.text(glyph, format, r, glyph_color);
             }
 
             let progress = state
                 .filter(|s| s.track.duration > 0.0)
                 .map_or(0.0, |s| (s.position_now() / s.track.duration).clamp(0.0, 1.0) as f32);
-            c.fill(rect(0.0, HEIGHT - 3.0, WIDTH, HEIGHT), pal.hover);
-            c.fill(rect(0.0, HEIGHT - 3.0, WIDTH * progress, HEIGHT), gfx::with_alpha(pal.text, 0.8));
+            // A rounded track under the buttons, the played part in the text color.
+            let (left, right) = (x, WIDTH - 12.0);
+            c.pill(rect(left, 88.0, right, 91.0), 1.5, gfx::with_alpha(pal.text, 0.16));
+            if progress > 0.0 {
+                let end = (left + (right - left) * progress).max(left + 3.0);
+                c.pill(rect(left, 88.0, end, 91.0), 1.5, gfx::with_alpha(pal.text, 0.85));
+            }
         });
     }
 }

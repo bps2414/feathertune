@@ -60,8 +60,11 @@
 
 /* The site's side and top panels are solid; they turn transparent so the glow runs under them instead of
    ending at their edge, and their divider lines go. The top bar starts in the title bar's ink (the
-   album color's, when there is one) and fades into the glow, so the native strip above it melts into the
-   page; the player bar has a short fade to dark so the controls stay readable. */
+   album color's, when there is one) and fades into the glow along an eased curve over its whole height
+   (a straight fade that stops halfway shows as a band while the page scrolls under it), so the native
+   strip above it melts into the page. The player bar is frosted glass: the ink at most of its strength
+   over a blur of what scrolls behind, so the controls stay readable and the list does not show through
+   (the blur covers only the bar's strip, and repaints only when the page under it moves). */
 html[data-feathertune-ambient] {
   --ytmusic-background: transparent;
   --ytmusic-general-background-c: transparent;
@@ -71,7 +74,15 @@ html[data-feathertune-ambient] {
 }
 
 html[data-feathertune-ambient] #nav-bar-background {
-  background-image: linear-gradient(to bottom, var(--feathertune-ink, #030303), transparent 50%);
+  background-image: linear-gradient(
+    to bottom,
+    var(--feathertune-ink, #030303) 0%,
+    color-mix(in srgb, var(--feathertune-ink, #030303) 88%, transparent) 22%,
+    color-mix(in srgb, var(--feathertune-ink, #030303) 64%, transparent) 46%,
+    color-mix(in srgb, var(--feathertune-ink, #030303) 36%, transparent) 68%,
+    color-mix(in srgb, var(--feathertune-ink, #030303) 13%, transparent) 86%,
+    transparent 100%
+  );
   background-repeat: no-repeat;
   border-bottom-color: transparent;
 }
@@ -95,13 +106,21 @@ html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer > * {
   direction: ltr;
 }
 
+/* The site's backdrop picture at the top of a page (home, albums) normally fades into the page color,
+   which is transparent here, so its bottom edge showed as a line across the window: it fades out itself. */
+html[data-feathertune-ambient] ytmusic-browse-response #background,
+html[data-feathertune-ambient] ytmusic-browse-response .background-gradient {
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+}
+
 html[data-feathertune-ambient] ytmusic-player-bar {
   --ytmusic-player-bar-background: transparent;
 }
 
 html[data-feathertune-ambient] #player-bar-background {
-  background-color: transparent;
-  background-image: linear-gradient(to top, rgba(3, 3, 3, 0.4), transparent);
+  background-color: color-mix(in srgb, var(--feathertune-ink, #030303) 72%, transparent);
+  backdrop-filter: blur(24px) saturate(1.4);
 }
 
 @media (prefers-reduced-motion: no-preference) {

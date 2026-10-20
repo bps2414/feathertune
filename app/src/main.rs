@@ -45,7 +45,7 @@ use tauri_plugin_window_state::StateFlags;
 const START_URL: &str = "https://music.youtube.com";
 // wry's defaults (dropped once we pass our own args), Chromium's media keys and flyout entry (ours
 // is in smtc.rs). Keep every feature in this single --disable-features: Chromium only honors the
-// last one. Features that the Phase 4 experiments kept go here (MediaRouter, DialMediaRouteProvider:
+// last one. Features that the measured experiments kept go here (MediaRouter, DialMediaRouteProvider:
 // no Cast discovery); the ones still being measured come from `[browser] disable_features` in
 // config.toml (see `browser_args`).
 const DISABLED_FEATURES: &[&str] = &[

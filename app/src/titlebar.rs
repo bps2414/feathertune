@@ -60,6 +60,9 @@ use crate::settings::Live;
 /// Strip height and button width, in DIPs (the Windows 11 caption metrics).
 pub const HEIGHT: f32 = 32.0;
 const BUTTON: f32 = 46.0;
+/// With an album theme the bottom of the strip fades into its ink over this many DIPs, in steps.
+const SETTLE: f32 = 12.0;
+const SETTLE_STEPS: usize = 6;
 const SUBCLASS_ID: usize = 0xfea7;
 /// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
 pub const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -539,10 +542,21 @@ impl TitleBar {
                     c.fill_with(strip, brush);
                 }
             }
-            // Glass: a sheen on the upper half and a lit bottom edge.
+            // Glass: a sheen on the upper half, and a lit bottom edge. With an album theme the strip
+            // settles into its ink at the bottom instead, which is where the page below starts, so the
+            // two meet without a line.
             c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
-            let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
-            c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
+            if themed {
+                let step = SETTLE / SETTLE_STEPS as f32;
+                for i in 0..SETTLE_STEPS {
+                    let t = (i + 1) as f32 / SETTLE_STEPS as f32;
+                    let top = HEIGHT - SETTLE + step * i as f32;
+                    c.fill(rect(0.0, top, width, top + step), gfx::with_alpha(ink, t * t * (3.0 - 2.0 * t)));
+                }
+            } else {
+                let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
+                c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
+            }
             for button in [Button::Menu, Button::Minimize, Button::Maximize, Button::Close] {
                 let left = button_left(button, width);
                 let r = rect(left, 0.0, left + BUTTON, HEIGHT);

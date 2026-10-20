@@ -39,7 +39,7 @@
 #feathertune-ambient .ft-scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, rgba(3, 3, 3, 0.35), rgba(3, 3, 3, 0.7));
+  background: linear-gradient(to bottom, rgba(3, 3, 3, 0.3), rgba(3, 3, 3, 0.5));
 }
 
 #feathertune-ambient .ft-halo {
@@ -59,8 +59,9 @@
 }
 
 /* The site's side and top panels are solid; they turn transparent so the glow runs under them instead of
-   ending at their edge. The top and bottom bars keep a short fade to dark so what scrolls under them
-   stays readable. */
+   ending at their edge, and their divider lines go. The top bar starts in the title bar's ink (the
+   album color's, when there is one) and fades into the glow, so the native strip above it melts into the
+   page; the player bar has a short fade to dark so the controls stay readable. */
 html[data-feathertune-ambient] {
   --ytmusic-background: transparent;
   --ytmusic-general-background-c: transparent;
@@ -70,12 +71,27 @@ html[data-feathertune-ambient] {
 }
 
 html[data-feathertune-ambient] #nav-bar-background {
-  background-image: linear-gradient(to bottom, rgba(3, 3, 3, 0.5), transparent);
+  background-image: linear-gradient(to bottom, var(--feathertune-ink, #030303), transparent);
+  background-repeat: no-repeat;
+  border-bottom-color: transparent;
+}
+
+html[data-feathertune-ambient] #nav-bar-divider {
+  border-top-color: transparent;
+}
+
+html[data-feathertune-ambient] #guide-wrapper,
+html[data-feathertune-ambient] #mini-guide-background {
+  border-right-color: transparent;
 }
 
 html[data-feathertune-ambient] ytmusic-player-bar {
   --ytmusic-player-bar-background: transparent;
-  background-image: linear-gradient(to top, rgba(3, 3, 3, 0.55), transparent);
+}
+
+html[data-feathertune-ambient] #player-bar-background {
+  background-color: transparent;
+  background-image: linear-gradient(to top, rgba(3, 3, 3, 0.4), transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {

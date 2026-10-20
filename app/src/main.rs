@@ -12,6 +12,7 @@ mod injections;
 mod lastfm;
 mod notify;
 mod player;
+mod privacy;
 mod settings;
 mod shortcuts;
 mod smtc;
@@ -30,9 +31,10 @@ use tauri_plugin_window_state::StateFlags;
 
 const START_URL: &str = "https://music.youtube.com";
 // wry's defaults (dropped once we pass our own args), Chromium's media keys and flyout entry (ours
-// is in smtc.rs) and autoplay. Keep every feature in this single --disable-features: Chromium
-// only honors the last one.
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling --autoplay-policy=no-user-gesture-required";
+// is in smtc.rs). Keep every feature in this single --disable-features: Chromium only honors the
+// last one. Features that the Phase 4 experiments kept go here; the ones still being measured come
+// from `[browser] disable_features` in config.toml (see `browser_args`).
+const DISABLED_FEATURES: &[&str] = &["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection", "HardwareMediaKeyHandling"];
 
 const BAR_PROBE: &str = "(() => { const b = document.querySelector('ytmusic-player-bar'); \
     return !!b && b.getBoundingClientRect().height > 0 && !!b.querySelector('.title')?.textContent.trim() })()";
@@ -92,7 +94,7 @@ fn main() {
                 .inner_size(1280.0, 800.0)
                 .data_directory(profile.clone())
                 .visible(!hidden)
-                .additional_browser_args(BROWSER_ARGS)
+                .additional_browser_args(&browser_args(&settings.browser))
                 .initialization_script(injections::script(&config))
                 .on_navigation({
                     let handle = handle.clone();
@@ -105,6 +107,9 @@ fn main() {
                 .build()?;
             if hidden {
                 set_hidden(&window, true);
+            }
+            if settings.privacy.tracker_filter {
+                privacy::install(&window, &profile, measure);
             }
             shortcuts::register(app.handle(), &settings.shortcuts);
             if settings.notifications.track_change {
@@ -132,6 +137,12 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("failed to run feathertune");
+}
+
+/// The WebView2 command line: the single --disable-features plus autoplay.
+fn browser_args(settings: &settings::Browser) -> String {
+    let features: Vec<&str> = DISABLED_FEATURES.iter().copied().chain(settings.disabled_features()).collect();
+    format!("--disable-features={} --autoplay-policy=no-user-gesture-required", features.join(","))
 }
 
 fn profile_dir() -> PathBuf {

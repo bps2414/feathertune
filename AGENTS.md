@@ -6,9 +6,9 @@ feathertune is a Windows-only Tauri 2 app that hosts a music service's official 
 
 ## Layout
 
-- `app/`: the app (Cargo project; run cargo commands from here). `src/main.rs` window, tray, navigation; `src/player.rs` player state (the API integrations consume); `src/smtc.rs` media flyout; `src/injections.rs` + `injections/<id>/` page scripts; `capabilities/` what the remote page may call.
+- `app/`: the app (Cargo project; run cargo commands from here). `src/main.rs` window, tray, navigation; `src/player.rs` player state (the API integrations consume); `src/smtc.rs` media flyout; `src/injections.rs` + `injections/<id>/` page scripts; `src/privacy.rs` + `filters/` tracker filter; `capabilities/` what the remote page may call; `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
 - `spike/`: frozen measurement prototype. Do not build it unless a task is about it.
-- `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer).
+- `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs.
 - `docs/`: plan and phase prompts, in English and pt-BR.
 
 ## Build discipline (important: builds are slow, do not repeat them)

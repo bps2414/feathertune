@@ -6,7 +6,7 @@
 //! - Only an interactive start uses it (not `--hidden`, `--mini-player` or `--measure`), and only with
 //!   the `launcher` plugin on.
 //! - While the progress is unknown a short bar sweeps on one timer, which runs only while the screen
-//!   exists and only when Windows animation effects are on; a download shows its real progress.
+//!   exists; a download shows its real progress.
 //! - It lives on the main thread; `set` and `step_done` can be called from any thread.
 
 use std::path::PathBuf;
@@ -291,9 +291,9 @@ unsafe fn create() -> Result<()> {
 }
 
 impl Splash {
-    /// The sweep runs only while the progress is unknown and animation effects are on.
+    /// The sweep runs only while the progress is unknown.
     fn schedule(&mut self, hwnd: HWND) {
-        let run = VIEW.lock().unwrap().fraction.is_none() && gfx::motion_allowed();
+        let run = VIEW.lock().unwrap().fraction.is_none();
         if run == self.ticking {
             return;
         }
@@ -317,7 +317,6 @@ impl Splash {
             let v = VIEW.lock().unwrap();
             (v.status.clone(), v.fraction)
         };
-        // With animation effects off the unknown progress is a still piece in the middle.
         let sweep = self.ticking.then(|| (self.start.elapsed().as_millis() % SWEEP_MS) as f32 / SWEEP_MS as f32);
         let (name, status_format, small) = (&self.name, &self.status, &self.small);
         self.surface.paint(hwnd, client, |c| {

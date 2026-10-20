@@ -41,7 +41,8 @@ The app targets Windows only (`windows` crate, WebView2), so it does not build o
 - Docs exist in English and pt-BR. When you change one, change its pair (`README.md`/`README.pt-BR.md`, `docs/DESIGN.md`/`docs/DESIGN.pt-BR.md`).
 - Match the surrounding style (`rustfmt.toml`: width 120). Minimal changes, no speculative abstractions.
 - Every Chromium feature flag goes in the single `--disable-features` in `BROWSER_ARGS` (Chromium only honors the last one).
-- UI work (native or HTML) follows the performance rules: draw only on change; any animation has a plugin switch, runs on one timer only while something is on screen to move (stops when the window is hidden, minimized or in the background, and when Windows animation effects or `prefers-reduced-motion` are off) and resumes where it stopped; invalidate only the region that changes; keep GPU resources (brushes, layouts, bitmaps) between frames; and measure it before it is on by default (it stays on by default only if it costs less than the measurement spread).
+- UI work (native or HTML) follows the performance rules: draw only on change; any animation has a plugin switch, runs on one timer only while something is on screen to move (stops when the window is hidden, minimized or in the background) and resumes where it stopped; Windows animation effects and `prefers-reduced-motion` do not turn it off (the switch does; the page gets `--force-prefers-no-reduced-motion`); invalidate only the region that changes; keep GPU resources (brushes, layouts, bitmaps) between frames.
+- Every plugin is on by default. Write its measured cost in `plugins.rs` and docs/DESIGN.md (or "not measured yet" until the maintainer measures it).
 - The page is untrusted. It may only call `player_state`; its payload is validated and never triggers an action. Do not widen `capabilities/` or `allowed()` without a reason written in docs/DESIGN.md.
 
 ## Legal and safety limits (never cross)

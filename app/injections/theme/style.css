@@ -14,11 +14,9 @@ html[data-feathertune-theme] ytmusic-player-bar {
   --ytmusic-player-bar-background: color-mix(in srgb, var(--feathertune-ink), #fff 7%);
 }
 
-/* The change of cover flows in; with reduced motion it is instant. */
-@media (prefers-reduced-motion: no-preference) {
-  html[data-feathertune-theme] ytmusic-player-page,
-  html[data-feathertune-theme] ytmusic-player-bar,
-  html[data-feathertune-theme] #nav-bar-background {
-    transition: background-color 0.7s ease;
-  }
+/* The change of cover flows in. */
+html[data-feathertune-theme] ytmusic-player-page,
+html[data-feathertune-theme] ytmusic-player-bar,
+html[data-feathertune-theme] #nav-bar-background {
+  transition: background-color 0.7s ease;
 }

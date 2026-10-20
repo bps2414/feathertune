@@ -2,7 +2,7 @@
 
 *Português: [README.pt-BR.md](README.pt-BR.md)*
 
-> **Early release (0.1).** A personal project, still young: things may break or change between versions, and there is no support. Use it at your own risk.
+> **Stable for daily use (0.1.x).** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
 
 A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: its own title bar, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
 
@@ -20,9 +20,10 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
-- Time-synced lyrics from LRCLIB in the site's Lyrics tab; an optional ambient mode with the blurred cover behind the site.
+- Time-synced lyrics from LRCLIB in the site's Lyrics tab: lines (or words) light up as they are sung, cross-fade into each other, and the list scrolls slowly in time with the song.
+- Ambient mode: the blurred, glowing cover behind the site.
 - A privacy filter for third-party analytics (never ads).
-- Every optional feature is a plugin you can switch off in the settings window.
+- Every feature is on out of the box and is a plugin you can switch off in the settings window. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-verified-yet).
 
@@ -44,7 +45,7 @@ cargo build --release
 
 ## Configuration
 
-`%LOCALAPPDATA%\feathertune\config.toml` (created on first run with the plugin list, outside the repository). The settings window (the gear on the title bar, or tray menu > Settings) edits everything below and keeps your comments; editing by hand works too. Everything is optional:
+`%LOCALAPPDATA%\feathertune\config.toml` (created on first run with the plugin list, outside the repository; an existing file keeps the values written in it). The settings window (the gear on the title bar, or tray menu > Settings) edits everything below and keeps your comments; editing by hand works too. Everything is optional:
 
 ```toml
 [plugins]                    # every optional feature; the settings window shows its description and cost
@@ -58,8 +59,8 @@ lastfm = true                # also needs your account connected
 mini_player = true
 animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
 album_color = true            # title bar, mini player and site take the cover's colors (once per track)
-synced_lyrics = true          # LRCLIB time-synced lyrics in the Lyrics tab; one request per track, cached
-ambient_mode = false          # blurred, glowing cover behind the site; off by default
+synced_lyrics = true          # LRCLIB time-synced lyrics in the Lyrics tab, scrolling in time; one request per track, cached
+ambient_mode = true           # blurred, glowing cover behind the site
 
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"

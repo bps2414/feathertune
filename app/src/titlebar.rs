@@ -20,7 +20,7 @@
 //!   partial opacity, so nothing is rebuilt per frame).
 //! - With the `animated_title_bar` plugin the glows also drift slowly. Performance rules: one 30 fps
 //!   timer that runs only while there is something to move (a track change, or the drift while the
-//!   window is visible, not minimized and in front, and Windows animation effects are on); the clock
+//!   window is visible, not minimized and in front; Windows animation effects do not stop it); the clock
 //!   stops while paused, so it resumes where it was; only the strip is invalidated; brushes and the
 //!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
 //!   track or the width change. A theme or shape flow also runs only while the window is on screen.
@@ -49,7 +49,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, WM_ACTIVATE, WM_APP, WM_CLOSE,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST,
     WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS,
-    WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
 
 use crate::gfx::{self, ICON_FONT, point, rect};
@@ -238,7 +238,6 @@ struct TitleBar {
     time: f32,
     last_frame: Option<Instant>,
     ticking: bool,
-    motion: bool,
     brushes: Option<Brushes>,
     /// The glow brushes of the themes on screen.
     glows: gfx::GlowSets,
@@ -302,7 +301,6 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             time: 0.0,
             last_frame: None,
             ticking: false,
-            motion: gfx::motion_allowed(),
             brushes: None,
             glows: gfx::GlowSets::default(),
             brushes_id: 0,
@@ -435,7 +433,7 @@ impl TitleBar {
     /// Starts or stops the frame timer: it runs only while there is something to move on screen.
     fn schedule(&mut self, hwnd: HWND) {
         let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
-        let drifting = ANIMATED.load(Ordering::Relaxed) && self.motion && self.active && on_screen;
+        let drifting = ANIMATED.load(Ordering::Relaxed) && self.active && on_screen;
         let run = ((self.morph.is_some() || gfx::fading()) && on_screen) || drifting;
         if run == self.ticking {
             return;
@@ -492,7 +490,7 @@ impl TitleBar {
         // Smoothstep of the shape flow's progress.
         let t = self.morph.map_or(1.0, |start| (start.elapsed().as_secs_f32() / MORPH.as_secs_f32()).min(1.0));
         let t = t * t * (3.0 - 2.0 * t);
-        let drifting = ANIMATED.load(Ordering::Relaxed) && self.motion;
+        let drifting = ANIMATED.load(Ordering::Relaxed);
         let time = self.time;
         let shape: Vec<Glow> = glows(self.from)
             .into_iter()
@@ -727,11 +725,6 @@ unsafe extern "system" fn subclass(
         },
         WM_NCACTIVATE => {
             bar.active = wparam.0 != 0;
-            bar.schedule(hwnd);
-            invalidate(hwnd);
-        }
-        WM_SETTINGCHANGE => {
-            bar.motion = gfx::motion_allowed();
             bar.schedule(hwnd);
             invalidate(hwnd);
         }

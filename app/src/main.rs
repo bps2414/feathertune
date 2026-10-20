@@ -217,7 +217,12 @@ fn main() {
 /// The WebView2 command line: the single --disable-features plus autoplay.
 fn browser_args(settings: &settings::Browser) -> String {
     let features: Vec<&str> = DISABLED_FEATURES.iter().copied().chain(settings.disabled_features()).collect();
-    format!("--disable-features={} --autoplay-policy=no-user-gesture-required", features.join(","))
+    // Animations follow their plugin switches, not Windows' animation effects (which the page would
+    // otherwise see as prefers-reduced-motion).
+    format!(
+        "--disable-features={} --autoplay-policy=no-user-gesture-required --force-prefers-no-reduced-motion",
+        features.join(",")
+    )
 }
 
 fn profile_dir() -> PathBuf {

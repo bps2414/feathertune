@@ -2,13 +2,19 @@
 // track changed, or LRCLIB has none). In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
 // one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
-// click on a line seeks the <video> to it. With no data the site's own lyrics are left alone. The page
-// fetches nothing and calls nothing; lines are shown with textContent only.
+// click on a line seeks the <video> to it. While the song plays and the window is in front, the list scrolls
+// on its own, slowly and in time: the middle of the view moves from the current line toward the next one
+// as the line goes by, and eases to a new place after a seek, a click or a manual scroll (one animation
+// frame loop, only while that is so; it writes the scroll only when it moves by a whole device pixel).
+// Otherwise each new line scrolls smoothly to the middle. With no data the site's own lyrics are left
+// alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MANUAL_SCROLL_MS = 4000;
+// How fast the scroll catches up with where it should be (seconds to cover about two thirds of the way).
+const FOLLOW_S = 0.35;
 
 let lines = null; // [{ ms, text }], sorted by ms
 let box = null; // our container, first child of the tab renderer
@@ -18,9 +24,14 @@ let sung = -1; // in the current line, the last word whose time has come
 let manualUntil = 0;
 let observed = null;
 const observer = new MutationObserver(() => refresh());
+let centers = null; // middle of each line in the tab's scroll space, measured when needed
+const resizes = new ResizeObserver(() => (centers = null));
+let frame = 0;
+let last = 0; // time of the previous frame
+let pos = 0; // the scroll position the loop is at, in CSS px
+let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
 
 const tab = () => document.querySelector(TAB);
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const timed = (l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string';
 
@@ -39,6 +50,8 @@ const clear = () => {
   current = -1;
   sung = -1;
   items = [];
+  centers = null;
+  resizes.disconnect();
   box?.remove();
   box = null;
   tab()?.removeAttribute('data-feathertune-lyrics');
@@ -80,6 +93,8 @@ const build = () => {
   box.append(credit);
   current = -1;
   sung = -1;
+  centers = null;
+  resizes.observe(box);
 };
 
 // Puts the box in the tab renderer and shows it only while the Lyrics tab is the open one.
@@ -97,7 +112,10 @@ const refresh = () => {
   const open = t.getAttribute('page-type') === LYRICS_PAGE;
   box.hidden = !open;
   t.toggleAttribute('data-feathertune-lyrics', open);
-  if (open) sync(document.querySelector('video'), true);
+  if (open) {
+    run();
+    sync(document.querySelector('video'), true);
+  }
 };
 
 // The last entry (line or word) whose time has come.
@@ -166,18 +184,84 @@ const sync = (video, force) => {
   if (!el) return;
   el.classList.add('ft-current');
   const t = tab();
-  if (!t || Date.now() < manualUntil) return;
-  const top = el.getBoundingClientRect().top - t.getBoundingClientRect().top + t.scrollTop;
-  t.scrollTo({ top: top - t.clientHeight / 2 + el.clientHeight / 2, behavior: reduced() ? 'auto' : 'smooth' });
+  if (frame || !t || Date.now() < manualUntil) return;
+  t.scrollTo({ top: center(index) - t.clientHeight / 2, behavior: 'smooth' });
+};
+
+const center = (i) => {
+  if (!centers) {
+    const t = tab();
+    const origin = t.getBoundingClientRect().top - t.scrollTop;
+    centers = items.map((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top - origin + r.height / 2;
+    });
+  }
+  return centers[i] ?? 0;
+};
+
+// Where the middle of the view should be now: from the current line toward the next one as it goes by.
+const goal = (ms) => {
+  const i = indexAt(lines, ms);
+  if (i < 0) return center(0);
+  const next = i + 1 < lines.length ? i + 1 : -1;
+  if (next < 0) return center(i);
+  const span = lines[next].ms - lines[i].ms;
+  const p = span > 0 ? Math.min(1, Math.max(0, (ms - lines[i].ms) / span)) : 1;
+  return center(i) + (center(next) - center(i)) * p;
+};
+
+const media = () => document.querySelector('video');
+const canRun = (v) =>
+  !!lines && !!box && box.isConnected && !box.hidden && !!v && !v.paused && !document.hidden && document.hasFocus();
+
+// `frame` stays set while a frame runs, so `sync` leaves the scroll to the loop.
+const step = (now) => {
+  const v = media();
+  const t = tab();
+  if (!t || !canRun(v)) {
+    frame = 0;
+    return;
+  }
+  sync(v, false);
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (Math.abs(t.scrollTop - seen) > 1) manualUntil = Date.now() + MANUAL_SCROLL_MS;
+  if (Date.now() < manualUntil) {
+    pos = t.scrollTop;
+  } else {
+    const target = goal(v.currentTime * 1000 + 250) - t.clientHeight / 2;
+    pos += (target - pos) * (1 - Math.exp(-dt / FOLLOW_S));
+    const dpr = devicePixelRatio || 1;
+    const top = Math.round(pos * dpr) / dpr;
+    if (Math.abs(top - t.scrollTop) * dpr >= 1) t.scrollTop = top;
+  }
+  seen = t.scrollTop;
+  frame = requestAnimationFrame(step);
+};
+
+// Starts the loop when it has something to follow; it stops on its own when that ends.
+const run = () => {
+  const t = tab();
+  if (frame || !t || !canRun(media())) return;
+  pos = seen = t.scrollTop;
+  last = performance.now();
+  frame = requestAnimationFrame(step);
 };
 
 // Media events do not bubble, but a capturing listener on the document gets them (same as the bridge).
 const onTime = (e) => {
   if (!lines || !(e.target instanceof HTMLVideoElement)) return;
-  if (!box || !box.isConnected || box.parentNode !== tab()) refresh();
-  else sync(e.target, e.type === 'seeked');
+  if (!box || !box.isConnected || box.parentNode !== tab()) {
+    refresh();
+    return;
+  }
+  run();
+  sync(e.target, e.type === 'seeked');
 };
-for (const type of ['timeupdate', 'seeked']) document.addEventListener(type, onTime, true);
+for (const type of ['timeupdate', 'seeked', 'play']) document.addEventListener(type, onTime, true);
+window.addEventListener('focus', run);
+document.addEventListener('visibilitychange', run);
 
 feathertune.lyrics = Object.freeze({
   set(data) {

@@ -51,7 +51,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 
 ## Plugins
 
-Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor em `[plugins]` no `config.toml` e na janela de configurações. Nada é carregado de DLL nem baixado.
+Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor em `[plugins]` no `config.toml` e na janela de configurações. Todo plugin vem ligado; o interruptor é o controle. Nada é carregado de DLL nem baixado.
 
 | Plugin | Padrão | Custo |
 |---|---|---|
@@ -63,20 +63,20 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 | `mini_player` | ligado | nada enquanto fechado |
 | `animated_title_bar` | ligado | ainda não medido |
 | `album_color` | ligado | +1 MB privado, dentro do ruído |
-| `synced_lyrics` (LRCLIB) | ligado | ~+5 MB, dentro da variação (uma rodada) |
-| `ambient_mode` | **desligado** | ~+25 MB privados, +15 MB de WS (uma rodada) |
+| `synced_lyrics` (LRCLIB) | ligado | ~+5 MB, dentro da variação (uma rodada); a transição e o scroll ainda não medidos |
+| `ambient_mode` | ligado | ~+25 MB privados, +15 MB de WS (uma rodada) |
 
 **Filtro de rastreadores:** `WebResourceRequested` do WebView2 e o crate `adblock` sem regras cosméticas, então ele só consegue bloquear requisições. Só vê scripts, imagens, XHR/fetch, pings e "outros" (nunca documentos, frames, mídia, fontes ou folhas de estilo), e pula os domínios do player, todo domínio do Google e os domínios de entrega de anúncios do Google antes de consultar a lista, então nem uma lista de anúncios colocada por engano muda algo ali. A lista embutida (`app/filters/privacy.txt`) tem só analytics de terceiros; neste site ela bloqueia um host.
 
 **Last.fm:** autenticação desktop (`auth.getToken` → navegador → `auth.getSession`, consultado em intervalos); a session key fica no Gerenciador de Credenciais do Windows. Os builds de release da CI embutem a API key do mantenedor a partir dos secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` do repositório (`option_env!`); chaves no `config.toml` têm prioridade. O ponto do scrobble conta só o tempo tocado; scrobbles que falham esperam em `lastfm-queue.json` (nova tentativa a cada 5 min, descartados depois de 14 dias).
 
-**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
+**Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. As linhas fazem transição cruzada (a antiga esmaece devagar, a nova entra mais rápido). Enquanto a música toca e a janela está em primeiro plano, um laço de animation frame rola a lista no ritmo: o meio da vista vai da linha atual em direção à próxima conforme a linha passa, desliza suave para um novo lugar depois de um seek, um clique ou uma rolagem manual, e só escreve o scroll quando ele anda um pixel inteiro do dispositivo; nesse tempo ele também troca as linhas e palavras. Fora disso, cada linha nova rola suave até o meio. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
 
 **Launcher:** numa abertura interativa (sem `--hidden`, `--mini-player` ou `--measure`) uma tela de abertura nativa pequena (Direct2D) aparece primeiro e diz o que o app está fazendo. A janela principal é criada escondida, então o site carrega enquanto isso; ela é mostrada quando a checagem de atualização termina e o site desenhou o primeiro conteúdo (uma sonda na página, no máximo 8 s depois do `load`, 20 s no total), nunca numa página em branco. A checagem é um `GET` do último release do repositório na API do GitHub. O instalador de um release mais novo é baixado, o SHA-256 dele é comparado com o que o GitHub lista para o arquivo (o instalador não é assinado, então hash ausente ou diferente interrompe a atualização) e executado em silêncio (`/S /R /UPDATE`: ele fecha o app, substitui e abre de novo). Só uma cópia instalada se atualiza (o exe está na pasta do perfil, onde o instalador o coloca); um build de `target/` nunca. Qualquer falha, inclusive sem internet, só abre a versão atual.
 
 ## Regras de desempenho da UI
 
-Desenhar só quando muda. Toda animação tem um interruptor de plugin e roda num único timer, só enquanto há algo na tela para mover: para quando a janela está escondida, minimizada ou em segundo plano, e quando os efeitos de animação do Windows ou o `prefers-reduced-motion` estão desligados, e retoma de onde parou. Invalidar só a região que muda. Guardar recursos de GPU (pincéis, layouts, bitmaps) entre quadros. Medir um recurso antes de ligá-lo por padrão: ele só fica ligado se custar menos que a variação da medição.
+Desenhar só quando muda. Toda animação tem um interruptor de plugin e roda num único timer, só enquanto há algo na tela para mover: para quando a janela está escondida, minimizada ou em segundo plano, e retoma de onde parou. Os efeitos de animação do Windows não desligam as animações; os interruptores dos plugins sim (a página recebe `--force-prefers-no-reduced-motion`, então o site e os módulos da página também animam). Invalidar só a região que muda. Guardar recursos de GPU (pincéis, layouts, bitmaps) entre quadros. Os recursos vêm ligados; meça cada um e escreva o custo na lista de plugins, para o interruptor ser uma escolha informada.
 
 ## Medições
 
@@ -130,6 +130,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 - O caminho "apagar dados" do desinstalador.
 - A transição de 0,7 s entre capas, o Windows em modo claro, uma falta no LRCLIB, e um recarregamento mantendo tema e letras.
 - Uma base no mesmo dia para saber se a casca nativa custa memória e CPU, e o plugin `animated_title_bar` medido ligado e desligado.
+- A transição e o scroll no ritmo da letra no app rodando (suavidade, rolagem manual e seeks) e o custo de CPU deles.
 
 ## Ideias
 

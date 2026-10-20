@@ -32,10 +32,7 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::WindowsAndMessaging::{
-    SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
-};
-use windows::core::{BOOL, HSTRING, Result, w};
+use windows::core::{HSTRING, Result, w};
 use windows_numerics::Vector2;
 
 pub const ICON_FONT: &str = "Segoe MDL2 Assets";
@@ -182,8 +179,8 @@ pub fn fading() -> bool {
     THEME.lock().unwrap().start.is_some_and(|s| s.elapsed() < FADE)
 }
 
-/// Sets or clears (`None`: the default look) the album theme. The new colors flow in; clearing, or
-/// Windows animation effects off, is instant. The caller repaints the title bar and the mini player.
+/// Sets or clears (`None`: the default look) the album theme. The new colors flow in; clearing is
+/// instant. The caller repaints the title bar and the mini player.
 pub fn set_theme(theme: Option<Theme>) {
     let mut f = THEME.lock().unwrap();
     if f.to == theme {
@@ -191,21 +188,7 @@ pub fn set_theme(theme: Option<Theme>) {
     }
     f.from = f.to;
     f.to = theme;
-    f.start = (theme.is_some() && motion_allowed()).then(Instant::now);
-}
-
-/// Windows' "Animation effects" (Settings > Accessibility > Visual effects).
-pub fn motion_allowed() -> bool {
-    let mut on = BOOL(1);
-    let ok = unsafe {
-        SystemParametersInfoW(
-            SPI_GETCLIENTAREAANIMATION,
-            0,
-            Some(&mut on as *mut BOOL as *mut _),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-    };
-    ok.is_err() || on.as_bool()
+    f.start = theme.is_some().then(Instant::now);
 }
 
 pub fn lerp_color(a: u32, b: u32, t: f32) -> u32 {

@@ -102,7 +102,7 @@ pub const PLUGINS: &[Plugin] = &[
         id: "animated_title_bar",
         name: "Animated title bar",
         description: "The colors of the title bar drift slowly. Pauses while the window is hidden, minimized or \
-                      in the background, and when Windows animation effects are off.",
+                      in the background.",
         cost: "Not measured yet: the 32 px strip repainted 30 times a second while the window is in front; \
                nothing otherwise.",
         default_on: true,
@@ -123,9 +123,11 @@ pub const PLUGINS: &[Plugin] = &[
         id: "synced_lyrics",
         name: "Synced lyrics",
         description: "Shows time-synced lyrics from LRCLIB in the site's Lyrics tab, with the current line \
-                      (or word, when the entry has word times) highlighted. One request per track, cached on disk; when LRCLIB has none, the site's own \
-                      lyrics stay.",
-        cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread.",
+                      (or word, when the entry has word times) highlighted. Lines cross-fade and the list \
+                      scrolls slowly in time with the song while it plays and the window is in front. One \
+                      request per track, cached on disk; when LRCLIB has none, the site's own lyrics stay.",
+        cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread. \
+               The cross-fade and the scroll are not measured yet.",
         default_on: true,
         live: false,
         legacy: None,
@@ -134,9 +136,9 @@ pub const PLUGINS: &[Plugin] = &[
         id: "ambient_mode",
         name: "Ambient mode",
         description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \
-                      window is hidden or minimized and with reduced motion.",
+                      window is hidden or minimized.",
         cost: "About +25 MB private and +15 MB WS against off (one run); the CPU difference is inside the noise of one run.",
-        default_on: false,
+        default_on: true,
         live: false,
         legacy: None,
     },

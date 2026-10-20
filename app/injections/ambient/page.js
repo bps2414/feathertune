@@ -3,7 +3,7 @@
 // is the one in the site's own media session metadata, the URL the player bar already shows, so it is
 // already loaded; nothing else is fetched. Presentation only: it never touches the player or the ads.
 // The drift (style.css) pauses while the window is hidden or minimized (page visibility) or in the
-// background (no focus), and does not run with reduced motion. Off by default (plugin `ambient_mode`).
+// background (no focus). Plugin `ambient_mode`.
 const HOSTS = ['googleusercontent.com', 'ggpht.com', 'ytimg.com'];
 // The halo is this much bigger than the cover it sits behind.
 const HALO_SCALE = 1.7;

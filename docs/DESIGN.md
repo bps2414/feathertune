@@ -51,7 +51,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 
 ## Plugins
 
-Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under `[plugins]` in `config.toml` and in the settings window. Nothing is loaded from a DLL or downloaded.
+Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under `[plugins]` in `config.toml` and in the settings window. Every plugin is on by default; the switch is the control. Nothing is loaded from a DLL or downloaded.
 
 | Plugin | Default | Cost |
 |---|---|---|
@@ -63,20 +63,20 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 | `mini_player` | on | nothing while closed |
 | `animated_title_bar` | on | not measured yet |
 | `album_color` | on | +1 MB private, inside the noise |
-| `synced_lyrics` (LRCLIB) | on | ~+5 MB, inside the spread (one run) |
-| `ambient_mode` | **off** | ~+25 MB private, +15 MB WS (one run) |
+| `synced_lyrics` (LRCLIB) | on | ~+5 MB, inside the spread (one run); the cross-fade and scroll not measured yet |
+| `ambient_mode` | on | ~+25 MB private, +15 MB WS (one run) |
 
 **Tracker filter:** WebView2 `WebResourceRequested` and the `adblock` crate with cosmetic rules dropped, so it can only block requests. It only sees scripts, images, XHR/fetch, pings and "other" (never documents, frames, media, fonts or stylesheets), and skips the player's domains, every Google domain and Google's ad-delivery domains before the list is asked, so even an ad list dropped in by mistake changes nothing there. The bundled list (`app/filters/privacy.txt`) has only third-party analytics; on this site it blocks one host.
 
 **Last.fm:** desktop auth (`auth.getToken` → browser → `auth.getSession`, polled); the session key lives in the Windows Credential Manager. CI release builds embed the maintainer's API key from the repository secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` (`option_env!`); keys in `config.toml` take priority. The scrobble point counts played time only; failed scrobbles wait in `lastfm-queue.json` (retried every 5 min, dropped after 14 days).
 
-**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
+**Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Lines cross-fade (the old one dims slowly, the new one comes in faster). While the song plays and the window is in front, an animation-frame loop scrolls the list in time: the middle of the view moves from the current line toward the next one as the line goes by, eases to a new place after a seek, a click or a manual scroll, and writes the scroll only when it moves by a whole device pixel; it also drives the line and word changes then. Otherwise each new line scrolls smoothly to the middle. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
 
 **Launcher:** on an interactive start (not `--hidden`, `--mini-player` or `--measure`) a small native start screen (Direct2D) opens first and says what the app is doing. The main window is created hidden, so the site loads meanwhile; the window is shown when the update check is done and the site has drawn its first content (a probe on the page, at most 8 s after `load`, 20 s overall), never on a blank page. The update check is one `GET` of the repository's latest release on the GitHub API. A newer release's installer is downloaded, its SHA-256 compared with the one GitHub lists for the asset (the installer is not signed, so a missing or different hash stops the update), and run silently (`/S /R /UPDATE`: it closes the app, replaces it and starts it again). Only an installed copy updates itself (the exe is in the profile folder, where the installer puts it); a build from `target/` never does. Any failure, offline included, just starts the current version.
 
 ## UI performance rules
 
-Draw only on change. Any animation has a plugin switch and runs on one timer only while there is something on screen to move: it stops when the window is hidden, minimized or in the background, and when Windows animation effects or `prefers-reduced-motion` are off, and resumes where it stopped. Invalidate only the region that changes. Keep GPU resources (brushes, layouts, bitmaps) between frames. Measure a feature before it is on by default: it stays on only if it costs less than the measurement spread.
+Draw only on change. Any animation has a plugin switch and runs on one timer only while there is something on screen to move: it stops when the window is hidden, minimized or in the background, and resumes where it stopped. Windows' animation effects do not turn animations off; the plugin switches do (the page gets `--force-prefers-no-reduced-motion`, so the site and the page modules animate too). Invalidate only the region that changes. Keep GPU resources (brushes, layouts, bitmaps) between frames. Features are on by default; measure each one and write its cost in the plugin list, so the switch is an informed choice.
 
 ## Measurements
 
@@ -130,6 +130,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 - The "delete data" uninstall path.
 - The 0.7 s color flow between covers, light-mode Windows, an LRCLIB miss, and a reload keeping the theme and lyrics.
 - A same-day baseline to tell whether the native shell costs memory and CPU, and the `animated_title_bar` plugin measured on and off.
+- The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost.
 
 ## Ideas
 

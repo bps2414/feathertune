@@ -2,7 +2,7 @@
 
 *English: [README.md](README.md)*
 
-> **Primeira versão (0.1).** Um projeto pessoal, ainda novo: coisas podem quebrar ou mudar entre versões, e não há suporte. Use por sua conta e risco.
+> **Estável para uso diário (0.1.x).** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
 
 Uma casca desktop leve para Windows de um player de música na web, escrita em Rust com Tauri 2. Em vez de embutir um Chromium (como os apps Electron), usa o runtime WebView2 que já vem no Windows e cuida das partes de desktop de forma nativa: barra de título própria, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
 
@@ -20,9 +20,10 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
-- Letras sincronizadas do LRCLIB na aba Letra do site; um modo ambiente opcional com a capa desfocada atrás do site.
+- Letras sincronizadas do LRCLIB na aba Letra do site: as linhas (ou palavras) acendem conforme são cantadas, uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
+- Modo ambiente: a capa desfocada e brilhante atrás do site.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
-- Todo recurso opcional é um plugin que você desliga na janela de configurações.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md#ainda-não-conferido).
 
@@ -44,7 +45,7 @@ cargo build --release
 
 ## Configuração
 
-`%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução com a lista de plugins, fora do repositório). A janela de configurações (engrenagem da barra de título, ou menu da bandeja > Settings) edita tudo abaixo e mantém seus comentários; editar à mão também funciona. Tudo é opcional:
+`%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução com a lista de plugins, fora do repositório; um arquivo que já existe mantém os valores escritos nele). A janela de configurações (engrenagem da barra de título, ou menu da bandeja > Settings) edita tudo abaixo e mantém seus comentários; editar à mão também funciona. Tudo é opcional:
 
 ```toml
 [plugins]                    # todo recurso opcional; a janela de configurações mostra descrição e custo
@@ -58,8 +59,8 @@ lastfm = true                # também precisa conectar a conta
 mini_player = true
 animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
 album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
-synced_lyrics = true          # letras sincronizadas do LRCLIB na aba Letra; uma requisição por faixa, com cache
-ambient_mode = false          # capa desfocada e brilhante atrás do site; desligado por padrão
+synced_lyrics = true          # letras sincronizadas do LRCLIB na aba Letra, rolando no ritmo; uma requisição por faixa, com cache
+ambient_mode = true           # capa desfocada e brilhante atrás do site
 
 [shortcuts]                  # globais; "" desliga um
 play_pause = "Ctrl+Alt+Space"

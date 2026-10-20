@@ -2,8 +2,7 @@
 //! (`page.js` and/or `style.css`) and is compiled into the binary.
 //!
 //! Each module except `core` (the player state bridge, always on) belongs to a plugin (plugins.rs)
-//! and follows its switch in `config.toml`. A module that is an unmeasured experiment gets a plugin
-//! with `default_on: false` until a measurement shows a gain.
+//! and follows its switch in `config.toml`. Every plugin is on by default; the switch is the control.
 //! On startup the enabled modules are assembled into a single initialization script that only
 //! runs on the main frame of https://music.youtube.com. CSS enters as a `<style>` element and each
 //! module runs inside its own `try/catch`, so a module that throws does not take the others down.

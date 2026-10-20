@@ -1,7 +1,8 @@
 /* Synced lyrics: the timed lines replace the site's own lyrics while the Lyrics tab is open (the
    attribute is set by lyrics/page.js only then, and only when LRCLIB had lyrics). The site's root font
    is small, so sizes are in px. Lines fade with their distance from the current one (`data-d`, set by
-   the page; lines without it are the farthest), the current one is large and bright. */
+   the page; lines without it are the farthest), the current one is large and bright, and every change
+   between them is a cross-fade. */
 ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   display: none;
 }
@@ -60,12 +61,25 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   color: rgba(255, 255, 255, 0.4);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  #feathertune-lyrics .ft-line,
-  #feathertune-lyrics .ft-line span {
-    transition:
-      color 0.35s ease,
-      text-shadow 0.35s ease,
-      transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
+/* A line leaves slowly (it and its sung words dim together) and the next one comes in a little faster:
+   the transition is the one of the state a line goes to. */
+#feathertune-lyrics .ft-line,
+#feathertune-lyrics .ft-line span {
+  transition:
+    color 0.9s ease,
+    text-shadow 0.9s ease,
+    transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#feathertune-lyrics .ft-line.ft-current {
+  transition:
+    color 0.5s ease,
+    text-shadow 0.6s ease,
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-sung {
+  transition:
+    color 0.25s ease,
+    text-shadow 0.4s ease;
 }

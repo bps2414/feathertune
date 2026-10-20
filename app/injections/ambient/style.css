@@ -3,8 +3,7 @@
    seems to go on forever. The site's page backgrounds turn transparent while it is on, so the glow
    shows through, and a dark scrim keeps the site's white text readable. The slow drift of the
    background steps at about 10 frames a second (the blur is the costly part); it pauses while the window
-   is hidden, minimized or in the background (`ft-still`) and does not run with reduced motion. The halo
-   does not move on its own. */
+   is hidden, minimized or in the background (`ft-still`). The halo does not move on its own. */
 #feathertune-ambient {
   position: fixed;
   inset: 0;
@@ -107,13 +106,19 @@ html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer > * {
 }
 
 /* The site's backdrop picture at the top of a page (home, albums) normally fades into the page color,
-   which is transparent here, so its bottom edge showed as a line across the window: it fades out itself.
-   The picture can end above the bottom of its box, so the picture is faded too, not only the box. */
-html[data-feathertune-ambient] ytmusic-browse-response #background,
+   which is transparent here, so its bottom edge showed as a line across the window: the picture fades
+   out itself. Its `#background` box has no height (the picture overflows it), so the mask goes on the
+   picture. The darkening gradient over it is one half-screen tile that the site repeats down the whole
+   page; it ends in the page color, so the repeats were invisible, but ending in transparent each one
+   started dark again, a line every half screen: it is drawn once. */
 html[data-feathertune-ambient] ytmusic-browse-response #background img,
 html[data-feathertune-ambient] ytmusic-browse-response .background-gradient {
   -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
+}
+
+html[data-feathertune-ambient] ytmusic-browse-response .background-gradient {
+  background-repeat: no-repeat;
 }
 
 /* The search box and its suggestions sit over the page; with the page colors transparent they let the
@@ -139,14 +144,12 @@ html[data-feathertune-ambient] #player-bar-background {
   backdrop-filter: blur(24px) saturate(1.4);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  #feathertune-ambient .ft-bg .ft-layer.ft-show {
-    animation: ft-drift 90s steps(900) infinite alternate;
-  }
+#feathertune-ambient .ft-bg .ft-layer.ft-show {
+  animation: ft-drift 90s steps(900) infinite alternate;
+}
 
-  #feathertune-ambient.ft-still .ft-bg .ft-layer {
-    animation-play-state: paused;
-  }
+#feathertune-ambient.ft-still .ft-bg .ft-layer {
+  animation-play-state: paused;
 }
 
 @keyframes ft-drift {

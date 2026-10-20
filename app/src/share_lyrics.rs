@@ -25,7 +25,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_BRUSH_PROPERTIES, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
     D2D1_BITMAP_PROPERTIES, D2D1_EXTEND_MODE_CLAMP, D2D1_ROUNDED_RECT, ID2D1BitmapBrush, ID2D1LinearGradientBrush,
-    ID2D1RadialGradientBrush,
+    ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
@@ -89,10 +89,13 @@ const MAX_PICKS: usize = 8;
 
 /// The card, in its own DIPs.
 const CARD_W: f32 = 360.0;
-const PAD: f32 = 32.0;
-const ART: f32 = 52.0;
-const LYRIC_SIZE: f32 = 24.0;
-const LINE_GAP: f32 = 10.0;
+const PAD: f32 = 34.0;
+const ART: f32 = 56.0;
+const ART_RADIUS: f32 = 12.0;
+const LYRIC_SIZE: f32 = 26.0;
+const LINE_GAP: f32 = 12.0;
+/// The footer under the lines: a hairline and the album.
+const FOOTER: f32 = 58.0;
 /// The room a skip takes on the card.
 const SKIP: f32 = 26.0;
 /// The picture is the card at this scale: 1080 px wide.
@@ -192,6 +195,7 @@ fn inside(r: D2D_RECT_F, x: f32, y: f32) -> bool {
 struct Snapshot {
     title: String,
     artist: String,
+    album: String,
     artwork: Option<String>,
     /// The lines with text (instrumental gaps left out), with their times.
     rows: Vec<(u32, String)>,
@@ -212,7 +216,6 @@ struct Card {
     skips: Vec<f32>,
     /// Nothing picked: `lines` holds the hint.
     hint: bool,
-    footer: f32,
     height: f32,
 }
 
@@ -225,6 +228,8 @@ struct CardBrushes {
     field: Option<ID2D1BitmapBrush>,
     shade: Option<ID2D1LinearGradientBrush>,
     spot: Option<ID2D1RadialGradientBrush>,
+    /// The inner edge of the card.
+    edge: Option<ID2D1SolidColorBrush>,
     glows: gfx::GlowSets,
 }
 
@@ -239,7 +244,8 @@ struct Formats {
     card_title: IDWriteTextFormat,
     card_artist: IDWriteTextFormat,
     lyric: IDWriteTextFormat,
-    brand: IDWriteTextFormat,
+    quote: IDWriteTextFormat,
+    footer: IDWriteTextFormat,
 }
 
 struct Share {
@@ -286,7 +292,7 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     unsafe {
         lyric.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
         lyric.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
-        lyric.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, LYRIC_SIZE * 1.25, LYRIC_SIZE)?;
+        lyric.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, LYRIC_SIZE * 1.22, LYRIC_SIZE)?;
     }
     let formats = Formats {
         heading: font("Segoe UI Variable Display", 20.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
@@ -296,10 +302,11 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         small_icons: font(ICON_FONT, 10.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         button: font(TEXT_FONT, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         status: font(TEXT_FONT, 12.5, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?,
-        card_title: font("Segoe UI Variable Text", 15.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
+        card_title: font("Segoe UI Variable Text", 16.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
         card_artist: font("Segoe UI Variable Text", 13.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
         lyric,
-        brand: font("Segoe UI Variable Text", 11.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
+        quote: font("Georgia", 96.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?,
+        footer: font("Segoe UI Variable Text", 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
     };
     let share = Box::new(Share {
         app: app.clone(),
@@ -468,6 +475,7 @@ impl CardBrushes {
             self.url.clear();
             self.shade = c.linear(point(0.0, 0.0), point(0.0, 1.0), rgba(0, 0.28), rgba(0, 0.62));
             self.spot = c.radial(rgb(0xffffff));
+            self.edge = c.solid(rgb(0xffffff));
         }
         let url = media.map_or("", |m| m.url.as_str());
         if self.url != url {
@@ -527,6 +535,7 @@ fn draw_card(
                 cover(field, FIELD, FIELD, full);
                 c.fill_with(full, field);
             }
+            glows(b, 0.4);
             // Darker toward the bottom, where most of the text is.
             if let Some(shade) = &b.shade {
                 unsafe { shade.SetEndPoint(point(0.0, h)) };
@@ -556,26 +565,44 @@ fn draw_card(
         }
     }
 
+    // A soft sheen from the top left, and a big quote mark behind the header.
+    if let Some(spot) = &b.spot {
+        unsafe {
+            spot.SetCenter(point(0.0, 0.0));
+            spot.SetRadiusX(CARD_W * 1.1);
+            spot.SetRadiusY(CARD_W * 0.8);
+            spot.SetOpacity(if paper { 0.35 } else { 0.06 });
+        }
+        c.fill_with(full, spot);
+    }
+    c.text(
+        "\u{201d}",
+        &f.quote,
+        rect(CARD_W - 140.0, PAD - 34.0, CARD_W - PAD + 6.0, PAD + 76.0),
+        with_alpha(text, 0.14),
+    );
+
     // Header: the cover on a soft shadow, the title and the artist.
     let art = rect(PAD, PAD, PAD + ART, PAD + ART);
-    for (grow, alpha) in [(8.0, 0.05), (4.0, 0.08), (1.5, 0.12)] {
-        let shadow = rect(art.left - grow, art.top - grow + 3.0, art.right + grow, art.bottom + grow + 3.0);
-        c.pill(shadow, 10.0 + grow, rgba(0, if paper { alpha * 0.6 } else { alpha * 1.6 }));
+    for (grow, alpha) in [(10.0, 0.04), (5.0, 0.07), (2.0, 0.12)] {
+        let shadow = rect(art.left - grow, art.top - grow + 4.0, art.right + grow, art.bottom + grow + 4.0);
+        c.pill(shadow, ART_RADIUS + grow, rgba(0, if paper { alpha * 0.6 } else { alpha * 1.6 }));
     }
     match (&b.art, media) {
         (Some(brush), Some(m)) => unsafe {
             cover(brush, m.art.width, m.art.height, art);
-            let rounded = D2D1_ROUNDED_RECT { rect: art, radiusX: 10.0, radiusY: 10.0 };
+            let rounded = D2D1_ROUNDED_RECT { rect: art, radiusX: ART_RADIUS, radiusY: ART_RADIUS };
             c.target.FillRoundedRectangle(&rounded, brush);
         },
         _ => {
-            c.pill(art, 10.0, with_alpha(text, 0.12));
+            c.pill(art, ART_RADIUS, with_alpha(text, 0.12));
             c.text("\u{e8d6}", &f.icons, art, sub);
         }
     }
-    let x = art.right + 14.0;
-    c.text(&snap.title, &f.card_title, rect(x, PAD + 5.0, CARD_W - PAD, PAD + 27.0), text);
-    c.text(&snap.artist, &f.card_artist, rect(x, PAD + 27.0, CARD_W - PAD, PAD + 47.0), sub);
+    let x = art.right + 16.0;
+    let right = CARD_W - PAD - 40.0;
+    c.text(&snap.title, &f.card_title, rect(x, PAD + 6.0, right, PAD + 30.0), text);
+    c.text(&snap.artist, &f.card_artist, rect(x, PAD + 30.0, right, PAD + 50.0), sub);
 
     // The lines; a skip is three small dots.
     for (layout, y) in &card.lines {
@@ -588,11 +615,22 @@ fn draw_card(
         }
     }
 
-    // Footer: a hairline and the app's name.
-    let y = card.footer;
-    c.fill(rect(PAD, y, CARD_W - PAD, y + 1.0), with_alpha(text, 0.14));
-    c.text("\u{e8d6}", &f.small_icons, rect(PAD, y + 13.0, PAD + 12.0, y + 29.0), sub);
-    c.text("feathertune", &f.brand, rect(PAD + 18.0, y + 13.0, CARD_W - PAD, y + 29.0), sub);
+    // Footer: a hairline, a note and the album (or the artist).
+    let y = h - PAD - FOOTER + 26.0;
+    c.fill(rect(PAD, y, CARD_W - PAD, y + 1.0), with_alpha(text, 0.16));
+    let label = if snap.album.is_empty() { &snap.artist } else { &snap.album };
+    c.text("\u{e8d6}", &f.small_icons, rect(PAD, y + 16.0, PAD + 12.0, y + 32.0), sub);
+    c.text(label, &f.footer, rect(PAD + 20.0, y + 16.0, CARD_W - PAD, y + 32.0), sub);
+
+    // A faint inner edge, like glass.
+    if let Some(edge) = &b.edge {
+        let inset = rect(10.0, 10.0, CARD_W - 10.0, h - 10.0);
+        let rounded = D2D1_ROUNDED_RECT { rect: inset, radiusX: 18.0, radiusY: 18.0 };
+        unsafe {
+            edge.SetColor(&with_alpha(text, if paper { 0.1 } else { 0.12 }));
+            c.target.DrawRoundedRectangle(&rounded, edge, 1.0, None);
+        }
+    }
 }
 
 fn layout_card(rows: &[(u32, String)], picks: &[usize], lyric: &IDWriteTextFormat) -> Result<Card> {
@@ -600,7 +638,7 @@ fn layout_card(rows: &[(u32, String)], picks: &[usize], lyric: &IDWriteTextForma
     let hint = picks.is_empty();
     let texts: Vec<&str> =
         if hint { vec!["Pick lines on the left"] } else { picks.iter().map(|i| rows[*i].1.as_str()).collect() };
-    let mut y = PAD + ART + 30.0;
+    let mut y = PAD + ART + 34.0;
     let (mut lines, mut skips) = (Vec::new(), Vec::new());
     for (n, text) in texts.iter().enumerate() {
         if n > 0 && picks[n] > picks[n - 1] + 1 {
@@ -613,8 +651,7 @@ fn layout_card(rows: &[(u32, String)], picks: &[usize], lyric: &IDWriteTextForma
         lines.push((layout, y));
         y += m.height + LINE_GAP;
     }
-    let footer = y - LINE_GAP + 34.0;
-    Ok(Card { lines, skips, hint, footer, height: footer + 1.0 + 13.0 + 16.0 + PAD - 4.0 })
+    Ok(Card { lines, skips, hint, height: y - LINE_GAP + FOOTER + PAD })
 }
 
 impl Share {
@@ -626,6 +663,7 @@ impl Share {
         if let Some(s) = &state {
             snap.title = s.track.title.clone();
             snap.artist = s.track.artist.clone();
+            snap.album = s.track.album.clone();
             snap.artwork = s.track.artwork.clone();
             if let Some(synced) = synced.filter(|l| l.key == track_key(&s.track)) {
                 snap.rows = synced

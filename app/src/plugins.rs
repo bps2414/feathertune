@@ -92,7 +92,8 @@ pub const PLUGINS: &[Plugin] = &[
         id: "mini_player",
         name: "Mini player",
         description: "A small always-on-top window with the artwork and the controls; opening it hides the main \
-                      window.",
+                      window. Its lyrics button adds the current line of the synced lyrics and the next one (when \
+                      Synced, Floating or Share lyrics is on).",
         cost: "Nothing while closed. Open: about the same as the main window in the tray.",
         default_on: true,
         live: true,
@@ -146,7 +147,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Share lyrics",
         description: "Makes a picture card of the synced lyrics: pick any lines (skipped ones are marked), choose \
                       a look (cover colors, album ink, dark or paper), then copy it or save it as a PNG. Open it \
-                      from the tray or below. Uses LRCLIB like Synced lyrics, even with that one off.",
+                      from the title bar, the tray or below. Uses LRCLIB like Synced lyrics, even with that one off.",
         cost: "Not measured yet: nothing until opened; the window repaints only on input.",
         default_on: true,
         live: false,

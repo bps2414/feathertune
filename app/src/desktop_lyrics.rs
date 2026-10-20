@@ -6,27 +6,22 @@
 //!   kept in `desktop-lyrics.json` in the profile, so it comes back after a restart.
 //! - Locked (the default) it never takes the mouse: clicks go to whatever is below. Unlocked (tray) it
 //!   shows a panel to drag it by and a lock button.
-//! - Fed by the `Player` state and the lines of `lyrics::Lyrics` (looked up when either this plugin or
-//!   `synced_lyrics` is on). The time is `State::position_now()` with the page's 250 ms lead, so it
-//!   changes lines with the site's Lyrics tab.
+//! - The lines, their timing and their drawing are `lyric_view::View` (shared with the mini player).
 //! - Performance rules: it repaints only when the line or the sung word changes, on a one-shot timer
 //!   set to the next change (no frame loop); a change cross-fades on a 60 fps timer that exists only
-//!   for the fade. Hidden (no timers) while paused, between tracks or without synced lyrics. Layouts
-//!   and the brush are kept until their line, word or the render target changes.
+//!   for the fade. Hidden (no timers) while paused, between tracks or without synced lyrics.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Once};
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::error::RecvError;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
-use windows::Win32::Graphics::Direct2D::ID2D1SolidColorBrush;
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_RANGE,
-    DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat, IDWriteTextLayout,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_WORD_WRAPPING_WRAP,
+    IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
@@ -43,9 +38,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Result, w};
 
-use crate::gfx::{self, ICON_FONT, point, rect, rgb, rgba};
-use crate::lyrics::{Line, Lyrics, track_key};
-use crate::player::{Player, State};
+use crate::gfx::{self, ICON_FONT, rect, rgb, rgba};
+use crate::lyric_view::View;
+use crate::player::Player;
 use crate::settings::Live;
 
 /// Window size in DIPs: two lines of the current lyric and one of the next.
@@ -57,21 +52,12 @@ const CURRENT_BOTTOM: f32 = 88.0;
 const NEXT_BOTTOM: f32 = 120.0;
 /// The lock button of the unlocked panel.
 const LOCK: (f32, f32, f32, f32) = (WIDTH - 40.0, 8.0, WIDTH - 8.0, 40.0);
-/// The page lights a line this early (lyrics/page.js), so both change together.
-const LEAD_MS: f64 = 250.0;
-const FADE_MS: f32 = 320.0;
-/// How far a line slides while it fades, in DIPs.
-const SLIDE: f32 = 10.0;
 const FRAME_MS: u32 = 16;
 const LINE_TIMER: usize = 0xfeb0;
 const FRAME_TIMER: usize = 0xfeb1;
 const WM_UPDATE: u32 = WM_APP + 1;
 const WM_LOCK: u32 = WM_APP + 2;
 const FILE: &str = "desktop-lyrics.json";
-/// The outline: the text drawn dark at these offsets under itself, then a soft drop below.
-const OUTLINE: [(f32, f32); 8] =
-    [(-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
-
 /// The open window, 0 when closed. Only the main thread creates and destroys it.
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(true);
@@ -166,40 +152,14 @@ fn post(msg: u32, wparam: WPARAM) {
     }
 }
 
-/// A lyric line on screen: its layout, and for a line timed word by word a second one with the sung
-/// words lit (made with the target's brush, so it is rebuilt with the target).
-struct Text {
-    text: String,
-    plain: IDWriteTextLayout,
-    /// Timed word by word: it starts dim and its words light up.
-    words: bool,
-    /// UTF-16 length of the sung words.
-    sung: u32,
-    lit: Option<(u32, IDWriteTextLayout)>,
-}
-
-/// What the window shows: the track, the current line (-1: before the first) and its sung word.
-struct Shown {
-    key: String,
-    index: isize,
-    word: isize,
-    current: Option<Text>,
-    next: Option<IDWriteTextLayout>,
-}
-
 struct Floating {
     app: AppHandle,
     /// The worker stops when this is set.
     closed: Arc<AtomicBool>,
     bitmap: Option<gfx::Offscreen>,
-    big: IDWriteTextFormat,
+    view: View,
     small: IDWriteTextFormat,
     icons: IDWriteTextFormat,
-    /// White, for the lit words; with the target generation it was made on.
-    white: Option<(u32, ID2D1SolidColorBrush)>,
-    shown: Option<Shown>,
-    /// The content that is fading out, and since when.
-    old: Option<(Shown, Instant)>,
     visible: bool,
     fading: bool,
 }
@@ -226,22 +186,22 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         DWRITE_TEXT_ALIGNMENT_CENTER,
     )?;
     unsafe { big.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)? };
+    let small =
+        gfx::text_format("Segoe UI Variable Text", 17.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
     let closed = Arc::new(AtomicBool::new(false));
     let floating = Box::new(Floating {
         app: app.clone(),
         closed: closed.clone(),
         bitmap: None,
-        big,
-        small: gfx::text_format(
-            "Segoe UI Variable Text",
-            17.0,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_TEXT_ALIGNMENT_CENTER,
-        )?,
+        view: View::new(
+            big,
+            small.clone(),
+            WIDTH - 2.0 * PAD,
+            CURRENT_BOTTOM - CURRENT_TOP,
+            NEXT_BOTTOM - CURRENT_BOTTOM,
+        ),
+        small,
         icons: gfx::text_format(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
-        white: None,
-        shown: None,
-        old: None,
         visible: false,
         fading: false,
     });
@@ -304,114 +264,27 @@ unsafe fn place(app: &AppHandle, hwnd: HWND) {
     let _ = unsafe { SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
 }
 
-/// The current line (-1 before the first) and, in a line timed by word, the sung word (-1: none yet).
-fn position(lines: &[Line], ms: f64) -> (isize, isize) {
-    let index = lines.partition_point(|l| f64::from(l.ms) <= ms) as isize - 1;
-    let word = usize::try_from(index)
-        .ok()
-        .map_or(-1, |i| lines[i].words.partition_point(|(at, _)| f64::from(*at) <= ms) as isize - 1);
-    (index, word)
-}
-
-/// When the line or the word changes next, in ms of track time.
-fn next_change(lines: &[Line], index: isize, ms: f64) -> Option<f64> {
-    let next_line = lines.get((index + 1) as usize).map(|l| f64::from(l.ms));
-    let next_word = usize::try_from(index)
-        .ok()
-        .and_then(|i| lines[i].words.iter().map(|(at, _)| f64::from(*at)).find(|at| *at > ms));
-    [next_line, next_word].into_iter().flatten().reduce(f64::min)
-}
-
-/// UTF-16 length of the words up to `word`, within the line's text.
-fn sung_len(line: &Line, word: isize) -> u32 {
-    let n: usize = line.words.iter().take((word + 1).max(0) as usize).map(|(_, t)| t.encode_utf16().count()).sum();
-    n.min(line.text.encode_utf16().count()) as u32
-}
-
 impl Floating {
-    /// What should be on screen now, from the player and the lyrics.
-    fn wanted(&self) -> Option<(State, Arc<crate::lyrics::Synced>)> {
-        let state = self.app.state::<Player>().current()?;
-        let synced = self.app.state::<Lyrics>().current()?;
-        (synced.key == track_key(&state.track)).then_some((state, synced))
-    }
-
-    fn text(&self, line: &Line, word: isize) -> Option<Text> {
-        if line.text.is_empty() {
-            return None;
-        }
-        let height = CURRENT_BOTTOM - CURRENT_TOP;
-        let plain = gfx::text_layout(&line.text, &self.big, WIDTH - 2.0 * PAD, height).ok()?;
-        let words = !line.words.is_empty();
-        Some(Text {
-            text: line.text.clone(),
-            plain,
-            words,
-            sung: if words { sung_len(line, word) } else { 0 },
-            lit: None,
-        })
-    }
-
-    fn next_layout(&self, line: Option<&Line>) -> Option<IDWriteTextLayout> {
-        let line = line.filter(|l| !l.text.is_empty())?;
-        gfx::text_layout(&line.text, &self.small, WIDTH - 2.0 * PAD, NEXT_BOTTOM - CURRENT_BOTTOM).ok()
-    }
-
     /// Brings the content up to date, shows or hides the window, draws it and sets the timers.
     fn update(&mut self, hwnd: HWND) {
-        let wanted = self.wanted();
-        let playing = wanted.as_ref().is_some_and(|(s, _)| !s.paused);
-        let mut next_ms = None;
-        if let Some((state, synced)) = wanted.as_ref().filter(|_| playing) {
-            let lines = &synced.lines;
-            let ms = state.position_now() * 1000.0 + LEAD_MS;
-            let (index, word) = position(lines, ms);
-            next_ms = next_change(lines, index, ms).map(|at| at - ms);
-            let same_line = self.shown.as_ref().is_some_and(|s| s.key == synced.key && s.index == index);
-            if !same_line {
-                let line = usize::try_from(index).ok().map(|i| &lines[i]);
-                let shown = Shown {
-                    key: synced.key.clone(),
-                    index,
-                    word,
-                    current: line.and_then(|l| self.text(l, word)),
-                    next: self.next_layout(lines.get((index + 1) as usize)),
-                };
-                // Only a line change within the track cross-fades; a new track just appears.
-                let old = self.shown.replace(shown).filter(|s| s.key == synced.key);
-                self.old = old.map(|s| (s, Instant::now()));
-            } else if let Some(shown) = self.shown.as_mut().filter(|s| s.word != word) {
-                shown.word = word;
-                if let (Some(text), Ok(i)) = (shown.current.as_mut(), usize::try_from(index)) {
-                    text.sung = sung_len(&lines[i], word);
-                    text.lit = None;
-                }
-            }
-        } else {
-            self.shown = None;
-            self.old = None;
-        }
-        let has_text = self.shown.as_ref().is_some_and(|s| s.current.is_some() || s.next.is_some());
-        let visible = !is_locked() || (playing && has_text);
+        let update = self.view.update(&self.app, false);
+        let visible = !is_locked() || (update.playing && self.view.has_text());
         if visible != self.visible {
             self.visible = visible;
             unsafe {
                 let _ = ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
             }
         }
-        if self.old.as_ref().is_some_and(|(_, at)| at.elapsed().as_secs_f32() * 1000.0 >= FADE_MS) {
-            self.old = None;
-        }
+        let fading = visible && self.view.fading();
         if visible {
             self.draw(hwnd);
         }
         unsafe {
             let _ = KillTimer(Some(hwnd), LINE_TIMER);
-            if let Some(ms) = next_ms.filter(|_| visible) {
+            if let Some(ms) = update.next_ms.filter(|_| visible) {
                 SetTimer(Some(hwnd), LINE_TIMER, ms.clamp(10.0, 60_000.0) as u32, None);
             }
         }
-        let fading = visible && self.old.is_some();
         if fading != self.fading {
             self.fading = fading;
             unsafe {
@@ -436,36 +309,22 @@ impl Floating {
                 }
             }
         }
-        let t = self.old.as_ref().map_or(1.0, |(_, at)| (at.elapsed().as_secs_f32() * 1000.0 / FADE_MS).min(1.0));
-        let t = 1.0 - (1.0 - t) * (1.0 - t);
         let locked = is_locked();
-        let (big, small, icons) = (self.big.clone(), self.small.clone(), self.icons.clone());
-        let white = &mut self.white;
-        let (shown, old) = (self.shown.as_mut(), self.old.as_mut().map(|(s, _)| s));
+        let (small, icons, view) = (&self.small, &self.icons, &mut self.view);
         let Some(bitmap) = self.bitmap.as_mut() else { return };
         let result = bitmap.draw(scale, |c| {
             if !locked {
                 c.pill(rect(0.0, 0.0, WIDTH, HEIGHT), 16.0, rgba(0x101018, 0.6));
                 let (l, t, r, b) = LOCK;
                 c.pill(rect(l, t, r, b), 16.0, rgba(0xffffff, 0.14));
-                c.text("\u{e72e}", &icons, rect(l, t, r, b), rgb(0xffffff));
+                c.text("\u{e72e}", icons, rect(l, t, r, b), rgb(0xffffff));
             }
-            if white.as_ref().is_none_or(|(g, _)| *g != c.generation) {
-                *white = c.solid(rgb(0xffffff)).map(|b| (c.generation, b));
-            }
-            let brush = white.as_ref().map(|(_, b)| b);
-            if let Some(old) = old {
-                paint(c, old, &big, brush, 1.0 - t, -SLIDE * t);
-            }
-            match shown {
-                Some(s) => paint(c, s, &big, brush, t, SLIDE * (1.0 - t)),
+            if view.is_empty() {
                 // Unlocked with nothing to show: say what it is, so it can be placed.
-                None => c.text(
-                    "Floating lyrics: drag to place, then lock",
-                    &small,
-                    rect(PAD, CURRENT_TOP, WIDTH - PAD, CURRENT_BOTTOM),
-                    rgba(0xffffff, 0.8),
-                ),
+                let r = rect(PAD, CURRENT_TOP, WIDTH - PAD, CURRENT_BOTTOM);
+                c.text("Floating lyrics: drag to place, then lock", small, r, rgba(0xffffff, 0.8));
+            } else {
+                view.draw(c, PAD, CURRENT_TOP, rgb(0xffffff), true);
             }
         });
         if let Err(e) = result {
@@ -493,60 +352,6 @@ impl Floating {
             );
         }
     }
-}
-
-/// One content (current and next line) at `alpha`, moved down by `dy`.
-fn paint(
-    c: &gfx::Canvas,
-    s: &mut Shown,
-    big: &IDWriteTextFormat,
-    white: Option<&ID2D1SolidColorBrush>,
-    alpha: f32,
-    dy: f32,
-) {
-    if alpha <= 0.0 {
-        return;
-    }
-    if let Some(text) = s.current.as_mut() {
-        let origin = point(PAD, CURRENT_TOP + dy);
-        outlined(c, &text.plain, origin, alpha);
-        if !text.words {
-            c.layout(&text.plain, origin, rgba(0xffffff, alpha));
-        } else {
-            // Dim, then the sung words over it (the rest of the lit copy is drawn transparent).
-            c.layout(&text.plain, origin, rgba(0xffffff, 0.5 * alpha));
-            if let Some(white) = white.filter(|_| text.sung > 0) {
-                if text.lit.as_ref().is_none_or(|(g, _)| *g != c.generation) {
-                    text.lit = lit(text, big, white).map(|l| (c.generation, l));
-                }
-                if let Some((_, layout)) = &text.lit {
-                    unsafe { white.SetOpacity(alpha) };
-                    c.layout(layout, origin, rgba(0, 0.0));
-                }
-            }
-        }
-    }
-    if let Some(next) = &s.next {
-        let origin = point(PAD, CURRENT_BOTTOM + dy);
-        outlined(c, next, origin, alpha * 0.8);
-        c.layout(next, origin, rgba(0xffffff, 0.6 * alpha));
-    }
-}
-
-/// The dark outline and drop under a layout, so it reads on any background.
-fn outlined(c: &gfx::Canvas, layout: &IDWriteTextLayout, origin: windows_numerics::Vector2, alpha: f32) {
-    for (dx, dy) in OUTLINE {
-        c.layout(layout, point(origin.X + dx, origin.Y + dy), rgba(0x000000, 0.5 * alpha));
-    }
-    c.layout(layout, point(origin.X, origin.Y + 2.5), rgba(0x000000, 0.35 * alpha));
-}
-
-/// A copy of the line's layout with the sung words in `white`.
-fn lit(text: &Text, big: &IDWriteTextFormat, white: &ID2D1SolidColorBrush) -> Option<IDWriteTextLayout> {
-    let (width, height) = unsafe { (text.plain.GetMaxWidth(), text.plain.GetMaxHeight()) };
-    let layout = gfx::text_layout(&text.text, big, width, height).ok()?;
-    unsafe { layout.SetDrawingEffect(white, DWRITE_TEXT_RANGE { startPosition: 0, length: text.sung }).ok()? };
-    Some(layout)
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

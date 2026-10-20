@@ -22,7 +22,8 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
 - Letras sincronizadas do LRCLIB na aba Letra do site: as linhas (ou palavras) acendem conforme são cantadas, uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
-- Compartilhar letra como cartão: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
+- Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
+- O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 - Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
 - Um menu da bandeja no visual do app, com a faixa e os controles.
 - Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.

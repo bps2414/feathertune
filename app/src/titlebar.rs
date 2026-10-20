@@ -6,8 +6,9 @@
 //!
 //! - WM_NCHITTEST: the top resize border comes from tao; on the strip the caption buttons answer
 //!   HTMINBUTTON/HTMAXBUTTON/HTCLOSE (HTMAXBUTTON is what shows the Windows 11 snap layouts), the
-//!   mini player and settings buttons are client area and the rest is HTCAPTION (drag, Aero Snap, double click maximizes,
-//!   right click opens the system menu).
+//!   share lyrics, mini player and settings buttons are client area and the rest is HTCAPTION (drag, Aero Snap,
+//!   double click maximizes, right click opens the system menu). The share lyrics button is there only while the
+//!   track has synced lyrics (`set_lyrics`, from lyrics.rs) and the `share_lyrics` plugin is on.
 //! - The caption buttons are clicked on the non-client mouse messages, which are not passed on:
 //!   DefWindowProc would draw the classic buttons over the strip.
 //! - Sizes are DIPs scaled by the window's DPI; colors follow the system light/dark setting and, with
@@ -25,7 +26,7 @@
 //!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
 //!   track or the width change. A theme or shape flow also runs only while the window is on screen.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -77,6 +78,11 @@ const FRAME_MS: u32 = 33;
 const MORPH: Duration = Duration::from_millis(700);
 /// The `animated_title_bar` plugin switch.
 static ANIMATED: AtomicBool = AtomicBool::new(false);
+/// The `share_lyrics` plugin was on at startup, and the current track has synced lyrics.
+static SHARE_ON: AtomicBool = AtomicBool::new(false);
+static LYRICS_READY: AtomicBool = AtomicBool::new(false);
+/// The main window, for `set_lyrics`.
+static WINDOW: AtomicIsize = AtomicIsize::new(0);
 const NAME_FONT: &str = "Segoe UI Variable Display";
 const TRACK_FONT: &str = "Segoe UI Variable Text";
 
@@ -191,7 +197,7 @@ impl TrackLine {
         width: f32,
         dim: &ID2D1SolidColorBrush,
     ) -> Option<Self> {
-        let (left, right) = (NAME_LEFT + 150.0, button_left(Button::MiniPlayer, width) - 24.0);
+        let (left, right) = (NAME_LEFT + 150.0, first_button_left(width) - 24.0);
         if title.is_empty() || right - left < 80.0 {
             return None;
         }
@@ -213,6 +219,7 @@ impl TrackLine {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Button {
+    Share,
     MiniPlayer,
     Settings,
     Minimize,
@@ -256,6 +263,8 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
     let hwnd = window.hwnd()?.0 as isize;
     let window = window.clone();
     ANIMATED.store(app.state::<Live>().plugin("animated_title_bar"), Ordering::Relaxed);
+    SHARE_ON.store(app.state::<Live>().plugin("share_lyrics"), Ordering::Relaxed);
+    WINDOW.store(hwnd, Ordering::Relaxed);
     let player = app.state::<Player>();
     let now = Arc::new(Mutex::new(Now::of(player.current().as_ref())));
     let seed = now.lock().unwrap().seed;
@@ -339,6 +348,18 @@ pub fn set_animated(app: &AppHandle, on: bool) {
     }
 }
 
+/// Shows or hides the share lyrics button: whether the current track has synced lyrics. Any thread.
+pub fn set_lyrics(ready: bool) {
+    if LYRICS_READY.swap(ready, Ordering::Relaxed) != ready {
+        let hwnd = WINDOW.load(Ordering::Relaxed);
+        if hwnd != 0 {
+            unsafe {
+                let _ = PostMessageW(Some(HWND(hwnd as _)), WM_ANIMATE, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+}
+
 /// Repaints the strip and starts the flow to a new theme (after `gfx::set_theme`). Any thread.
 pub fn refresh(app: &AppHandle) {
     set_animated(app, ANIMATED.load(Ordering::Relaxed));
@@ -373,7 +394,10 @@ impl TitleBar {
         if !(0.0..HEIGHT).contains(&y) {
             return None;
         }
-        BUTTONS.into_iter().find(|b| (button_left(*b, width)..button_left(*b, width) + button_width(*b)).contains(&x))
+        BUTTONS
+            .into_iter()
+            .filter(|b| shown(*b))
+            .find(|b| (button_left(*b, width)..button_left(*b, width) + button_width(*b)).contains(&x))
     }
 
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Button>, nonclient: bool) {
@@ -406,6 +430,7 @@ impl TitleBar {
             let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(c as usize), LPARAM(0));
         };
         match button {
+            Button::Share => crate::share_lyrics::open(self.window.app_handle()),
             Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
             Button::Settings => crate::settings_window::open(self.window.app_handle()),
             Button::Minimize => command(SC_MINIMIZE),
@@ -533,7 +558,7 @@ impl TitleBar {
             c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
             let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
             c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
-            for button in BUTTONS {
+            for button in BUTTONS.into_iter().filter(|b| shown(*b)) {
                 let left = button_left(button, width);
                 let right = left + button_width(button);
                 let r = rect(left, 0.0, right, HEIGHT);
@@ -550,6 +575,7 @@ impl TitleBar {
                     }
                 }
                 let icon = match button {
+                    Button::Share => "\u{e72d}",
                     Button::MiniPlayer => "\u{e8a7}",
                     Button::Settings => "\u{e713}",
                     Button::Minimize => "\u{e921}",
@@ -560,7 +586,7 @@ impl TitleBar {
                 c.text(icon, if ours(button) { big_icons } else { icons }, r, glyph);
             }
             c.text("feathertune", name, rect(NAME_LEFT, 0.0, NAME_LEFT + 140.0, HEIGHT), text);
-            let key = (title, artist, width.to_bits(), *brushes_id);
+            let key = (title, artist, first_button_left(width).to_bits(), *brushes_id);
             if line.as_ref().is_none_or(|l| l.key != key) {
                 *line = TrackLine::new(track, &key.0, &key.1, width, &b.dim).map(|l| TrackLine { key, ..l });
             }
@@ -572,11 +598,21 @@ impl TitleBar {
     }
 }
 
-const BUTTONS: [Button; 5] = [Button::MiniPlayer, Button::Settings, Button::Minimize, Button::Maximize, Button::Close];
+const BUTTONS: [Button; 6] =
+    [Button::Share, Button::MiniPlayer, Button::Settings, Button::Minimize, Button::Maximize, Button::Close];
 
 /// The buttons that are client area (ours), not caption buttons.
 fn ours(b: Button) -> bool {
-    matches!(b, Button::MiniPlayer | Button::Settings)
+    matches!(b, Button::Share | Button::MiniPlayer | Button::Settings)
+}
+
+fn shown(b: Button) -> bool {
+    b != Button::Share || (SHARE_ON.load(Ordering::Relaxed) && LYRICS_READY.load(Ordering::Relaxed))
+}
+
+/// Where the leftmost button on the strip starts.
+fn first_button_left(width: f32) -> f32 {
+    BUTTONS.into_iter().filter(|b| shown(*b)).map(|b| button_left(b, width)).fold(width, f32::min)
 }
 
 fn button_width(b: Button) -> f32 {
@@ -585,6 +621,7 @@ fn button_width(b: Button) -> f32 {
 
 fn button_left(b: Button, width: f32) -> f32 {
     match b {
+        Button::Share => width - 3.0 * BUTTON - GAP - 3.0 * SMALL,
         Button::MiniPlayer => width - 3.0 * BUTTON - GAP - 2.0 * SMALL,
         Button::Settings => width - 3.0 * BUTTON - GAP - SMALL,
         Button::Minimize => width - 3.0 * BUTTON,

@@ -70,9 +70,11 @@ impl Lyrics {
     }
 
     fn set(&self, synced: Option<Synced>) {
+        crate::titlebar::set_lyrics(synced.as_ref().is_some_and(|s| !s.lines.is_empty()));
         *self.0.lock().unwrap() = synced.map(Arc::new);
         crate::desktop_lyrics::refresh();
         crate::share_lyrics::refresh();
+        crate::miniplayer::refresh();
     }
 }
 

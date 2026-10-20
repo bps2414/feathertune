@@ -6,7 +6,10 @@
 //! - Opened by a right click on the tray icon, at the cursor, inside the work area of its monitor;
 //!   sized for that monitor's DPI. Its items and their states are read when it opens.
 //! - It closes when it loses the focus, on Esc, on a click outside or after an item runs. If Windows
-//!   does not give it the foreground, it captures the mouse so a click outside still closes it.
+//!   does not give it the foreground, it captures the mouse so a click outside still closes it; as
+//!   the capture is dropped silently when another window is activated (a click on another app, the
+//!   Start menu, Alt+Tab), it also closes when it loses the capture, when the app is deactivated and,
+//!   on a 250 ms timer that exists only while it is open that way, when the foreground window changes.
 //! - Keyboard: Up/Down move between the items, Enter or Space runs one.
 //! - It exists only while open, and repaints only on hover and focus changes (no timer). Screen
 //!   readers do not see it as a menu, unlike the Windows one: turn the plugin off for that.
@@ -32,10 +35,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetClientRect, GetCursorPos, GetWindowLongPtrW, IDC_ARROW, LoadCursorW, RegisterClassExW, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE,
-    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
+    BringWindowToTop, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, IDC_ARROW, KillTimer,
+    LoadCursorW, RegisterClassExW, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_ACTIVATEAPP, WM_CAPTURECHANGED,
+    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_TIMER,
     WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
@@ -54,6 +58,10 @@ const SEPARATOR: f32 = 9.0;
 const CONTROL: f32 = 34.0;
 /// The static glows behind the header: center, radii and strength (like the mini player's).
 const GLOWS: [(f32, f32, f32, f32, f32); 2] = [(WIDTH, 0.0, 200.0, 110.0, 0.5), (40.0, 0.0, 160.0, 80.0, 0.35)];
+
+/// Watches the foreground window while the menu holds the mouse capture instead of the foreground.
+const WATCH_TIMER: usize = 0xfeb3;
+const WATCH_MS: u32 = 250;
 
 /// The open menu, 0 when closed. Main thread only.
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
@@ -92,6 +100,8 @@ struct Menu {
     tracking: bool,
     /// The mouse is captured (no foreground): a click outside closes it.
     captured: bool,
+    /// The foreground window when it opened that way: it closes when another one takes over.
+    foreground: isize,
     /// DestroyWindow was called (it sends WM_ACTIVATE on the way).
     closing: bool,
 }
@@ -345,6 +355,7 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         focus: None,
         tracking: false,
         captured: false,
+        foreground: 0,
         closing: false,
     });
     let total = height(&menu.entries);
@@ -394,9 +405,12 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
             size_of_val(&corner) as u32,
         );
         let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = BringWindowToTop(hwnd);
         if !SetForegroundWindow(hwnd).as_bool() {
             SetCapture(hwnd);
             (*menu).captured = true;
+            (*menu).foreground = GetForegroundWindow().0 as isize;
+            SetTimer(Some(hwnd), WATCH_TIMER, WATCH_MS, None);
         }
     }
     Ok(())
@@ -425,6 +439,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         match msg {
             WM_ACTIVATE if (wparam.0 & 0xffff) as u32 == WA_INACTIVE => {
                 m.close(hwnd);
+                return LRESULT(0);
+            }
+            WM_ACTIVATEAPP if wparam.0 == 0 => {
+                m.close(hwnd);
+                return LRESULT(0);
+            }
+            WM_CAPTURECHANGED if m.captured => {
+                m.close(hwnd);
+                return LRESULT(0);
+            }
+            WM_TIMER if wparam.0 == WATCH_TIMER => {
+                let now = GetForegroundWindow().0 as isize;
+                if now != m.foreground && now != hwnd.0 as isize {
+                    m.close(hwnd);
+                }
                 return LRESULT(0);
             }
             WM_MOUSEMOVE => {
@@ -478,6 +507,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             WM_DESTROY => {
                 m.closing = true;
+                let _ = KillTimer(Some(hwnd), WATCH_TIMER);
                 if m.captured {
                     let _ = ReleaseCapture();
                 }

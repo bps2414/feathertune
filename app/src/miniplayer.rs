@@ -12,8 +12,12 @@
 //!   colors (gfx::Theme); a change of theme flows in over `gfx::fading()`, on a timer that exists only
 //!   during the flow. Without a theme the background stays flat.
 //! - The worker also wakes once per second while playing to move the progress bar.
+//! - The lyrics button grows it by a band with the current line of the synced lyrics and the next one
+//!   (`lyric_view::View`, like the floating lyrics, in the window's colors). Whether it is open is
+//!   kept in `mini-player.json` in the profile. A one-shot timer is set to the next line or word and a
+//!   frame timer runs only for the short cross-fade; while paused the line stays, with no timer.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
@@ -25,7 +29,7 @@ use windows::Win32::Graphics::Direct2D::Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PRE
 use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapBrush};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_LEADING, IDWriteTextFormat,
+    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -47,12 +51,18 @@ use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
 use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
+use crate::lyric_view::View;
 use crate::player::{Event, Player, State};
 use crate::settings::Live;
 
-/// Window size in DIPs.
+/// Window size in DIPs, without and with the lyrics band.
 const WIDTH: f32 = 340.0;
 const HEIGHT: f32 = 96.0;
+const LYRICS_BAND: f32 = 84.0;
+/// The lyrics band: current line (two lines of text) and the next one.
+const LYRIC_TOP: f32 = HEIGHT + 4.0;
+const LYRIC_CURRENT: f32 = 50.0;
+const LYRIC_NEXT: f32 = 24.0;
 const ART: f32 = 80.0;
 const ART_RADIUS: f32 = 8.0;
 /// The static glows of a theme: center, radii (DIPs) and strength, kept soft so the white text stays
@@ -61,6 +71,9 @@ const GLOWS: [(f32, f32, f32, f32, f32); 3] =
     [(290.0, 0.0, 190.0, 110.0, 0.55), (130.0, HEIGHT, 170.0, 70.0, 0.45), (WIDTH, HEIGHT, 140.0, 60.0, 0.4)];
 const WM_UPDATE: u32 = WM_APP + 1;
 const TIMER: usize = 0xfea9;
+/// One-shot, at the next lyric line or word.
+const LYRIC_TIMER: usize = 0xfeb2;
+const FILE: &str = "mini-player.json";
 /// 30 fps, like the title bar; only while a theme flow runs.
 const FRAME_MS: u32 = 33;
 use crate::titlebar::WM_MOUSELEAVE;
@@ -69,6 +82,22 @@ use crate::titlebar::WM_MOUSELEAVE;
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 /// Where it was last closed, to reopen there.
 static LAST_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+/// The lyrics band is open (saved in `FILE`).
+static LYRICS: AtomicBool = AtomicBool::new(false);
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Saved {
+    lyrics: bool,
+}
+
+fn saved_path(app: &AppHandle) -> std::path::PathBuf {
+    app.state::<Live>().profile.join(FILE)
+}
+
+/// The window height in DIPs.
+fn height() -> f32 {
+    if LYRICS.load(Ordering::Relaxed) { HEIGHT + LYRICS_BAND } else { HEIGHT }
+}
 
 pub fn is_open() -> bool {
     WINDOW.load(Ordering::Relaxed) != 0
@@ -128,11 +157,13 @@ enum Button {
     Previous,
     PlayPause,
     Next,
+    Lyrics,
     Back,
     Close,
 }
 
-const BUTTONS: [Button; 5] = [Button::Previous, Button::PlayPause, Button::Next, Button::Back, Button::Close];
+const BUTTONS: [Button; 6] =
+    [Button::Previous, Button::PlayPause, Button::Next, Button::Lyrics, Button::Back, Button::Close];
 
 struct Mini {
     app: AppHandle,
@@ -142,6 +173,9 @@ struct Mini {
     artist: IDWriteTextFormat,
     icons: IDWriteTextFormat,
     small_icons: IDWriteTextFormat,
+    lyrics: View,
+    /// The lyrics' one-shot timer is set.
+    lyric_timer: bool,
     /// The artwork as a bitmap brush of the current target (so it can fill a rounded square): URL and
     /// target generation it was made for.
     bitmap: Option<(String, u32, ID2D1BitmapBrush)>,
@@ -160,6 +194,7 @@ fn button_rect(b: Button) -> windows::Win32::Graphics::Direct2D::Common::D2D_REC
         Button::Previous => rect(x, 52.0, x + 36.0, 84.0),
         Button::PlayPause => rect(x + 38.0, 52.0, x + 70.0, 84.0),
         Button::Next => rect(x + 72.0, 52.0, x + 108.0, 84.0),
+        Button::Lyrics => rect(WIDTH - 88.0, 4.0, WIDTH - 60.0, 32.0),
         Button::Back => rect(WIDTH - 60.0, 4.0, WIDTH - 32.0, 32.0),
         Button::Close => rect(WIDTH - 32.0, 4.0, WIDTH - 4.0, 32.0),
     }
@@ -190,6 +225,12 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     });
     let data = Arc::new(Mutex::new(Data { state: app.state::<Player>().current(), ..Default::default() }));
     let font = |family: &str, size, weight, align| gfx::text_format(family, size, weight, align);
+    let saved: Saved =
+        std::fs::read(saved_path(app)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    LYRICS.store(saved.lyrics, Ordering::Relaxed);
+    let current = font("Segoe UI Variable Display", 16.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+    unsafe { current.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)? };
+    let next = font("Segoe UI Variable Text", 12.5, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
     let mini = Box::new(Mini {
         app: app.clone(),
         data: data.clone(),
@@ -198,6 +239,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         artist: font(TEXT_FONT, 12.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
         icons: font(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         small_icons: font(ICON_FONT, 10.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+        lyrics: View::new(current, next, WIDTH - 24.0, LYRIC_CURRENT, LYRIC_NEXT),
+        lyric_timer: false,
         bitmap: None,
         glows: gfx::GlowSets::default(),
         ticking: false,
@@ -238,13 +281,15 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     let rx = app.state::<Player>().subscribe();
     let hwnd = hwnd.0 as isize;
     std::thread::spawn(move || worker(hwnd, data, rx));
+    // The lyrics band, if open, without waiting for a player event.
+    refresh();
     Ok(())
 }
 
 /// Where it was last closed, or the bottom right of the main window's monitor.
 unsafe fn place(app: &AppHandle, hwnd: HWND) {
     let scale = gfx::scale(hwnd);
-    let (w, h) = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
+    let (w, h) = ((WIDTH * scale).round() as i32, (height() * scale).round() as i32);
     let (x, y) = match *LAST_POSITION.lock().unwrap() {
         Some(p) => p,
         None => {
@@ -316,9 +361,10 @@ impl Mini {
         }
     }
 
-    /// Runs the frame timer only while the colors flow to a new theme.
+    /// Runs the frame timer only while the colors flow to a new theme or a lyric line cross-fades.
     fn schedule(&mut self, hwnd: HWND) {
-        let run = gfx::fading();
+        let lyrics_fading = LYRICS.load(Ordering::Relaxed) && self.lyrics.fading();
+        let run = gfx::fading() || lyrics_fading;
         if run == self.ticking {
             return;
         }
@@ -330,6 +376,43 @@ impl Mini {
                 let _ = KillTimer(Some(hwnd), TIMER);
             }
         }
+    }
+
+    /// Brings the lyrics band up to date and sets its one-shot timer.
+    fn update_lyrics(&mut self, hwnd: HWND) {
+        let next = if LYRICS.load(Ordering::Relaxed) { self.lyrics.update(&self.app, true).next_ms } else { None };
+        unsafe {
+            if self.lyric_timer {
+                let _ = KillTimer(Some(hwnd), LYRIC_TIMER);
+            }
+            self.lyric_timer = next.is_some();
+            if let Some(ms) = next {
+                SetTimer(Some(hwnd), LYRIC_TIMER, ms.clamp(10.0, 60_000.0) as u32, None);
+            }
+        }
+        self.schedule(hwnd);
+    }
+
+    /// Opens or closes the lyrics band; the window grows or shrinks upward (its bottom stays).
+    fn toggle_lyrics(&mut self, hwnd: HWND) {
+        let on = !LYRICS.load(Ordering::Relaxed);
+        LYRICS.store(on, Ordering::Relaxed);
+        if let Ok(bytes) = serde_json::to_vec(&Saved { lyrics: on })
+            && let Err(e) = std::fs::write(saved_path(&self.app), bytes)
+        {
+            eprintln!("mini player: not saved: {e}");
+        }
+        let scale = gfx::scale(hwnd);
+        let mut r = RECT::default();
+        unsafe {
+            if GetWindowRect(hwnd, &mut r).is_ok() {
+                let h = (height() * scale).round() as i32;
+                let _ =
+                    SetWindowPos(hwnd, None, r.left, r.bottom - h, r.right - r.left, h, SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
+        self.update_lyrics(hwnd);
+        invalidate(hwnd);
     }
 
     fn paint(&mut self, hwnd: HWND) {
@@ -352,9 +435,12 @@ impl Mini {
         let (hover, pressed) = (self.hover, self.pressed);
         let bitmap = &mut self.bitmap;
         let (title, artist, icons, small) = (&self.title, &self.artist, &self.icons, &self.small_icons);
+        let lyrics_open = LYRICS.load(Ordering::Relaxed);
+        let full_height = height();
+        let lyrics = &mut self.lyrics;
         let art = data.art.as_ref().filter(|a| Some(&a.url) == state.and_then(|s| s.track.artwork.as_ref()));
         self.surface.paint(hwnd, client, |c| {
-            c.fill(rect(0.0, 0.0, WIDTH, HEIGHT), pal.background);
+            c.fill(rect(0.0, 0.0, WIDTH, full_height), pal.background);
             let themes: Vec<gfx::Theme> = layers.iter().map(|(t, _)| *t).collect();
             sets.prepare(c, &themes);
             for (theme, share) in &layers {
@@ -366,7 +452,7 @@ impl Mini {
                         brush.SetRadiusY(ry);
                         brush.SetOpacity(alpha * share);
                     }
-                    c.fill_with(rect(0.0, 0.0, WIDTH, HEIGHT), brush);
+                    c.fill_with(rect(0.0, 0.0, WIDTH, full_height), brush);
                 }
             }
             let art_rect = rect(8.0, 8.0, 8.0 + ART, 8.0 + ART);
@@ -435,7 +521,16 @@ impl Mini {
             for b in BUTTONS {
                 let r = button_rect(b);
                 let mut glyph_color = pal.text;
-                if b == Button::PlayPause {
+                if b == Button::Lyrics && lyrics_open {
+                    let alpha = if pressed == Some(b) {
+                        0.1
+                    } else if hover == Some(b) {
+                        0.2
+                    } else {
+                        0.14
+                    };
+                    c.pill(r, 8.0, gfx::with_alpha(pal.text, alpha));
+                } else if b == Button::PlayPause {
                     let alpha = if pressed == Some(b) {
                         0.75
                     } else if hover == Some(b) {
@@ -454,6 +549,7 @@ impl Mini {
                     Button::PlayPause if state.is_some_and(|s| !s.paused) => ("\u{e769}", icons),
                     Button::PlayPause => ("\u{e768}", icons),
                     Button::Next => ("\u{e893}", icons),
+                    Button::Lyrics => ("\u{e90b}", small),
                     Button::Back => ("\u{e73f}", small),
                     Button::Close => ("\u{e8bb}", small),
                 };
@@ -469,6 +565,16 @@ impl Mini {
             if progress > 0.0 {
                 let end = (left + (right - left) * progress).max(left + 3.0);
                 c.pill(rect(left, 88.0, end, 91.0), 1.5, gfx::with_alpha(pal.text, 0.85));
+            }
+
+            if lyrics_open {
+                c.fill(rect(12.0, HEIGHT, WIDTH - 12.0, HEIGHT + 1.0), gfx::with_alpha(pal.text, 0.1));
+                if lyrics.is_empty() {
+                    let r = rect(12.0, LYRIC_TOP, WIDTH - 12.0, LYRIC_TOP + LYRIC_CURRENT);
+                    c.text("No synced lyrics for this track", artist, r, gfx::with_alpha(pal.text, 0.55));
+                } else {
+                    lyrics.draw(c, 12.0, LYRIC_TOP, pal.text, false);
+                }
             }
         });
     }
@@ -532,6 +638,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     Some(Button::Previous) => crate::player(&m.app, "previous"),
                     Some(Button::PlayPause) => crate::player(&m.app, "playPause"),
                     Some(Button::Next) => crate::player(&m.app, "next"),
+                    Some(Button::Lyrics) => m.toggle_lyrics(hwnd),
                     Some(Button::Back) => crate::show_main(&m.app.clone()),
                     Some(Button::Close) => {
                         let _ = DestroyWindow(hwnd);
@@ -545,8 +652,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                m.schedule(hwnd);
+                m.update_lyrics(hwnd);
                 invalidate(hwnd);
+            }
+            WM_TIMER if wparam.0 == LYRIC_TIMER => {
+                let _ = KillTimer(Some(hwnd), LYRIC_TIMER);
+                m.lyric_timer = false;
+                m.update_lyrics(hwnd);
+                invalidate(hwnd);
+                return LRESULT(0);
             }
             WM_TIMER if wparam.0 == TIMER => {
                 invalidate(hwnd);
@@ -568,6 +682,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), TIMER);
+                let _ = KillTimer(Some(hwnd), LYRIC_TIMER);
                 let mut r = RECT::default();
                 if GetWindowRect(hwnd, &mut r).is_ok() {
                     *LAST_POSITION.lock().unwrap() = Some((r.left, r.top));

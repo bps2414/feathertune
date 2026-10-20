@@ -17,6 +17,7 @@ mod discord;
 mod gfx;
 mod injections;
 mod lastfm;
+mod lyric_view;
 mod lyrics;
 mod miniplayer;
 mod notify;

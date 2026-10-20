@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "feathertune",
+  "version": "0.1.0",
+  "identifier": "dev.feathertune.desktop",
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}

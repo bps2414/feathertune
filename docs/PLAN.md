@@ -308,6 +308,9 @@ Builds on the Phase 5 shell (title bar, settings window, plugins, WIC artwork de
 | Candidate | Type |
 |---|---|
 | More looks (fonts, compact mode, large artwork) | CSS |
+| Settings window in the title bar look ("ink in water"): liquid strip at the top with its own title bar, glass sections, redesigned switches and fields | HTML/CSS (+ Rust, if the bar is native) |
+| Mini player in the same look: the current track's glows behind it, glass pill buttons, a liquid progress bar | Rust (Direct2D) |
+| Title bar and tray menus in the same theme (today they are the native Windows menu) | Rust (Win32) |
 | Media buttons on the taskbar thumbnail | Rust (Win32) |
 | Audio equalizer and compressor (Web Audio on the `<video>`) | JS; first decide whether it breaks the rule of not touching what the player plays |
 

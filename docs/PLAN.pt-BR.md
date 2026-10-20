@@ -308,6 +308,9 @@ Usa a casca da Fase 5 (barra de título, janela de configurações, plugins, dec
 | Candidato | Tipo |
 |---|---|
 | Mais visuais (fontes, modo compacto, capa grande) | CSS |
+| Janela de configurações no visual da barra ("tinta na água"): faixa líquida no topo com barra de título própria, seções em vidro, interruptores e campos redesenhados | HTML/CSS (+ Rust, se a barra for nativa) |
+| Mini player no mesmo visual: brilhos da faixa atual no fundo, botões em pílula de vidro, barra de progresso líquida | Rust (Direct2D) |
+| Menus do botão de menu e da bandeja no mesmo tema (hoje são o menu nativo do Windows) | Rust (Win32) |
 | Botões de mídia na miniatura da barra de tarefas | Rust (Win32) |
 | Equalizador e compressor de áudio (Web Audio no `<video>`) | JS; antes, decidir se quebra a regra de não mexer no que o player toca |
 

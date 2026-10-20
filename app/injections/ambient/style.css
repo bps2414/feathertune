@@ -71,7 +71,7 @@ html[data-feathertune-ambient] {
 }
 
 html[data-feathertune-ambient] #nav-bar-background {
-  background-image: linear-gradient(to bottom, var(--feathertune-ink, #030303), transparent);
+  background-image: linear-gradient(to bottom, var(--feathertune-ink, #030303), transparent 50%);
   background-repeat: no-repeat;
   border-bottom-color: transparent;
 }
@@ -83,6 +83,16 @@ html[data-feathertune-ambient] #nav-bar-divider {
 html[data-feathertune-ambient] #guide-wrapper,
 html[data-feathertune-ambient] #mini-guide-background {
   border-right-color: transparent;
+}
+
+/* With no edge on the sidebar, its scrollbar would stand as an invisible wall at the right: it goes to the
+   left side of the list (the entries keep their direction). */
+html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer {
+  direction: rtl;
+}
+
+html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer > * {
+  direction: ltr;
 }
 
 html[data-feathertune-ambient] ytmusic-player-bar {

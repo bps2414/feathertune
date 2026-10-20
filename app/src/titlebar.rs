@@ -61,8 +61,8 @@ use crate::settings::Live;
 pub const HEIGHT: f32 = 32.0;
 const BUTTON: f32 = 46.0;
 /// With an album theme the bottom of the strip fades into its ink over this many DIPs, in steps.
-const SETTLE: f32 = 12.0;
-const SETTLE_STEPS: usize = 6;
+const SETTLE: f32 = 5.0;
+const SETTLE_STEPS: usize = 5;
 const SUBCLASS_ID: usize = 0xfea7;
 /// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
 pub const WM_MOUSELEAVE: u32 = 0x02a3;

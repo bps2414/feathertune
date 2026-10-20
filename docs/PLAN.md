@@ -61,6 +61,8 @@ Prototype (`spike/`: bare wry 0.57 + WebView2 155, no optimization, signed out, 
 | 1 | — | 1 h in the tray | pending | | | | |
 | 2 | 2026-10-19 | Playing, window open (3 runs, median) | 9 | **3.6%** (3.1–3.9%) | **408 MB** | 711 MB | 2.0 s |
 | 2 | 2026-10-19 | Playing, bridge sending 1×/s (discarded; 3 runs, median) | 9 | 6.2% (3.9–6.5%) | 412 MB | 720 MB | 2.0 s |
+| 3 | pending | Playing, window open, all integrations on (3 runs, median) | | | | | |
+| 3 | pending | Playing, in the tray, all integrations on (3 runs, median) | | | | | |
 
 - Phase 1/2 numbers were taken with the old release profile (thin LTO, 1 codegen unit). The exe process is ~4 MB private either way, so the profile does not move these numbers; the final Phase 4 table uses `--profile dist`.
 - In the tray the `<video>` kept advancing and the session stayed signed in.
@@ -120,12 +122,12 @@ Result: playing 408 MB private and 2.8% CPU, tray 167 MB WS, startup to the play
 - **Flyout name:** a bare exe shows as "Unknown app". The fix is a process AppUserModelID (`dev.feathertune.desktop`) plus a Start menu shortcut carrying the same ID. The app creates `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` if missing; in Phase 4 the installer must create it with the same AUMID and the uninstaller must remove it.
 - Media keys with the app in the tray: play/pause ≤ 16 ms, next ~0.5 s, previous ~0.2 s until the new state reaches Rust. CPU playing: median 3.6%, 408 MB private.
 
-### Phase 3: Integrations (Sonnet 5.5 high)
+### Phase 3: Integrations (Sonnet 5.5 high) — code written 2026-10-20, maintainer checks and measurement pending
 
 Consumes only the Phase 2 state. Does not touch the bridge, the WebView or the flags.
 
 - Official plugins: `single-instance` (a second launch shows the existing window), `autostart` (tray menu option, off by default), `window-state`.
-- Track-change notification (`tauri-plugin-notification`), only while the window is hidden.
+- Track-change notification, only while the window is hidden.
 - Global shortcuts (`tauri-plugin-global-shortcut`): play/pause, next, previous. Keys in the profile's `config.toml`.
 - Discord Rich Presence (`discord-rich-presence` crate): title, artist and time; cleared on pause; silent failure and reconnect if Discord is closed.
 - Last.fm:
@@ -134,6 +136,16 @@ Consumes only the Phase 2 state. Does not touch the bridge, the WebView or the f
   - `track.updateNowPlaying` on track start; `track.scrobble` when the track is longer than 30 s and half of it or 4 min has played, whichever comes first;
   - simple offline queue for failed scrobbles.
 - **Done when:** each item works with the app in the tray, the maintainer confirms Discord and the scrobble on a real Last.fm profile, and CPU playing stays ≤ 4%.
+
+Implementation notes (`app/src/{settings,shortcuts,notify,discord,lastfm}.rs`; each integration is one thread blocked on `Player::subscribe()`, with no polling):
+
+- All settings come from the profile's `config.toml` (`[shortcuts]`, `[notifications]`, `[discord]`, `[lastfm]`; see the README). The Discord application id and the Last.fm key and secret are the maintainer's own and live only there, outside Git. An empty value turns the integration off.
+- **Notification without the plugin:** `tauri-plugin-notification` injects a script into every webview that replaces `window.Notification` in the page, which breaks "the page is untrusted and we do not touch it". The toast is shown from Rust with `tauri-winrt-notification` (the crate the plugin uses), under the app's AppUserModelID.
+- **Autostart** passes `--hidden`, so a login start goes straight to the tray (window created invisible, memory Low). **Window state** saves size, position and maximized only (never visibility) and is disabled with `--measure`, so measurements keep the fixed 1280×800.
+- **Shortcut defaults:** `Ctrl+Alt+Space`, `Ctrl+Alt+Right`, `Ctrl+Alt+Left`; `""` turns one off; a combination another app owns is logged and skipped.
+- **Discord:** "Listening" activity (title, artist, artwork, time bar from the extrapolated position); sent on track change and resume, and again only if the position drifted > 2 s (a seek); cleared on pause. If Discord is closed the connection is retried at the next player event.
+- **Last.fm:** the tray item connects or disconnects. Sign-in opens the browser and polls `auth.getSession` every 5 s for 5 min; the session key goes to the Credential Manager (service `feathertune`). The scrobble point counts played time only (pauses excluded) and a timer wakes the thread at that moment. Replaying the same track (position goes back after the scrobble) counts as a new listen. Failed scrobbles wait in `lastfm-queue.json` in the profile (batches of 10, retried every 5 min, at startup and at the next scrobble; entries older than 14 days are dropped because Last.fm ignores them). A rejected session key (error 9) drops the session and asks for a new sign-in.
+- **Cloud session limits:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` and `cargo fmt --check` pass from Linux; the app was not run. Pending for the maintainer, on Windows: each item in the tray, the Discord check, a real scrobble, and `measure.ps1` (3 runs, median) for the two rows above. When all of it passes, replace the heading note with "Phase 3: done on <date>" and fill the table.
 
 ### Phase 4: Slimming and delivery (Sonnet 5.5 high)
 

@@ -20,7 +20,7 @@ Measured so far (process tree, playing): ~410 MB private memory and ~3% of one C
 |---|---|
 | 1. Shell: window, tray, memory trimming | done |
 | 2. Player state bridge, media keys, flyout | done |
-| 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | planned |
+| 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | code written, being tested |
 | 4. Slimming and installer | planned |
 
 ## Build
@@ -34,6 +34,29 @@ cargo build --release
 ```
 
 `cargo check` is the fast loop while editing; `cargo build --profile dist` is the slow, fully optimized build meant for releases.
+
+## Configuration
+
+`%LOCALAPPDATA%\feathertune\config.toml` (created on first run with only the injection switches, outside the repository). Add the sections you need; everything is optional:
+
+```toml
+[shortcuts]                  # global; "" turns one off
+play_pause = "Ctrl+Alt+Space"
+next = "Ctrl+Alt+Right"
+previous = "Ctrl+Alt+Left"
+
+[notifications]
+track_change = true          # toast on track change, only while the window is in the tray
+
+[discord]
+client_id = ""               # your own Discord application id; Rich Presence is off while empty
+
+[lastfm]
+api_key = ""                 # your own Last.fm API account; off while either is empty
+api_secret = ""
+```
+
+"Start with Windows" and "Connect Last.fm" are in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file.
 
 ## Disclaimer
 

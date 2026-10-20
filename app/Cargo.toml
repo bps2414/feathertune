@@ -10,9 +10,20 @@ tauri-build = { version = "2.6", features = [] }
 [dependencies]
 tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-global-shortcut = "2"
+discord-rich-presence = "1"
+keyring = "4"
+md5 = "0.8"
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+# Toasts. tauri-plugin-notification would inject a script into the page that replaces
+# window.Notification, so the toast is shown from Rust directly (the plugin uses this crate too).
+tauri-winrt-notification = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "time"] }
 toml = "1"
 webview2-com = "0.39"
 windows-core = "0.62"

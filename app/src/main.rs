@@ -1,13 +1,19 @@
 // feathertune: the official web music player in a lean WebView2 window, with a tray icon.
-// Usage: feathertune [--measure] [start url on the player domain]
+// Usage: feathertune [--measure] [--hidden] [start url on the player domain]
+// --hidden starts in the tray (the autostart entry passes it).
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
 // login state, so measure.ps1 can record them. The page can call a single Tauri command,
 // `player_state` (see player.rs and capabilities/), which only reports data.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod discord;
 mod injections;
+mod lastfm;
+mod notify;
 mod player;
+mod settings;
+mod shortcuts;
 mod smtc;
 
 use std::path::PathBuf;
@@ -15,10 +21,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_window_state::StateFlags;
 
 const START_URL: &str = "https://music.youtube.com";
 // wry's defaults (dropped once we pass our own args), Chromium's media keys and flyout entry (ours
@@ -35,10 +43,13 @@ const STATUS_PROBE: &str = "(() => { const v = document.querySelector('video'); 
 fn main() {
     let start = Instant::now();
     let mut measure = false;
+    let mut hidden = false;
     let mut url: Url = START_URL.parse().unwrap();
     for arg in std::env::args().skip(1) {
         if arg == "--measure" {
             measure = true;
+        } else if arg == "--hidden" {
+            hidden = true;
         } else if let Ok(u) = arg.parse::<Url>()
             && u.scheme() == "https"
             && u.host_str() == Some("music.youtube.com")
@@ -49,9 +60,29 @@ fn main() {
     smtc::set_app_id();
     let profile = profile_dir();
     let config = injections::Config::load(&profile);
+    let settings = settings::Settings::load(&profile);
+
+    // A measurement must not read or overwrite the saved window state: it needs the fixed 1280x800.
+    let denylist: &[&str] = if measure { &["main"] } else { &[] };
+    let window_state = tauri_plugin_window_state::Builder::new()
+        .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+        .with_denylist(denylist)
+        .build();
 
     tauri::Builder::default()
+        // Must be the first plugin: a second launch brings the first window back and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second autostart launch (`--hidden`) must not pop the window up.
+            if !args.iter().any(|a| a == "--hidden")
+                && let Some(w) = app.get_webview_window("main")
+            {
+                set_hidden(&w, false);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(window_state)
+        .plugin(tauri_plugin_autostart::Builder::new().arg("--hidden").build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(player::Player::new())
         .invoke_handler(tauri::generate_handler![player::player_state])
         .setup(move |app| {
@@ -59,7 +90,8 @@ fn main() {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("feathertune")
                 .inner_size(1280.0, 800.0)
-                .data_directory(profile)
+                .data_directory(profile.clone())
+                .visible(!hidden)
                 .additional_browser_args(BROWSER_ARGS)
                 .initialization_script(injections::script(&config))
                 .on_navigation({
@@ -71,7 +103,16 @@ fn main() {
                     tauri::webview::NewWindowResponse::Deny
                 })
                 .build()?;
-            tray(app.handle())?;
+            if hidden {
+                set_hidden(&window, true);
+            }
+            shortcuts::register(app.handle(), &settings.shortcuts);
+            if settings.notifications.track_change {
+                notify::start(app.handle());
+            }
+            discord::start(app.handle(), &settings.discord.client_id);
+            let lastfm = lastfm::start(app.handle(), &settings.lastfm, &profile);
+            tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {
                 eprintln!("media flyout unavailable: {e}");
             }
@@ -129,13 +170,39 @@ fn open_external(app: &AppHandle, url: &Url) -> bool {
     false
 }
 
-fn tray(app: &AppHandle) -> tauri::Result<()> {
+fn tray(app: &AppHandle, lastfm: Option<lastfm::LastFm>) -> tauri::Result<()> {
+    let autostart = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        "Start with Windows",
+        true,
+        app.autolaunch().is_enabled().unwrap_or(false),
+        None::<&str>,
+    )?;
+    // Without the keys in config.toml the item only says where they go.
+    let lastfm_item = MenuItem::with_id(
+        app,
+        "lastfm",
+        lastfm_label(lastfm.as_ref().map(lastfm::LastFm::connected)),
+        lastfm.is_some(),
+        None::<&str>,
+    )?;
+    if let Some(lastfm) = &lastfm {
+        let item = lastfm_item.clone();
+        lastfm.on_change(move |connected| {
+            let _ = item.set_text(lastfm_label(Some(connected)));
+        });
+    }
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?,
             &MenuItem::with_id(app, "play_pause", "Play / pause", true, None::<&str>)?,
             &MenuItem::with_id(app, "next", "Next", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &autostart,
+            &lastfm_item,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
         ],
     )?;
@@ -144,10 +211,24 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("feathertune")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "toggle" => toggle(app),
             "play_pause" => player(app, "playPause"),
             "next" => player(app, "next"),
+            "autostart" => {
+                // The item has already flipped itself when the event arrives.
+                let on = autostart.is_checked().unwrap_or(false);
+                let manager = app.autolaunch();
+                if let Err(e) = if on { manager.enable() } else { manager.disable() } {
+                    eprintln!("autostart change failed: {e}");
+                    let _ = autostart.set_checked(!on);
+                }
+            }
+            "lastfm" => {
+                if let Some(lastfm) = &lastfm {
+                    if lastfm.connected() { lastfm.disconnect() } else { lastfm.connect(app) }
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -158,6 +239,15 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+/// `None`: the keys are not configured.
+fn lastfm_label(connected: Option<bool>) -> &'static str {
+    match connected {
+        None => "Last.fm: add the keys to config.toml",
+        Some(true) => "Disconnect Last.fm",
+        Some(false) => "Connect Last.fm",
+    }
 }
 
 fn toggle(app: &AppHandle) {

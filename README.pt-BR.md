@@ -20,7 +20,7 @@ Medido até agora (árvore de processos, tocando): ~410 MB de memória privada e
 |---|---|
 | 1. Casca: janela, bandeja, redução de memória | concluída |
 | 2. Ponte de estado do player, teclas de mídia, flyout | concluída |
-| 3. Integrações (instância única, autostart, atalhos, Discord, Last.fm) | planejada |
+| 3. Integrações (instância única, autostart, atalhos, Discord, Last.fm) | código escrito, em teste |
 | 4. Dieta e instalador | planejada |
 
 ## Compilar
@@ -34,6 +34,29 @@ cargo build --release
 ```
 
 `cargo check` é o ciclo rápido enquanto edita; `cargo build --profile dist` é o build lento e totalmente otimizado, para releases.
+
+## Configuração
+
+`%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução só com os interruptores de injeção, fora do repositório). Acrescente as seções de que precisar; tudo é opcional:
+
+```toml
+[shortcuts]                  # globais; "" desliga um
+play_pause = "Ctrl+Alt+Space"
+next = "Ctrl+Alt+Right"
+previous = "Ctrl+Alt+Left"
+
+[notifications]
+track_change = true          # aviso na troca de faixa, só com a janela na bandeja
+
+[discord]
+client_id = ""               # o id do seu próprio aplicativo do Discord; sem ele o Rich Presence fica desligado
+
+[lastfm]
+api_key = ""                 # sua própria conta de API do Last.fm; desligado se um dos dois estiver vazio
+api_secret = ""
+```
+
+Os itens "Start with Windows" e "Connect Last.fm" ficam no menu da bandeja. O login do Last.fm acontece no navegador; a session key fica no Windows Credential Manager, nunca em arquivo.
 
 ## Aviso
 

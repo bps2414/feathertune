@@ -61,6 +61,8 @@ Protótipo (`spike/`: wry 0.57 + WebView2 155 sem otimização, deslogado, janel
 | 1 | — | 1 h na bandeja | pendente | | | | |
 | 2 | 19/10/2026 | Tocando, janela aberta (3 rodadas, mediana) | 9 | **3,6%** (3,1–3,9%) | **408 MB** | 711 MB | 2,0 s |
 | 2 | 19/10/2026 | Tocando, ponte mandando 1×/s (descartado; 3 rodadas, mediana) | 9 | 6,2% (3,9–6,5%) | 412 MB | 720 MB | 2,0 s |
+| 3 | pendente | Tocando, janela aberta, todas as integrações ligadas (3 rodadas, mediana) | | | | | |
+| 3 | pendente | Tocando, na bandeja, todas as integrações ligadas (3 rodadas, mediana) | | | | | |
 
 - As Fases 1 e 2 foram medidas com o perfil release antigo (LTO thin, 1 codegen unit). O processo do exe ocupa ~4 MB privados de qualquer jeito, então o perfil não mexe nesses números; a tabela final da Fase 4 usa `--profile dist`.
 - Na bandeja o `<video>` seguiu avançando e a sessão continuou logada.
@@ -120,12 +122,12 @@ Resultado: tocando 408 MB privados e 2,8% de CPU, bandeja 167 MB de WS, abertura
 - **Nome no flyout:** um exe solto aparece como "Unknown app". O que resolve é o processo ter um AppUserModelID (`dev.feathertune.desktop`) e existir um atalho no Menu Iniciar com o mesmo ID. O app cria `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` se não existir; na Fase 4 o instalador deve criá-lo com o mesmo AUMID e o desinstalador deve removê-lo.
 - Teclas de mídia com o app na bandeja: tocar/pausar ≤ 16 ms, próxima ~0,5 s, anterior ~0,2 s até o novo estado chegar no Rust. CPU tocando: mediana de 3,6%, 408 MB privados.
 
-### Fase 3: Integrações (Sonnet 5.5 high)
+### Fase 3: Integrações (Sonnet 5.5 high) — código escrito em 20/10/2026, conferências do mantenedor e medição pendentes
 
 Consome só o estado da Fase 2. Não mexe na ponte, no WebView nem nas flags.
 
 - Plugins oficiais: `single-instance` (abrir de novo mostra a janela existente), `autostart` (opção no menu da bandeja, desligada por padrão), `window-state`.
-- Notificação de troca de faixa (`tauri-plugin-notification`), só com a janela escondida.
+- Notificação de troca de faixa, só com a janela escondida.
 - Atalhos globais (`tauri-plugin-global-shortcut`): tocar/pausar, próxima, anterior. As teclas ficam no `config.toml` do perfil.
 - Discord Rich Presence (crate `discord-rich-presence`): título, artista e tempo; limpa ao pausar; falha em silêncio e reconecta se o Discord estiver fechado.
 - Last.fm:
@@ -134,6 +136,16 @@ Consome só o estado da Fase 2. Não mexe na ponte, no WebView nem nas flags.
   - `track.updateNowPlaying` ao começar a faixa; `track.scrobble` quando a faixa tem mais de 30 s e já tocou metade dela ou 4 min, o que vier primeiro;
   - fila offline simples para scrobbles que falharem.
 - **Pronto quando:** cada item funciona com o app na bandeja, o mantenedor confirma o Discord e o scrobble num perfil real do Last.fm, e a CPU tocando continua ≤ 4%.
+
+Notas da implementação (`app/src/{settings,shortcuts,notify,discord,lastfm}.rs`; cada integração é uma thread parada em `Player::subscribe()`, sem polling):
+
+- Tudo vem do `config.toml` do perfil (`[shortcuts]`, `[notifications]`, `[discord]`, `[lastfm]`; veja o README). O id do aplicativo do Discord e a chave e o secret do Last.fm são do próprio mantenedor e ficam só ali, fora do Git. Valor vazio desliga a integração.
+- **Notificação sem o plugin:** o `tauri-plugin-notification` injeta em todo webview um script que troca o `window.Notification` da página, o que quebra "a página não é confiável e não mexemos nela". O toast sai do Rust com `tauri-winrt-notification` (a crate que o plugin usa), sob o AppUserModelID do app.
+- **Autostart** passa `--hidden`, então a partida no login vai direto para a bandeja (janela criada invisível, memória Low). **Window-state** salva só tamanho, posição e maximizado (nunca a visibilidade) e fica desligado com `--measure`, para a medição manter o 1280×800 fixo.
+- **Atalhos padrão:** `Ctrl+Alt+Space`, `Ctrl+Alt+Right`, `Ctrl+Alt+Left`; `""` desliga um; combinação que outro app já usa é registrada no log e ignorada.
+- **Discord:** atividade "Listening" (título, artista, capa, barra de tempo a partir da posição extrapolada); enviada na troca de faixa e ao retomar, e de novo só se a posição derivar > 2 s (um seek); limpa ao pausar. Com o Discord fechado, a conexão é tentada de novo no próximo evento do player.
+- **Last.fm:** o item da bandeja conecta ou desconecta. O login abre o navegador e consulta `auth.getSession` a cada 5 s por 5 min; a session key vai para o Credential Manager (serviço `feathertune`). O ponto do scrobble conta só tempo tocado (pausas fora) e um timer acorda a thread nesse momento. Tocar a mesma faixa de novo (a posição volta depois do scrobble) conta como nova audição. Scrobbles que falham esperam em `lastfm-queue.json` no perfil (lotes de 10, nova tentativa a cada 5 min, na partida e no próximo scrobble; itens com mais de 14 dias são descartados porque o Last.fm os ignora). Session key rejeitada (erro 9) descarta a sessão e pede novo login.
+- **Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` passam no Linux; o app não foi executado. Pendente para o mantenedor, no Windows: cada item na bandeja, a conferência do Discord, um scrobble de verdade e o `measure.ps1` (3 rodadas, mediana) das duas linhas acima. Quando tudo passar, troque a nota do título por "Fase 3: concluída em <data>" e preencha a tabela.
 
 ### Fase 4: Dieta e entrega (Sonnet 5.5 high)
 

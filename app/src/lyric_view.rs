@@ -4,7 +4,9 @@
 //! - Fed by the `Player` state and the lines of `lyrics::Lyrics`. The time is `State::position_now()`
 //!   with the page's 250 ms lead, so it changes lines with the site's Lyrics tab.
 //! - `update` says when the line or the sung word changes next, for the caller's one-shot timer; a
-//!   line change cross-fades for `FADE_MS`, during which the caller runs a frame timer (`fading`).
+//!   line change rolls for `FADE_MS`, during which the caller runs a frame timer (`fading`): the next
+//!   line rises into the current one's place and grows into it, the old line fades out upward first,
+//!   and the new next line fades in from below, so no two lines sit on top of each other.
 //! - Layouts and the lit brush are kept until their line, word or the render target changes.
 
 use std::sync::Arc;
@@ -13,7 +15,9 @@ use std::time::Instant;
 use tauri::{AppHandle, Manager};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Direct2D::ID2D1SolidColorBrush;
-use windows::Win32::Graphics::DirectWrite::{DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout};
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
+};
 use windows_numerics::Vector2;
 
 use crate::gfx::{self, point, rgba, with_alpha};
@@ -22,9 +26,9 @@ use crate::player::{Player, State};
 
 /// The page lights a line this early (lyrics/page.js), so both change together.
 const LEAD_MS: f64 = 250.0;
-const FADE_MS: f32 = 320.0;
-/// How far a line slides while it fades, in DIPs.
-const SLIDE: f32 = 10.0;
+const FADE_MS: f32 = 420.0;
+/// How far the old line rises and the new next line comes up while they fade, in DIPs.
+const SLIDE: f32 = 12.0;
 /// The outline: the text drawn dark at these offsets under itself, then a soft drop below.
 const OUTLINE: [(f32, f32); 8] =
     [(-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
@@ -34,6 +38,8 @@ const OUTLINE: [(f32, f32); 8] =
 struct Text {
     text: String,
     plain: IDWriteTextLayout,
+    /// Where the text starts within its box (the format may center it vertically).
+    offset: f32,
     /// Timed word by word: it starts dim and its words light up.
     words: bool,
     /// UTF-16 length of the sung words.
@@ -120,9 +126,12 @@ impl View {
         }
         let plain = gfx::text_layout(&line.text, &self.current_format, self.width, self.current_height).ok()?;
         let words = !line.words.is_empty();
+        let mut m = DWRITE_TEXT_METRICS::default();
+        let _ = unsafe { plain.GetMetrics(&mut m) };
         Some(Text {
             text: line.text.clone(),
             plain,
+            offset: m.top,
             words,
             sung: if words { sung_len(line, word) } else { 0 },
             lit: None,
@@ -157,7 +166,7 @@ impl View {
                     current: line.and_then(|l| self.text(l, word)),
                     next: self.next_layout(lines.get((index + 1) as usize)),
                 };
-                // Only a line change within the track cross-fades; a new track just appears.
+                // Only a line change within the track rolls; a new track just appears.
                 let old = self.shown.replace(shown).filter(|s| s.key == synced.key);
                 self.old = old.map(|s| (s, Instant::now()));
             } else if let Some(shown) = self.shown.as_mut().filter(|s| s.word != word) {
@@ -183,7 +192,7 @@ impl View {
         self.shown.as_ref().is_some_and(|s| s.current.is_some() || s.next.is_some())
     }
 
-    /// Whether a cross-fade is still running (the caller's frame timer runs only then).
+    /// Whether a roll is still running (the caller's frame timer runs only then).
     pub fn fading(&mut self) -> bool {
         if self.old.as_ref().is_some_and(|(_, at)| at.elapsed().as_secs_f32() * 1000.0 >= FADE_MS) {
             self.old = None;
@@ -195,7 +204,8 @@ impl View {
     /// dark outline so it reads on any background.
     pub fn draw(&mut self, c: &gfx::Canvas, x: f32, top: f32, color: D2D1_COLOR_F, outline: bool) {
         let t = self.old.as_ref().map_or(1.0, |(_, at)| (at.elapsed().as_secs_f32() * 1000.0 / FADE_MS).min(1.0));
-        let t = 1.0 - (1.0 - t) * (1.0 - t);
+        // Ease out (cubic): quick at first, settling softly.
+        let t = 1.0 - (1.0 - t).powi(3);
         if self.lit.as_ref().is_none_or(|(g, _)| *g != c.generation) {
             self.lit = c.solid(color).map(|b| (c.generation, b));
         }
@@ -208,12 +218,17 @@ impl View {
             top,
             next_top: top + self.current_height,
         };
-        if let Some((old, _)) = self.old.as_mut() {
-            paint(c, old, &style, 1.0 - t, -SLIDE * t);
-        }
-        if let Some(shown) = self.shown.as_mut() {
-            paint(c, shown, &style, t, SLIDE * (1.0 - t));
-        }
+        let Some(shown) = self.shown.as_mut() else { return };
+        let Some((old, _)) = self.old.as_mut() else {
+            paint(c, shown, &style, Motion::still());
+            return;
+        };
+        // How far the new line rises: from where the old next line sat to its own place.
+        let rise = shown.current.as_ref().map_or(SLIDE, |text| style.next_top - style.top - text.offset).max(0.0);
+        let fade_out = (1.0 - t).powi(3);
+        let old_motion = Motion { current: (fade_out, -SLIDE * t), next: (1.0 - t, -rise * t) };
+        paint(c, old, &style, old_motion);
+        paint(c, shown, &style, Motion { current: (t, rise * (1.0 - t)), next: (t * t, SLIDE * (1.0 - t)) });
     }
 }
 
@@ -227,12 +242,22 @@ struct Style<'a> {
     next_top: f32,
 }
 
-/// One content (current and next line) at `alpha`, moved down by `dy`.
-fn paint(c: &gfx::Canvas, s: &mut Shown, style: &Style, alpha: f32, dy: f32) {
-    if alpha <= 0.0 {
-        return;
+/// Opacity and downward shift of each line of a content.
+struct Motion {
+    current: (f32, f32),
+    next: (f32, f32),
+}
+
+impl Motion {
+    fn still() -> Motion {
+        Motion { current: (1.0, 0.0), next: (1.0, 0.0) }
     }
-    if let Some(text) = s.current.as_mut() {
+}
+
+/// One content (current and next line), each line at its opacity and shift.
+fn paint(c: &gfx::Canvas, s: &mut Shown, style: &Style, motion: Motion) {
+    let (alpha, dy) = motion.current;
+    if let Some(text) = s.current.as_mut().filter(|_| alpha > 0.0) {
         let origin = point(style.x, style.top + dy);
         if style.outline {
             outlined(c, &text.plain, origin, alpha);
@@ -256,7 +281,8 @@ fn paint(c: &gfx::Canvas, s: &mut Shown, style: &Style, alpha: f32, dy: f32) {
             }
         }
     }
-    if let Some(next) = &s.next {
+    let (alpha, dy) = motion.next;
+    if let Some(next) = s.next.as_ref().filter(|_| alpha > 0.0) {
         let origin = point(style.x, style.next_top + dy);
         if style.outline {
             outlined(c, next, origin, alpha * 0.8);

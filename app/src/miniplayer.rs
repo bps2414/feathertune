@@ -15,7 +15,9 @@
 //! - The lyrics button grows it by a band with the current line of the synced lyrics and the next one
 //!   (`lyric_view::View`, like the floating lyrics, in the window's colors). Whether it is open is
 //!   kept in `mini-player.json` in the profile. A one-shot timer is set to the next line or word and a
-//!   frame timer runs only for the short cross-fade; while paused the line stays, with no timer.
+//!   60 fps frame timer runs only for the short roll to the next line; while paused the line stays,
+//!   with no timer.
+//! - The top buttons (lyrics, full window, close) show what they do in a small label on hover.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
@@ -26,10 +28,13 @@ use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::error::RecvError;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT};
-use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapBrush};
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_PROPERTIES, D2D1_ROUNDED_RECT, ID2D1BitmapBrush,
+};
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_WRAP,
+    IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -57,13 +62,13 @@ use crate::settings::Live;
 
 /// Window size in DIPs, without and with the lyrics band.
 const WIDTH: f32 = 340.0;
-const HEIGHT: f32 = 96.0;
+const HEIGHT: f32 = 104.0;
 const LYRICS_BAND: f32 = 84.0;
 /// The lyrics band: current line (two lines of text) and the next one.
 const LYRIC_TOP: f32 = HEIGHT + 4.0;
 const LYRIC_CURRENT: f32 = 50.0;
 const LYRIC_NEXT: f32 = 24.0;
-const ART: f32 = 80.0;
+const ART: f32 = 88.0;
 const ART_RADIUS: f32 = 8.0;
 /// The static glows of a theme: center, radii (DIPs) and strength, kept soft so the white text stays
 /// readable (the glows' luminance is capped in album_color.rs).
@@ -76,6 +81,8 @@ const LYRIC_TIMER: usize = 0xfeb2;
 const FILE: &str = "mini-player.json";
 /// 30 fps, like the title bar; only while a theme flow runs.
 const FRAME_MS: u32 = 33;
+/// 60 fps while a lyric line rolls (under half a second), so the motion is smooth.
+const LYRIC_FRAME_MS: u32 = 16;
 use crate::titlebar::WM_MOUSELEAVE;
 
 /// The open window, 0 when closed. Only the main thread creates and destroys it.
@@ -173,6 +180,8 @@ struct Mini {
     artist: IDWriteTextFormat,
     icons: IDWriteTextFormat,
     small_icons: IDWriteTextFormat,
+    /// The label under a hovered top button.
+    hint: IDWriteTextFormat,
     lyrics: View,
     /// The lyrics' one-shot timer is set.
     lyric_timer: bool,
@@ -181,8 +190,8 @@ struct Mini {
     bitmap: Option<(String, u32, ID2D1BitmapBrush)>,
     /// The glow brushes of the themes on screen.
     glows: gfx::GlowSets,
-    /// The frame timer of a theme flow is running.
-    ticking: bool,
+    /// The frame timer's interval, when it runs (a theme flow or a lyric roll).
+    ticking: Option<u32>,
     hover: Option<Button>,
     pressed: Option<Button>,
     tracking: bool,
@@ -191,12 +200,23 @@ struct Mini {
 fn button_rect(b: Button) -> windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F {
     let x = 8.0 + ART + 8.0;
     match b {
-        Button::Previous => rect(x, 52.0, x + 36.0, 84.0),
-        Button::PlayPause => rect(x + 38.0, 52.0, x + 70.0, 84.0),
-        Button::Next => rect(x + 72.0, 52.0, x + 108.0, 84.0),
-        Button::Lyrics => rect(WIDTH - 88.0, 4.0, WIDTH - 60.0, 32.0),
-        Button::Back => rect(WIDTH - 60.0, 4.0, WIDTH - 32.0, 32.0),
-        Button::Close => rect(WIDTH - 32.0, 4.0, WIDTH - 4.0, 32.0),
+        Button::Previous => rect(x, 55.0, x + 40.0, 87.0),
+        Button::PlayPause => rect(x + 44.0, 52.0, x + 82.0, 90.0),
+        Button::Next => rect(x + 86.0, 55.0, x + 126.0, 87.0),
+        Button::Lyrics => rect(WIDTH - 100.0, 6.0, WIDTH - 70.0, 36.0),
+        Button::Back => rect(WIDTH - 68.0, 6.0, WIDTH - 38.0, 36.0),
+        Button::Close => rect(WIDTH - 36.0, 6.0, WIDTH - 6.0, 36.0),
+    }
+}
+
+/// What a top button does, shown under it on hover.
+fn hint_text(b: Button, lyrics_open: bool) -> Option<&'static str> {
+    match b {
+        Button::Lyrics if lyrics_open => Some("Hide lyrics"),
+        Button::Lyrics => Some("Show lyrics"),
+        Button::Back => Some("Open the full window"),
+        Button::Close => Some("Close mini player"),
+        _ => None,
     }
 }
 
@@ -229,7 +249,11 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         std::fs::read(saved_path(app)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     LYRICS.store(saved.lyrics, Ordering::Relaxed);
     let current = font("Segoe UI Variable Display", 16.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-    unsafe { current.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)? };
+    unsafe {
+        current.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+        // A one-line current line sits in the middle of its two-line box, not glued to the top.
+        current.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+    }
     let next = font("Segoe UI Variable Text", 12.5, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
     let mini = Box::new(Mini {
         app: app.clone(),
@@ -237,13 +261,14 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         surface: gfx::Surface::default(),
         title: font(TEXT_FONT, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
         artist: font(TEXT_FONT, 12.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
-        icons: font(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
-        small_icons: font(ICON_FONT, 10.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+        icons: font(ICON_FONT, 16.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+        small_icons: font(ICON_FONT, 12.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
+        hint: font(TEXT_FONT, 11.5, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         lyrics: View::new(current, next, WIDTH - 24.0, LYRIC_CURRENT, LYRIC_NEXT),
         lyric_timer: false,
         bitmap: None,
         glows: gfx::GlowSets::default(),
-        ticking: false,
+        ticking: None,
         hover: None,
         pressed: None,
         tracking: false,
@@ -361,19 +386,28 @@ impl Mini {
         }
     }
 
-    /// Runs the frame timer only while the colors flow to a new theme or a lyric line cross-fades.
+    /// Runs the frame timer only while the colors flow to a new theme or a lyric line rolls.
     fn schedule(&mut self, hwnd: HWND) {
-        let lyrics_fading = LYRICS.load(Ordering::Relaxed) && self.lyrics.fading();
-        let run = gfx::fading() || lyrics_fading;
+        let lyrics_rolling = LYRICS.load(Ordering::Relaxed) && self.lyrics.fading();
+        let run = if lyrics_rolling {
+            Some(LYRIC_FRAME_MS)
+        } else if gfx::fading() {
+            Some(FRAME_MS)
+        } else {
+            None
+        };
         if run == self.ticking {
             return;
         }
         self.ticking = run;
         unsafe {
-            if run {
-                SetTimer(Some(hwnd), TIMER, FRAME_MS, None);
-            } else {
-                let _ = KillTimer(Some(hwnd), TIMER);
+            match run {
+                Some(ms) => {
+                    SetTimer(Some(hwnd), TIMER, ms, None);
+                }
+                None => {
+                    let _ = KillTimer(Some(hwnd), TIMER);
+                }
             }
         }
     }
@@ -435,6 +469,7 @@ impl Mini {
         let (hover, pressed) = (self.hover, self.pressed);
         let bitmap = &mut self.bitmap;
         let (title, artist, icons, small) = (&self.title, &self.artist, &self.icons, &self.small_icons);
+        let hint = &self.hint;
         let lyrics_open = LYRICS.load(Ordering::Relaxed);
         let full_height = height();
         let lyrics = &mut self.lyrics;
@@ -456,6 +491,16 @@ impl Mini {
                 }
             }
             let art_rect = rect(8.0, 8.0, 8.0 + ART, 8.0 + ART);
+            // A soft shadow under the artwork.
+            for (grow, alpha) in [(6.0, 0.05), (3.0, 0.08), (1.0, 0.12)] {
+                let r = rect(
+                    art_rect.left - grow,
+                    art_rect.top - grow + 2.0,
+                    art_rect.right + grow,
+                    art_rect.bottom + grow + 2.0,
+                );
+                c.pill(r, ART_RADIUS + grow, gfx::rgba(0, alpha));
+            }
             // The surface may have been rebuilt since the bitmap was made (device lost).
             let fresh = |b: &(String, u32, ID2D1BitmapBrush), a: &Art| b.0 == a.url && b.1 == generation;
             match art {
@@ -507,17 +552,18 @@ impl Mini {
             }
 
             let x = 8.0 + ART + 8.0;
-            let text_right = button_rect(Button::Back).left - 4.0;
+            let text_right = button_rect(Button::Lyrics).left - 4.0;
             match state {
                 Some(s) => {
-                    c.text(&s.track.title, title, rect(x, 8.0, text_right, 30.0), pal.text);
-                    c.text(&s.track.artist, artist, rect(x, 30.0, WIDTH - 8.0, 50.0), gfx::with_alpha(pal.text, 0.7));
+                    c.text(&s.track.title, title, rect(x, 10.0, text_right, 30.0), pal.text);
+                    c.text(&s.track.artist, artist, rect(x, 30.0, text_right, 50.0), gfx::with_alpha(pal.text, 0.7));
                 }
-                None => c.text("Nothing playing", title, rect(x, 8.0, text_right, 30.0), pal.text),
+                None => c.text("Nothing playing", title, rect(x, 10.0, text_right, 30.0), pal.text),
             }
 
-            // Glass pills on hover; play/pause is a solid disc in the text color with the glyph cut in
-            // the background's color.
+            // Top buttons sit on faint glass pills (brighter on hover); previous and next get a pill on
+            // hover; play/pause is a solid disc in the text color with the glyph cut in the background's
+            // color.
             for b in BUTTONS {
                 let r = button_rect(b);
                 let mut glyph_color = pal.text;
@@ -543,6 +589,8 @@ impl Mini {
                 } else if pressed == Some(b) || hover == Some(b) {
                     let alpha = if pressed == Some(b) { 0.1 } else { 0.16 };
                     c.pill(r, 8.0, gfx::with_alpha(pal.text, alpha));
+                } else if hint_text(b, lyrics_open).is_some() {
+                    c.pill(r, 8.0, gfx::with_alpha(pal.text, 0.06));
                 }
                 let (glyph, format) = match b {
                     Button::Previous => ("\u{e892}", icons),
@@ -550,7 +598,7 @@ impl Mini {
                     Button::PlayPause => ("\u{e768}", icons),
                     Button::Next => ("\u{e893}", icons),
                     Button::Lyrics => ("\u{e90b}", small),
-                    Button::Back => ("\u{e73f}", small),
+                    Button::Back => ("\u{e8a7}", small),
                     Button::Close => ("\u{e8bb}", small),
                 };
                 c.text(glyph, format, r, glyph_color);
@@ -561,10 +609,10 @@ impl Mini {
                 .map_or(0.0, |s| (s.position_now() / s.track.duration).clamp(0.0, 1.0) as f32);
             // A rounded track under the buttons, the played part in the text color.
             let (left, right) = (x, WIDTH - 12.0);
-            c.pill(rect(left, 88.0, right, 91.0), 1.5, gfx::with_alpha(pal.text, 0.16));
+            c.pill(rect(left, 94.0, right, 97.0), 1.5, gfx::with_alpha(pal.text, 0.16));
             if progress > 0.0 {
                 let end = (left + (right - left) * progress).max(left + 3.0);
-                c.pill(rect(left, 88.0, end, 91.0), 1.5, gfx::with_alpha(pal.text, 0.85));
+                c.pill(rect(left, 94.0, end, 97.0), 1.5, gfx::with_alpha(pal.text, 0.85));
             }
 
             if lyrics_open {
@@ -573,8 +621,32 @@ impl Mini {
                     let r = rect(12.0, LYRIC_TOP, WIDTH - 12.0, LYRIC_TOP + LYRIC_CURRENT);
                     c.text("No synced lyrics for this track", artist, r, gfx::with_alpha(pal.text, 0.55));
                 } else {
+                    // Clipped to the band, so a rolling line never runs into the controls.
+                    let band = rect(0.0, HEIGHT + 1.0, WIDTH, full_height);
+                    unsafe { c.target.PushAxisAlignedClip(&band, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
                     lyrics.draw(c, 12.0, LYRIC_TOP, pal.text, false);
+                    unsafe { c.target.PopAxisAlignedClip() };
                 }
+            }
+
+            // What the hovered top button does, on a small pill under it, last so it is on top.
+            if let Some((b, label)) = hover.and_then(|b| hint_text(b, lyrics_open).map(|l| (b, l))) {
+                let mut m = DWRITE_TEXT_METRICS::default();
+                if let Ok(layout) = gfx::text_layout(label, hint, WIDTH, 20.0) {
+                    let _ = unsafe { layout.GetMetrics(&mut m) };
+                }
+                let r = button_rect(b);
+                let w = m.width + 16.0;
+                let left = (r.left + (r.right - r.left - w) / 2.0).min(WIDTH - 4.0 - w);
+                let pill = rect(left, r.bottom + 4.0, left + w, r.bottom + 24.0);
+                c.pill(
+                    rect(pill.left - 1.0, pill.top - 1.0, pill.right + 1.0, pill.bottom + 1.0),
+                    7.0,
+                    gfx::with_alpha(pal.text, 0.18),
+                );
+                c.pill(pill, 6.0, pal.background);
+                c.pill(pill, 6.0, gfx::with_alpha(pal.text, 0.08));
+                c.text(label, hint, pill, pal.text);
             }
         });
     }

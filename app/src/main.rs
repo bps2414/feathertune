@@ -32,9 +32,17 @@ use tauri_plugin_window_state::StateFlags;
 const START_URL: &str = "https://music.youtube.com";
 // wry's defaults (dropped once we pass our own args), Chromium's media keys and flyout entry (ours
 // is in smtc.rs). Keep every feature in this single --disable-features: Chromium only honors the
-// last one. Features that the Phase 4 experiments kept go here; the ones still being measured come
-// from `[browser] disable_features` in config.toml (see `browser_args`).
-const DISABLED_FEATURES: &[&str] = &["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection", "HardwareMediaKeyHandling"];
+// last one. Features that the Phase 4 experiments kept go here (MediaRouter, DialMediaRouteProvider:
+// no Cast discovery); the ones still being measured come from `[browser] disable_features` in
+// config.toml (see `browser_args`).
+const DISABLED_FEATURES: &[&str] = &[
+    "msWebOOUI",
+    "msPdfOOUI",
+    "msSmartScreenProtection",
+    "HardwareMediaKeyHandling",
+    "MediaRouter",
+    "DialMediaRouteProvider",
+];
 
 const BAR_PROBE: &str = "(() => { const b = document.querySelector('ytmusic-player-bar'); \
     return !!b && b.getBoundingClientRect().height > 0 && !!b.querySelector('.title')?.textContent.trim() })()";

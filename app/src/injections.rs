@@ -2,8 +2,8 @@
 //! (`page.js` and/or `style.css`) and is compiled into the binary.
 //!
 //! Each module has an on/off switch under `[injections]` in the profile's `config.toml`, except the
-//! `core` module (the player state bridge), which is always on. A module that is still an
-//! unmeasured experiment (`performance`) is off until the switch says otherwise.
+//! `core` module (the player state bridge), which is always on. A module that is an unmeasured
+//! experiment gets `default_on: false` until a measurement shows a gain.
 //! On startup the enabled modules are assembled into a single initialization script that only
 //! runs on the main frame of https://music.youtube.com. CSS enters as a `<style>` element and each
 //! module runs inside its own `try/catch`, so a module that throws does not take the others down.
@@ -40,13 +40,6 @@ const INJECTIONS: &[Injection] = &[
         css: None,
         toggle: true,
         default_on: true,
-    },
-    Injection {
-        id: "performance",
-        js: None,
-        css: Some(include_str!("../injections/performance/style.css")),
-        toggle: true,
-        default_on: false,
     },
 ];
 
@@ -118,10 +111,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn experiments_stay_off_until_switched_on() {
-        assert!(!script(&Config::default()).contains("backdrop-filter"));
-        let on: Config = toml::from_str("[injections]\nperformance = true").unwrap();
-        assert!(script(&on).contains("backdrop-filter"));
+    fn modules_follow_their_switch() {
+        assert!(script(&Config::default()).contains("SELECTORS"));
         let off: Config = toml::from_str("[injections]\ncontrols = false").unwrap();
         assert!(!script(&off).contains("SELECTORS"));
     }

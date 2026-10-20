@@ -61,9 +61,12 @@ Protótipo (`spike/`: wry 0.57 + WebView2 155 sem otimização, deslogado, janel
 | 1 | — | 1 h na bandeja | pendente | | | | |
 | 2 | 19/10/2026 | Tocando, janela aberta (3 rodadas, mediana) | 9 | **3,6%** (3,1–3,9%) | **408 MB** | 711 MB | 2,0 s |
 | 2 | 19/10/2026 | Tocando, ponte mandando 1×/s (descartado; 3 rodadas, mediana) | 9 | 6,2% (3,9–6,5%) | 412 MB | 720 MB | 2,0 s |
-| 3 | pendente | Tocando, janela aberta, todas as integrações ligadas (3 rodadas, mediana) | | | | | |
-| 3 | pendente | Tocando, na bandeja, todas as integrações ligadas (3 rodadas, mediana) | | | | | |
+| 3 | 20/10/2026 | Tocando, janela aberta, integrações no padrão (3 rodadas, mediana) | 9 | 3,6% (2,4–4,7%) | 407 MB | 721 MB | 2,0 s |
+| 3 | 20/10/2026 | Tocando, na bandeja, integrações no padrão (3 rodadas, mediana) | 9 | 3,4% (3,2–3,7%) | 415 MB | 185 MB | 2,0 s |
+| 4 | 20/10/2026 | `--profile dist`, experimentos mantidos ligados, janela aberta (3 rodadas, mediana) | 9 | **3,3%** (3,1–3,4%) | **403 MB** | 733 MB | 1,9 s |
+| 4 | 20/10/2026 | `--profile dist`, experimentos mantidos ligados, na bandeja (3 rodadas, mediana) | 9 | 3,3% (2,4–3,4%) | 411 MB | **188 MB** | 2,0 s |
 
+- As linhas da Fase 3 são as rodadas da base da Fase 4 (E0): mesmo binário, atalhos e notificação de faixa ligados, Discord e Last.fm desligados porque a máquina de teste não tem id de aplicativo nem chave de API configurados; essas duas integrações **não** estão nos números. Linhas da Fase 4: veja os experimentos abaixo.
 - As Fases 1 e 2 foram medidas com o perfil release antigo (LTO thin, 1 codegen unit). O processo do exe ocupa ~4 MB privados de qualquer jeito, então o perfil não mexe nesses números; a tabela final da Fase 4 usa `--profile dist`.
 - Na bandeja o `<video>` seguiu avançando e a sessão continuou logada.
 - Fase 2: cada chamada da ponte é um fetch com preflight CORS. Mandar a posição 1×/s custava ~3% de CPU (A/B no mesmo build: 3,2% sem, 6,2% com). Por isso a página manda só na troca de faixa, play/pause e seek, mais uma correção a cada 15 s, e o Rust extrapola a posição (`State::position_now()`).
@@ -76,7 +79,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 ├─ fechar = ir pra bandeja (memória Low)                 ├─ script injetado: lê o estado do player
 ├─ 1 instância, autostart, atalhos globais               │   (navigator.mediaSession + <video>)
 ├─ estado do player  ◄──── ponte de mão única ───────────┘   e manda só isso pro Rust
-├─ teclas de mídia / flyout do Windows (SMTC)            CSS injetado: corta animação e blur (Fase 4)
+├─ teclas de mídia / flyout do Windows (SMTC)
 ├─ Discord Rich Presence, Last.fm, notificação de faixa
 └─ filtro de rastreadores (só listas de privacidade, Fase 4)
 ```
@@ -122,7 +125,7 @@ Resultado: tocando 408 MB privados e 2,8% de CPU, bandeja 167 MB de WS, abertura
 - **Nome no flyout:** um exe solto aparece como "Unknown app". O que resolve é o processo ter um AppUserModelID (`dev.feathertune.desktop`) e existir um atalho no Menu Iniciar com o mesmo ID. O app cria `%APPDATA%\Microsoft\Windows\Start Menu\Programs\feathertune.lnk` se não existir; o instalador da Fase 4 o cria com o mesmo AUMID e o desinstalador o remove (veja a Fase 4).
 - Teclas de mídia com o app na bandeja: tocar/pausar ≤ 16 ms, próxima ~0,5 s, anterior ~0,2 s até o novo estado chegar no Rust. CPU tocando: mediana de 3,6%, 408 MB privados.
 
-### Fase 3: Integrações (Sonnet 5.5 high) — código escrito em 20/10/2026, conferências do mantenedor e medição pendentes
+### Fase 3: Integrações (Sonnet 5.5 high) — conferida no Windows em 20/10/2026; **não concluída, 3 itens em aberto** (veja o fim desta seção)
 
 Consome só o estado da Fase 2. Não mexe na ponte, no WebView nem nas flags.
 
@@ -145,17 +148,23 @@ Notas da implementação (`app/src/{settings,shortcuts,notify,discord,lastfm}.rs
 - **Atalhos padrão:** `Ctrl+Alt+Space`, `Ctrl+Alt+Right`, `Ctrl+Alt+Left`; `""` desliga um; combinação que outro app já usa é registrada no log e ignorada.
 - **Discord:** atividade "Listening" (título, artista, capa, barra de tempo a partir da posição extrapolada); enviada na troca de faixa e ao retomar, e de novo só se a posição derivar > 2 s (um seek); limpa ao pausar. Com o Discord fechado, a conexão é tentada de novo no próximo evento do player.
 - **Last.fm:** o item da bandeja conecta ou desconecta. O login abre o navegador e consulta `auth.getSession` a cada 5 s por 5 min; a session key vai para o Credential Manager (serviço `feathertune`). O ponto do scrobble conta só tempo tocado (pausas fora) e um timer acorda a thread nesse momento. Tocar a mesma faixa de novo (a posição volta depois do scrobble) conta como nova audição. Scrobbles que falham esperam em `lastfm-queue.json` no perfil (lotes de 10, nova tentativa a cada 5 min, na partida e no próximo scrobble; itens com mais de 14 dias são descartados porque o Last.fm os ignora). Session key rejeitada (erro 9) descarta a sessão e pede novo login.
-- **Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` passam no Linux; o app não foi executado. Pendente para o mantenedor, no Windows: cada item na bandeja, a conferência do Discord, um scrobble de verdade e o `measure.ps1` (3 rodadas, mediana) das duas linhas acima. Quando tudo passar, troque a nota do título por "Fase 3: concluída em <data>" e preencha a tabela.
+- **Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` passaram no Linux; o app não foi executado lá.
+- **Executado no Windows (20/10/2026, build release, perfil logado, sem supervisão).** A bandeja foi acionada postando o callback do ícone na janela da bandeja do app e as teclas do menu no menu popup (sem mouse de verdade); os atalhos, com teclas injetadas; o estado, lido do log do `--measure`.
+  - Bandeja: Mostrar/ocultar (e clique esquerdo) esconde na bandeja com memória Low e mostra de novo com Normal; Tocar/pausar pausa e retoma o `<video>`; Próxima troca a faixa. "Start with Windows" inverte a marca e o estado se mantém após reiniciar; a chave Run em si não pôde ser lida do shell de teste, então a entrada no registro **não está confirmada** (desligado de novo no fim). O item do Last.fm fica desabilitado com "Last.fm: add the keys to config.toml", como projetado.
+  - Atalhos: `Ctrl+Alt+Right` (próxima) e `Ctrl+Alt+Left` (reinicia a faixa) funcionam. `Ctrl+Alt+Space` pertence a outro app na máquina de teste, então é registrado no log e ignorado, como projetado; o tocar/pausar foi conferido com `play_pause = "Ctrl+Alt+P"` e funciona.
+  - Toast de troca de faixa com a janela escondida: o código rodou sem erro, mas o toast em si não foi visto.
+  - Medição: as duas linhas da Fase 3 acima (CPU 3,6% / 3,4%, dentro da meta ≤ 4%).
+  - **Ainda em aberto:** (1) Discord Rich Presence, não executado: sem id de aplicativo no `config.toml` e o Discord não estava aberto; (2) login e scrobble de verdade no Last.fm, não executados: sem chave de API nem sessão na máquina (`cmdkey /list` não tem entrada do Last.fm); (3) a entrada na chave Run do "Start with Windows" e o toast visível. Troque a nota do título por "Fase 3: concluída em <data>" quando (1) e (2) forem confirmados num perfil real.
 
-### Fase 4: Dieta e entrega (Sonnet 5.5 high) — código escrito em 20/10/2026, medições e conferência de instalação do mantenedor pendentes
+### Fase 4: Dieta e entrega (Sonnet 5.5 high) — medida e instalada no Windows em 20/10/2026; **não concluída, 3 itens em aberto** (veja o fim desta seção)
 
-Tudo abaixo está implementado; nada foi executado. A sessão na nuvem não abre o app, não roda o `measure.ps1` e não instala, então toda célula medida está `pendente` e a fase **não** está marcada como concluída. Troque a nota do título por "Fase 4: concluída em <data>" quando as tabelas estiverem preenchidas e o roteiro de instalação passar.
+Os experimentos, a medição final do dist e a conferência de instalação/desinstalação silenciosa rodaram no Windows em 20/10/2026. Em aberto: a coluna Electron da tabela final (nenhum cliente Electron instalado), o caminho "excluir dados" da desinstalação e os itens da Fase 3 acima. Troque a nota do título por "Fase 4: concluída em <data>" quando forem fechados.
 
-**Experimentos** (um por vez, cada um medido com `measure.ps1`, 3 rodadas, mediana; só fica o que mostrar ganho). Todos os interruptores estão no `config.toml` do perfil, então a tabela inteira precisa de **um** build:
+**Experimentos** (um por vez, cada um medido com `measure.ps1`, 3 rodadas, mediana; só fica o que mostrar ganho). Todos os interruptores estão no `config.toml` do perfil, então a tabela inteira precisa de **um** build. Os interruptores testados (`performance` era um módulo CSS, hoje apagado):
 
 ```toml
 [injections]
-performance = true                 # CSS: sem animação, transição, rolagem suave nem backdrop-filter
+performance = true                 # (apagado) CSS: sem animação, transição, rolagem suave nem backdrop-filter
 [browser]
 disable_features = ["Nome1", "Nome2"]   # entram no único --disable-features (nomes: letras, dígitos, _)
 [privacy]
@@ -171,37 +180,46 @@ $a = '--measure', '<url da faixa>'
 ./median.ps1 -Prefix base-tray-
 ```
 
-Repita com outro prefixo (`e1-open-`, `e1-tray-`, ...) depois de mudar só a linha daquele experimento no `config.toml`, e ponha as duas saídas do `median.ps1` na tabela. **Regra:** a mudança só fica se a mediana superar a da base por mais que a própria variação min–max da base (Fase 2: CPU 3,1–3,9%) *e* o login e a reprodução continuarem funcionando. Um nome de feature que o Chromium não conhece é ignorado sem erro, então "sem mudança" também pode significar que o nome não existe no runtime instalado. Depois dos experimentos isolados, meça uma vez os que ficaram juntos.
+Repita com outro prefixo (`e1-open-`, `e1-tray-`, ...) depois de mudar só a linha daquele experimento no `config.toml`, e ponha as duas saídas do `median.ps1` na tabela. **Regra:** a mudança só fica se a mediana superar a da base por mais que a própria variação min–max da base *e* o login e a reprodução continuarem funcionando. Um nome de feature que o Chromium não conhece é ignorado sem erro, então "sem mudança" também pode significar que o nome não existe no runtime instalado. Depois dos experimentos isolados, meça uma vez os que ficaram juntos.
+
+Como a regra foi aplicada (build release, faixa fixa, logado, toda rodada conferida com `loggedIn: true`, `paused: false` e tempo do `<video>` ≥ 40 s no fim; as 54 rodadas passaram): por métrica, a variação da base é CPU aberto 2,3 pontos (2,4–4,7%), privado 9 MB (405–414), WS 10 MB (715–725), WS na bandeja 2 MB (184–186). Um experimento fica se pelo menos uma métrica melhora por mais que a sua variação e nenhuma piora por mais que a sua. As variações são largas perto dos ganhos, então as duas mudanças mantidas são marginais; desfazer cada uma é uma linha.
 
 | # | Experimento (interruptor) | Aberto: CPU / privado / WS | Bandeja: WS | Decisão |
 |---|---|---|---|---|
-| E0 | Base: app atual, tudo abaixo desligado | pendente | pendente | — |
-| E1 | Módulo CSS `performance` (`performance = true`) | pendente | pendente | pendente |
-| E2 | `SpareRendererForSitePerProcess`: sem processo renderer reserva | pendente | pendente | pendente |
-| E3 | `Prerender2`: sem pré-renderização de páginas | pendente | pendente | pendente |
-| E4 | `MediaRouter`, `DialMediaRouteProvider`: sem descoberta de Cast | pendente | pendente | pendente |
-| E5 | `OptimizationHints`, `OptimizationGuideModelDownloading`, `OptimizationHintsFetching`, `OptimizationTargetPrediction`: sem hints nem download de modelos | pendente | pendente | pendente |
-| E6 | Filtro de rastreadores, lista embutida (`tracker_filter = true`) | pendente | pendente | pendente |
-| E7 | Filtro + lista de privacidade em `privacy-list.txt` (por exemplo a EasyPrivacy) | pendente | pendente | pendente |
-| E8 | Tudo o que ficou, junto | pendente | pendente | — |
+| E0 | Base: app atual, tudo abaixo desligado | 3,6% (2,4–4,7) / 407 MB / 721 MB | 185 MB | — |
+| E1 | Módulo CSS `performance` (`performance = true`) | 4,0% / 420 MB / 717 MB | 185 MB | não ficou: privado +13 MB (> variação), CPU sem melhora; módulo apagado |
+| E2 | `SpareRendererForSitePerProcess`: sem processo renderer reserva | 4,6% (4,6–13,2) / 424 MB / 728 MB | 187 MB | não ficou: pior em todas as métricas |
+| E3 | `Prerender2`: sem pré-renderização de páginas | 4,7% / 410 MB / 713 MB | 185 MB | não ficou: WS −8 MB está dentro da variação, CPU pior |
+| E4 | `MediaRouter`, `DialMediaRouteProvider`: sem descoberta de Cast | 4,0% / 408 MB / 709 MB | 185 MB | **ficou**: WS −12 MB (> 10), nada pior |
+| E5 | `OptimizationHints`, `OptimizationGuideModelDownloading`, `OptimizationHintsFetching`, `OptimizationTargetPrediction`: sem hints nem download de modelos | 4,2% / 409 MB / 712 MB | 185 MB | não ficou: WS −9 MB está dentro da variação |
+| E6 | Filtro de rastreadores, lista embutida (`tracker_filter = true`) | 2,9% (2,9–3,2) / 406 MB / 705 MB | 185 MB | **ficou**: WS −16 MB (> 10), CPU menor; bloqueou um host (`www.googletagmanager.com`), reprodução intacta |
+| E7 | Filtro + lista de privacidade em `privacy-list.txt` (EasyPrivacy, 1,5 MB) | 3,5% / 408 MB / 710 MB | 188 MB | não ficou: WS na bandeja +3 MB (> 2) e bloqueou o mesmo único host do E6 |
+| E8 | E4 + E6 juntos | 4,3% (3,8–4,5) / 409 MB / 712 MB (uma rodada teve 11 processos, 486 MB privados) | 185 MB | — (o ganho combinado não se confirma: WS −9 MB está dentro da variação) |
+
+Nas rodadas da bandeja (E0–E8) a CPU das medianas ficou entre 2,8% e 3,7%. Os interruptores mantidos são o padrão agora (`DISABLED_FEATURES` em `app/src/main.rs`, padrão de `tracker_filter` em `app/src/settings.rs`); o que vale é o número da rodada final `--profile dist` abaixo.
 
 Consideradas e **não** testadas, de propósito: isolamento de sites desligado (`site-per-process`, enfraquece o isolamento de uma página não confiável); `--disable-component-update` (pode congelar os componentes de mídia do runtime e quebrar a reprodução); features do Privacy Sandbox ou ligadas a anúncios (mexem em anúncios); `--disable-gpu` e V8 lite (já descartados, veja Peso medido); `CalculateNativeWinOcclusion` (a bandeja já esconde a view de forma explícita, e essa faria janelas escondidas contarem como visíveis). Uma feature que fica sai de `disable_features` e vai para `DISABLED_FEATURES` em `app/src/main.rs`; um módulo ou experimento que não fica é apagado, e a linha aqui guarda os números.
 
-**Módulo `performance`** (`app/injections/performance/style.css`): zera duração e atraso de animações e transições (`0s`, e não `animation: none`, para que os handlers de `animationend`/`transitionend` ainda disparem), `scroll-behavior: auto`, `backdrop-filter: none`. Só apresentação. Desligado por padrão até o E1 mostrar ganho. Os spinners de carregamento param por definição; qualquer outra coisa que pareça quebrada no E1 (ou um elemento dentro de shadow root nativo, que um seletor da página não alcança) é motivo para descartar o módulo.
+**Módulo `performance` (apagado):** zerava duração e atraso de animações e transições, `scroll-behavior: auto` e `backdrop-filter: none` como CSS injetado. O E1 não mostrou ganho (mais memória privada, CPU sem queda), então `app/injections/performance/` e o interruptor saíram.
 
-**Filtro de rastreadores** (`app/src/privacy.rs`, `[privacy] tracker_filter`, desligado por padrão): `WebResourceRequested` do WebView2 via `with_webview` + crate `adblock` (0.13, features padrão) com as regras cosméticas descartadas, então só consegue bloquear requisições, nunca mudar a página. Feito para não conseguir tocar em anúncios nem na reprodução, no código e não confiando na lista:
+**Filtro de rastreadores** (`app/src/privacy.rs`, `[privacy] tracker_filter`, **ligado por padrão** desde o E6; `tracker_filter = false` desliga): `WebResourceRequested` do WebView2 via `with_webview` + crate `adblock` (0.13, features padrão) com as regras cosméticas descartadas, então só consegue bloquear requisições, nunca mudar a página. Feito para não conseguir tocar em anúncios nem na reprodução, no código e não confiando na lista:
 
 - o handler só é registrado para scripts, imagens, XHR/fetch, pings e "other"; documentos, frames, mídia, fontes e folhas de estilo nunca chegam nele;
 - hosts dos domínios do player, qualquer domínio Google e os domínios de entrega de anúncios do Google (doubleclick, googlesyndication, googleadservices, 2mdn, ...) são pulados antes de consultar a lista, então mesmo uma lista de anúncios posta por engano não muda nada ali;
 - a lista embutida (`app/filters/privacy.txt`, escrita para este projeto) tem só hosts de analytics e gravação de sessão de terceiros. Mais regras vão em `privacy-list.txt` no perfil (só listas de privacidade: decisão do mantenedor, e o E7 mede o custo de uma completa);
 - a requisição bloqueada recebe um 403 vazio. Com `--measure`, cada host bloqueado é impresso uma vez (`tracker_blocked=<host>`), então uma rodada mostra o que foi pego. Se nada for bloqueado no site, o filtro não tem ganho e é candidato a sair, qualquer que seja o custo por requisição.
-- Situação: o código COM compila e a lógica da lista tem testes unitários; **o filtro não foi executado**. O handler roda na thread de UI a cada subrecurso desses tipos, então E6/E7 medem esse custo também. Não travou.
+- Situação: executado no E6, E7, E8 e nas rodadas finais do dist. Neste site bloqueou um host, `www.googletagmanager.com`, em todas as rodadas; login e reprodução não foram afetados e a CPU não subiu. A EasyPrivacy (E7) não pegou mais nada. O handler roda na thread de UI a cada subrecurso desses tipos; nenhuma trava foi vista.
 
-**Instalador** (`app/tauri.conf.json` → `bundle`, `app/installer-hooks.nsh`): bundler NSIS do Tauri, por usuário (sem admin; instala em `%LOCALAPPDATA%\Programs\feathertune`), WebView2 `downloadBootstrapper` (não aumenta o instalador; baixa o bootstrapper só onde falta o runtime, o que não é o caso do Windows 11 nem de um Windows 10 atualizado; `embedBootstrapper` somaria ~1,8 MB para instalação offline), inglês e português do Brasil conforme o idioma do sistema. O CI gera com `build -- --profile dist --locked` (job `dist`; artefato `feathertune-<sha>`, instalador em `bundle/nsis/*-setup.exe`). À mão: `cd app; npx @tauri-apps/cli@2.12.3 build -- --profile dist`.
+**Instalador** (`app/tauri.conf.json` → `bundle`, `app/installer-hooks.nsh`): bundler NSIS do Tauri, por usuário (sem admin; instala em `%LOCALAPPDATA%\feathertune`, **a mesma pasta do perfil**: conferido em 20/10/2026), WebView2 `downloadBootstrapper` (não aumenta o instalador; baixa o bootstrapper só onde falta o runtime, o que não é o caso do Windows 11 nem de um Windows 10 atualizado; `embedBootstrapper` somaria ~1,8 MB para instalação offline), inglês e português do Brasil conforme o idioma do sistema. O CI gera com `build -- --profile dist --locked` (job `dist`; artefato `feathertune-<sha>`, instalador em `bundle/nsis/*-setup.exe`). À mão: `cd app; npx @tauri-apps/cli@2.12.3 build -- --profile dist`.
 
 - **Atalho e AUMID:** o template padrão cria `Start Menu\Programs\feathertune.lnk` e grava nele o identificador do bundle como AppUserModelID, que é `dev.feathertune.desktop`, o ID que o `smtc.rs` põe no processo. É o mesmo caminho que o app escreve quando o atalho não existe, então não duplica, e o desinstalador o remove (quando ainda aponta para o exe instalado), além da jump list e da entrada "Iniciar com o Windows".
 - **Perfil:** o checkbox "excluir dados do aplicativo" do template limpa pastas com o nome do identificador do bundle, não `%LOCALAPPDATA%\feathertune`; por isso o `installer-hooks.nsh` limpa o perfil de verdade (login, `config.toml`, fila do Last.fm) e a credencial do Last.fm (`cmdkey /delete:lastfm-session.feathertune`, nome do alvo deduzido do código da crate `keyring`, **a confirmar**) só quando a caixa está marcada. Desmarcada, nada do usuário é removido.
-- **Conferência de instalação do mantenedor** ("instala e desinstala limpo"), no Windows:
+- **Conferência de instalação** ("instala e desinstala limpo"), no Windows. Resultado da rodada de 20/10/2026, com o instalador `dist` (2,98 MiB), **só em modo silencioso** (`/S`; a caixa não dá para marcar assim):
+  - passo 1: instala (exit 0) em `%LOCALAPPDATA%\feathertune`, junto do perfil; o atalho do Menu Iniciar é gravado com o AUMID `dev.feathertune.desktop` (lido de volta por `IShellLink`/`IPropertyStore`; guardado como `VT_BSTR`, enquanto o atalho do próprio app usa `VT_LPWSTR`); o exe instalado abre, o perfil existente está logado (`loggedIn: true`) e a barra do player aparece em 1,9 s. O nome no flyout de mídia em si não foi olhado;
+  - passo 2: instalar em silêncio por cima do app aberto fecha o app, sai com 0 e o perfil sobrevive;
+  - passo 3 (desmarcado): exe, `uninstall.exe`, atalho e entrada de desinstalação somem; `EBWebView` e `config.toml` continuam. Não havia entrada Run (o autostart estava desligado);
+  - passo 4 (marcado): **não executado.** Pela leitura do `installer-hooks.nsh`: com a caixa marcada (e fora do modo de atualização) remove `%LOCALAPPDATA%\feathertune` (perfil e pasta de instalação são a mesma) e roda `cmdkey /delete:lastfm-session.feathertune`. O nome do alvo bate com o padrão da crate `keyring` (`<user>.<service>` = `lastfm-session.feathertune`, lido do código-fonte); não havia credencial do Last.fm para comparar com o `cmdkey /list`.
+- O roteiro original, para o caminho da caixa:
   1. instalar e abrir pelo Menu Iniciar: a janela abre, o login funciona (ou o perfil logado vale), o flyout de mídia mostra o nome do app, o atalho tem o AUMID (`dev.feathertune.desktop`);
   2. instalar de novo por cima do app aberto: pede para fechá-lo, o perfil sobrevive;
   3. desinstalar **desmarcado**: pasta de instalação, atalho e entrada Run somem; `%LOCALAPPDATA%\feathertune` continua; reinstalar mantém o login;
@@ -211,15 +229,17 @@ Consideradas e **não** testadas, de propósito: isolamento de sites desligado (
 
 | | Cliente Electron | feathertune (dist) | Meta |
 |---|---|---|---|
-| Tocando, janela aberta: CPU | pendente | pendente | ≤ 4% |
-| Tocando, janela aberta: privado | pendente | pendente | ≤ 480 MB |
-| Tocando, janela aberta: WS | pendente | pendente | ≤ 750 MB |
-| Tocando, na bandeja: WS | pendente | pendente | ≤ 260 MB |
-| Processos | pendente | pendente | — |
-| Abertura até a barra do player / conteúdo | pendente | pendente | ≤ 2,0 s |
-| Tamanho do instalador | pendente | pendente | poucos MB |
+| Tocando, janela aberta: CPU | não medido: nenhum cliente Electron instalado (tabela do protótipo: 16–32%) | **3,3%** (3,1–3,4) | ≤ 4% ✔ |
+| Tocando, janela aberta: privado | não medido (antes: 672 MB) | **403 MB** (399–411) | ≤ 480 MB ✔ |
+| Tocando, janela aberta: WS | não medido (antes: 1009 MB) | **733 MB** (732–740) | ≤ 750 MB ✔ |
+| Tocando, na bandeja: WS | não medido | **188 MB** (188–190) | ≤ 260 MB ✔ |
+| Processos | não medido (antes: 6) | 9 | — |
+| Abertura até a barra do player / conteúdo | não medido (antes: 4,5 s) | mediana 1,9 s (1,9–2,9; uma rodada mais lenta) | ≤ 2,0 s ✔ |
+| Tamanho do instalador | não medido (antes: ~100 MB) | 2,98 MiB | poucos MB ✔ |
 
-**Limites da sessão na nuvem:** `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` rodam no Linux; o job `dist` do CI gera o instalador no Windows. Nada foi executado. Pendente para o mantenedor: a base e os E1–E8, a tabela final, o roteiro de instalação, as conferências da Fase 3 que já estavam pendentes e as notas dos títulos das Fases 3 e 4.
+Coluna feathertune: `app/target/dist/feathertune.exe`, experimentos mantidos ligados, perfil logado, uma faixa fixa, 3 rodadas cada (aberto e bandeja), todas conferidas como tocando. Os valores "antes" da coluna Electron são os números da época do protótipo, das tabelas acima, e não uma medição nova; o critério difere em detalhes (outro dia, faixa e versão do cliente).
+
+**Limites da sessão na nuvem (histórico) e o que rodou no Windows:** a sessão na nuvem só rodou `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` e `cargo fmt --check` no Linux; o job `dist` do CI gera o instalador no Windows. Em 20/10/2026 uma sessão sem supervisão no Windows rodou: o build release, as conferências de bandeja/atalhos da Fase 3 listadas lá, a base e E1–E8 (3 rodadas abertas + 3 na bandeja cada), o build e a medição `--profile dist` e a conferência silenciosa de instalar/reinstalar por cima/desinstalar. Pendente para o mantenedor: Discord e login/scrobble reais no Last.fm; a confirmação da chave Run e do toast; a coluna de comparação com o Electron; o caminho "excluir dados" da desinstalação; e as notas dos títulos das Fases 3 e 4.
 
 ## Depois da Fase 4: plugins (futuro, fora do escopo atual)
 

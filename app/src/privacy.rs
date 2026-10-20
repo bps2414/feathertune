@@ -1,4 +1,4 @@
-//! Tracker filter (Phase 4, off by default: `[privacy] tracker_filter` in `config.toml`).
+//! Tracker filter (Phase 4, on by default: `[privacy] tracker_filter = false` in `config.toml` turns it off).
 //!
 //! Third-party requests that match a *privacy* list (analytics, session recording) are answered
 //! with an empty 403 from WebView2's `WebResourceRequested`, so they never reach the network. The

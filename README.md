@@ -2,7 +2,7 @@
 
 *Português: [README.pt-BR.md](README.pt-BR.md)*
 
-> **Work in progress, experimental.** This is a personal project that I am still testing heavily. Things break, change or get rewritten without notice. There are no releases and no support yet; CI builds an installer, but it has not been tested. Use it at your own risk.
+> **Work in progress, experimental.** This is a personal project that I am still testing heavily. Things break, change or get rewritten without notice. There are no releases and no support yet; CI builds an installer; only its silent install and uninstall were tested. Use it at your own risk.
 
 A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: tray icon, media keys and the Windows media flyout, and memory trimming while hidden.
 
@@ -20,8 +20,8 @@ Measured so far (process tree, playing): ~410 MB private memory and ~3% of one C
 |---|---|
 | 1. Shell: window, tray, memory trimming | done |
 | 2. Player state bridge, media keys, flyout | done |
-| 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | code written, being tested |
-| 4. Slimming and installer | code written, measurements and install check pending |
+| 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | tray and shortcuts checked; Discord and Last.fm still to be confirmed on a real profile |
+| 4. Slimming and installer | measured (~400 MB private, ~3.3% CPU, ~190 MB in the tray); silent install/uninstall checked; Electron comparison and the "delete data" uninstall path open |
 
 ## Build
 
@@ -57,14 +57,11 @@ client_id = ""               # your own Discord application id; Rich Presence is
 api_key = ""                 # your own Last.fm API account; off while either is empty
 api_secret = ""
 
-[injections]
-performance = false          # CSS that removes animations, transitions and blur; an experiment, see docs/PLAN.md
-
 [browser]
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/PLAN.md)
 
 [privacy]
-tracker_filter = false       # blocks third-party analytics requests; never ads (docs/PLAN.md)
+tracker_filter = true        # blocks third-party analytics requests (default); never ads (docs/PLAN.md)
 ```
 
 "Start with Windows" and "Connect Last.fm" are in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file.

@@ -52,6 +52,7 @@ global_shortcuts = true
 discord = true               # também precisa do client_id abaixo
 lastfm = true                # também precisa conectar a conta
 mini_player = true
+animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
 
 [shortcuts]                  # globais; "" desliga um
 play_pause = "Ctrl+Alt+Space"

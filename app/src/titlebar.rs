@@ -15,8 +15,15 @@
 //! - WM_SIZE moves the site webview below the strip right away, through its WebView2 controller.
 //! - The look is "ink in water": soft color glows on deep ink under a glass sheen, laid out from the
 //!   current track's id, so every track gets its own shape. A track change flows from the old shape to
-//!   the new one (a 16 ms timer that runs only for `MORPH`); otherwise nothing animates.
+//!   the new one in `MORPH`.
+//! - With the `animated_title_bar` plugin the glows also drift slowly. Performance rules: one 30 fps
+//!   timer that runs only while there is something to move (a track change, or the drift while the
+//!   window is visible, not minimized and in front, and Windows animation effects are on); the clock
+//!   stops while paused, so it resumes where it was; only the strip is invalidated; brushes and the
+//!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
+//!   track or the width change.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,6 +34,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
@@ -35,16 +43,19 @@ use windows::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
 use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsZoomed,
-    KillTimer, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOZORDER,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
+    GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
+    IsWindowVisible, IsZoomed, KillTimer, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SIZE_MINIMIZED,
+    SPI_GETCLIENTAREAANIMATION, SWP_NOACTIVATE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, SystemParametersInfoW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
     WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SETTINGCHANGE,
-    WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
+use windows::core::BOOL;
 
 use crate::gfx::{self, ICON_FONT, point, rect};
 use crate::player::{Event, Player, State};
+use crate::settings::Live;
 
 /// Strip height and button width, in DIPs (the Windows 11 caption metrics).
 pub const HEIGHT: f32 = 32.0;
@@ -54,8 +65,14 @@ const SUBCLASS_ID: usize = 0xfea7;
 pub const WM_MOUSELEAVE: u32 = 0x02a3;
 /// Posted by the player thread when the track changed.
 const WM_TRACK: u32 = WM_APP + 2;
-const MORPH_TIMER: usize = 0xfea8;
+/// Posted to re-check whether the animation timer should run.
+const WM_ANIMATE: u32 = WM_APP + 3;
+const TIMER: usize = 0xfea8;
+/// 30 fps: smooth for slow drift, half the repaints of 60.
+const FRAME_MS: u32 = 33;
 const MORPH: Duration = Duration::from_millis(700);
+/// The `animated_title_bar` plugin switch.
+static ANIMATED: AtomicBool = AtomicBool::new(false);
 const NAME_FONT: &str = "Segoe UI Variable Display";
 const TRACK_FONT: &str = "Segoe UI Variable Text";
 
@@ -121,6 +138,91 @@ fn mix(a: Glow, b: Glow, t: f32) -> Glow {
     Glow { x: m(a.x, b.x), y: m(a.y, b.y), rx: m(a.rx, b.rx), ry: m(a.ry, b.ry) }
 }
 
+/// The slow drift of glow `i` at `time` seconds: each glow sways and breathes at its own pace
+/// (periods of 12 to 21 s), so the pattern never visibly repeats.
+fn drift(g: Glow, i: usize, time: f32) -> Glow {
+    const SPEED: [f32; 4] = [0.52, 0.41, 0.6, 0.3];
+    let (w, phase) = (SPEED[i], i as f32 * 1.7);
+    Glow {
+        x: g.x + 0.05 * (time * w + phase).sin(),
+        y: g.y + 0.35 * (time * w * 0.8 + phase * 1.3).sin(),
+        rx: g.rx * (1.0 + 0.12 * (time * w * 1.3 + phase).sin()),
+        ry: g.ry * (1.0 + 0.1 * (time * w * 0.7 + phase).cos()),
+    }
+}
+
+/// Windows' "Animation effects" (Settings > Accessibility > Visual effects).
+fn motion_allowed() -> bool {
+    let mut on = BOOL(1);
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut BOOL as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_err() || on.as_bool()
+}
+
+/// Glow and glass brushes, kept between frames and rebuilt with the render target or on a light/dark
+/// change.
+struct Brushes {
+    generation: u32,
+    dark: bool,
+    glows: Vec<ID2D1RadialGradientBrush>,
+    sheen: ID2D1LinearGradientBrush,
+    /// The artist's color in the track line (a drawing effect of its layout).
+    dim: ID2D1SolidColorBrush,
+}
+
+impl Brushes {
+    fn new(c: &gfx::Canvas, dark: bool) -> Option<Brushes> {
+        let glows = GLOWS.iter().map(|(color, _)| c.radial(gfx::rgb(*color))).collect::<Option<Vec<_>>>()?;
+        let sheen = if dark { 0.10 } else { 0.45 };
+        let sheen =
+            c.linear(point(0.0, 0.0), point(0.0, HEIGHT * 0.55), gfx::rgba(0xffffff, sheen), gfx::rgba(0xffffff, 0.0))?;
+        Some(Brushes { generation: c.generation, dark, glows, sheen, dim: c.solid(gfx::rgb(0))? })
+    }
+}
+
+/// The current track line, kept until the track, the width or the brushes change.
+struct TrackLine {
+    key: (String, String, u32, u32),
+    layout: IDWriteTextLayout,
+    left: f32,
+}
+
+impl TrackLine {
+    /// The title in semibold, then the artist dimmed, centered between the app name and the caption
+    /// buttons. None while nothing plays or the window is too narrow.
+    fn new(
+        format: &IDWriteTextFormat,
+        title: &str,
+        artist: &str,
+        width: f32,
+        dim: &ID2D1SolidColorBrush,
+    ) -> Option<Self> {
+        let (left, right) = (BUTTON + 150.0, button_left(Button::Minimize, width) - 24.0);
+        if title.is_empty() || right - left < 80.0 {
+            return None;
+        }
+        let line = if artist.is_empty() { title.to_string() } else { format!("{title}    {artist}") };
+        let title_len = title.encode_utf16().count() as u32;
+        let total = line.encode_utf16().count() as u32;
+        let layout = gfx::text_layout(&line, format, right - left, HEIGHT).ok()?;
+        unsafe {
+            let _ = layout
+                .SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE { startPosition: 0, length: title_len });
+            if total > title_len {
+                let _ = layout
+                    .SetDrawingEffect(dim, DWRITE_TEXT_RANGE { startPosition: title_len, length: total - title_len });
+            }
+        }
+        Some(TrackLine { key: Default::default(), layout, left })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Button {
     Menu,
@@ -142,6 +244,15 @@ struct TitleBar {
     from: u64,
     to: u64,
     morph: Option<Instant>,
+    /// Seconds of drift so far; advances only while the timer runs.
+    time: f32,
+    last_frame: Option<Instant>,
+    ticking: bool,
+    motion: bool,
+    brushes: Option<Brushes>,
+    /// Bumped when `brushes` is rebuilt (the track line holds one of them).
+    brushes_id: u32,
+    line: Option<TrackLine>,
     active: bool,
     hover: Option<Button>,
     pressed: Option<Button>,
@@ -162,6 +273,7 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
         ],
     )?;
     let window = window.clone();
+    ANIMATED.store(app.state::<Live>().plugin("animated_title_bar"), Ordering::Relaxed);
     let player = app.state::<Player>();
     let now = Arc::new(Mutex::new(Now::of(player.current().as_ref())));
     let seed = now.lock().unwrap().seed;
@@ -203,6 +315,13 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             from: seed,
             to: seed,
             morph: None,
+            time: 0.0,
+            last_frame: None,
+            ticking: false,
+            motion: motion_allowed(),
+            brushes: None,
+            brushes_id: 0,
+            line: None,
             active: true,
             hover: None,
             pressed: None,
@@ -223,6 +342,18 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             (*bar).layout(hwnd, client.right, client.bottom);
         }
     })
+}
+
+/// Turns the drift on or off (the `animated_title_bar` switch).
+pub fn set_animated(app: &AppHandle, on: bool) {
+    ANIMATED.store(on, Ordering::Relaxed);
+    if let Some(window) = app.get_window("main")
+        && let Ok(hwnd) = window.hwnd()
+    {
+        unsafe {
+            let _ = PostMessageW(Some(HWND(hwnd.0)), WM_ANIMATE, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 /// Repaints the strip (after a theme color change).
@@ -320,21 +451,45 @@ impl TitleBar {
             self.from = self.to;
             self.to = seed;
             self.morph = Some(Instant::now());
-            unsafe {
-                SetTimer(Some(hwnd), MORPH_TIMER, 16, None);
-            }
         }
+        self.schedule(hwnd);
         invalidate(hwnd);
     }
 
-    fn tick(&mut self, hwnd: HWND) {
-        if self.morph.is_none_or(|start| start.elapsed() >= MORPH) {
-            self.morph = None;
-            unsafe {
-                let _ = KillTimer(Some(hwnd), MORPH_TIMER);
+    /// Starts or stops the frame timer: it runs only while there is something to move on screen.
+    fn schedule(&mut self, hwnd: HWND) {
+        let drifting = ANIMATED.load(Ordering::Relaxed)
+            && self.motion
+            && self.active
+            && unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
+        let run = self.morph.is_some() || drifting;
+        if run == self.ticking {
+            return;
+        }
+        self.ticking = run;
+        unsafe {
+            if run {
+                SetTimer(Some(hwnd), TIMER, FRAME_MS, None);
+                self.last_frame = Some(Instant::now());
+            } else {
+                let _ = KillTimer(Some(hwnd), TIMER);
+                self.last_frame = None;
             }
         }
+    }
+
+    fn tick(&mut self, hwnd: HWND) {
+        let now = Instant::now();
+        if let Some(last) = self.last_frame {
+            // Capped, so a stalled message loop does not jump the drift.
+            self.time += (now - last).as_secs_f32().min(0.1);
+        }
+        self.last_frame = Some(now);
+        if self.morph.is_some_and(|start| start.elapsed() >= MORPH) {
+            self.morph = None;
+        }
         invalidate(hwnd);
+        self.schedule(hwnd);
     }
 
     fn paint(&mut self, hwnd: HWND) {
@@ -356,38 +511,58 @@ impl TitleBar {
         // Smoothstep of the flow's progress.
         let t = self.morph.map_or(1.0, |start| (start.elapsed().as_secs_f32() / MORPH.as_secs_f32()).min(1.0));
         let t = t * t * (3.0 - 2.0 * t);
-        let shape: Vec<Glow> = glows(self.from).into_iter().zip(glows(self.to)).map(|(a, b)| mix(a, b, t)).collect();
+        let drifting = ANIMATED.load(Ordering::Relaxed) && self.motion;
+        let time = self.time;
+        let shape: Vec<Glow> = glows(self.from)
+            .into_iter()
+            .zip(glows(self.to))
+            .enumerate()
+            .map(|(i, (a, b))| if drifting { drift(mix(a, b, t), i, time) } else { mix(a, b, t) })
+            .collect();
         let (hover, pressed) = (self.hover, self.pressed);
-        let track = self.track_layout(width);
-        let (name, icons) = (&self.name, &self.icons);
+        let (title, artist) = {
+            let now = self.now.lock().unwrap();
+            (now.title.clone(), now.artist.clone())
+        };
+        let (name, icons, track) = (&self.name, &self.icons, &self.track);
+        let (brushes, brushes_id, line) = (&mut self.brushes, &mut self.brushes_id, &mut self.line);
         self.surface.paint(hwnd, area, |c| {
             let strip = rect(0.0, 0.0, width, HEIGHT);
             c.fill(strip, ink);
-            for (g, (color, alpha)) in shape.iter().zip(GLOWS) {
-                let center = point(g.x * width, g.y * HEIGHT);
-                c.glow(strip, center, g.rx * width, g.ry * HEIGHT, gfx::rgba(color, alpha * strength));
+            if brushes.as_ref().is_none_or(|b| b.generation != c.generation || b.dark != dark) {
+                *brushes = Brushes::new(c, dark);
+                *brushes_id = brushes_id.wrapping_add(1);
+            }
+            let Some(b) = brushes.as_ref() else { return };
+            for ((g, (_, alpha)), brush) in shape.iter().zip(GLOWS).zip(&b.glows) {
+                unsafe {
+                    brush.SetCenter(point(g.x * width, g.y * HEIGHT));
+                    brush.SetRadiusX(g.rx * width);
+                    brush.SetRadiusY(g.ry * HEIGHT);
+                    brush.SetOpacity(alpha * strength);
+                }
+                c.fill_with(strip, brush);
             }
             // Glass: a sheen on the upper half and a lit bottom edge.
-            let sheen = if dark { 0.10 } else { 0.45 };
-            c.vertical(rect(0.0, 0.0, width, HEIGHT * 0.55), gfx::rgba(0xffffff, sheen), gfx::rgba(0xffffff, 0.0));
+            c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
             let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
             c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
-            for b in [Button::Menu, Button::Minimize, Button::Maximize, Button::Close] {
-                let left = button_left(b, width);
+            for button in [Button::Menu, Button::Minimize, Button::Maximize, Button::Close] {
+                let left = button_left(button, width);
                 let r = rect(left, 0.0, left + BUTTON, HEIGHT);
                 let mut glyph = text;
-                if hover == Some(b) || pressed == Some(b) {
-                    let down = pressed == Some(b);
-                    let fill = match b {
+                if hover == Some(button) || pressed == Some(button) {
+                    let down = pressed == Some(button);
+                    let fill = match button {
                         Button::Close => gfx::rgba(CLOSE_HOVER, if down { 0.8 } else { 1.0 }),
                         _ => gfx::with_alpha(full, if down { 0.1 } else { 0.16 }),
                     };
                     c.pill(rect(left + 5.0, 4.0, left + BUTTON - 5.0, HEIGHT - 4.0), 7.0, fill);
-                    if b == Button::Close {
+                    if button == Button::Close {
                         glyph = gfx::rgb(0xffffff);
                     }
                 }
-                let icon = match b {
+                let icon = match button {
                     Button::Menu => "\u{e700}",
                     Button::Minimize => "\u{e921}",
                     Button::Maximize if maximized => "\u{e923}",
@@ -397,40 +572,15 @@ impl TitleBar {
                 c.text(icon, icons, r, glyph);
             }
             c.text("feathertune", name, rect(BUTTON + 2.0, 0.0, BUTTON + 140.0, HEIGHT), text);
-            if let Some((layout, left, artist)) = &track {
-                // The artist is dimmed through a drawing effect: a brush of this target.
-                if let Some(range) = artist
-                    && let Ok(dim) = unsafe { c.target.CreateSolidColorBrush(&gfx::with_alpha(text, 0.6), None) }
-                {
-                    unsafe {
-                        let _ = layout.SetDrawingEffect(&dim, *range);
-                    }
-                }
-                c.layout(layout, point(*left, 0.0), text);
+            let key = (title, artist, width.to_bits(), *brushes_id);
+            if line.as_ref().is_none_or(|l| l.key != key) {
+                *line = TrackLine::new(track, &key.0, &key.1, width, &b.dim).map(|l| TrackLine { key, ..l });
+            }
+            if let Some(l) = line.as_ref() {
+                unsafe { b.dim.SetColor(&gfx::with_alpha(text, 0.6)) };
+                c.layout(&l.layout, point(l.left, 0.0), text);
             }
         });
-    }
-
-    /// The current track, centered between the app name and the caption buttons: the title in
-    /// semibold, then the artist (its range is returned, to be dimmed). None while nothing plays or
-    /// the window is too narrow.
-    fn track_layout(&self, width: f32) -> Option<(IDWriteTextLayout, f32, Option<DWRITE_TEXT_RANGE>)> {
-        let (left, right) = (BUTTON + 150.0, button_left(Button::Minimize, width) - 24.0);
-        let now = self.now.lock().unwrap();
-        if now.title.is_empty() || right - left < 80.0 {
-            return None;
-        }
-        let line = if now.artist.is_empty() { now.title.clone() } else { format!("{}    {}", now.title, now.artist) };
-        let title_len = now.title.encode_utf16().count() as u32;
-        let total = line.encode_utf16().count() as u32;
-        let layout = gfx::text_layout(&line, &self.track, right - left, HEIGHT).ok()?;
-        unsafe {
-            let _ = layout
-                .SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE { startPosition: 0, length: title_len });
-        }
-        let artist =
-            (total > title_len).then_some(DWRITE_TEXT_RANGE { startPosition: title_len, length: total - title_len });
-        Some((layout, left, artist))
     }
 }
 
@@ -551,23 +701,39 @@ unsafe extern "system" fn subclass(
             bar.track_changed(hwnd);
             return LRESULT(0);
         }
-        WM_TIMER if wparam.0 == MORPH_TIMER => {
+        WM_TIMER if wparam.0 == TIMER => {
             bar.tick(hwnd);
             return LRESULT(0);
         }
+        WM_ANIMATE => {
+            bar.schedule(hwnd);
+            invalidate(hwnd);
+            return LRESULT(0);
+        }
+        // Shown or hidden (the tray): IsWindowVisible changes after this message, so check later.
+        WM_SHOWWINDOW => unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_ANIMATE, WPARAM(0), LPARAM(0));
+        },
         WM_SIZE => {
             if wparam.0 != SIZE_MINIMIZED as usize {
                 bar.layout(hwnd, (lparam.0 & 0xffff) as i32, ((lparam.0 >> 16) & 0xffff) as i32);
             }
+            bar.schedule(hwnd);
         }
         WM_MOVE => unsafe {
             let _ = bar.controller.NotifyParentWindowPositionChanged();
         },
         WM_NCACTIVATE => {
             bar.active = wparam.0 != 0;
+            bar.schedule(hwnd);
             invalidate(hwnd);
         }
-        WM_ACTIVATE | WM_SETTINGCHANGE => invalidate(hwnd),
+        WM_SETTINGCHANGE => {
+            bar.motion = motion_allowed();
+            bar.schedule(hwnd);
+            invalidate(hwnd);
+        }
+        WM_ACTIVATE => invalidate(hwnd),
         WM_SETFOCUS => {
             // The window got the focus itself (Alt+Tab, the taskbar): hand it to the page.
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
@@ -577,7 +743,7 @@ unsafe extern "system" fn subclass(
             return result;
         }
         WM_NCDESTROY => unsafe {
-            let _ = KillTimer(Some(hwnd), MORPH_TIMER);
+            let _ = KillTimer(Some(hwnd), TIMER);
             let _ = RemoveWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID);
             drop(Box::from_raw(data as *mut TitleBar));
         },

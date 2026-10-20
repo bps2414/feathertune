@@ -17,7 +17,8 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
     D2D1_GAMMA_1_0, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
-    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+    D2D1CreateFactory, ID2D1Brush, ID2D1DCRenderTarget, ID2D1Factory, ID2D1LinearGradientBrush,
+    ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
@@ -197,6 +198,8 @@ pub struct Surface {
 pub struct Canvas<'a> {
     pub target: &'a ID2D1DCRenderTarget,
     brush: &'a ID2D1SolidColorBrush,
+    /// `Surface::generation`: brushes made on an older target must be rebuilt.
+    pub generation: u32,
 }
 
 impl Canvas<'_> {
@@ -215,47 +218,50 @@ impl Canvas<'_> {
         }
     }
 
-    /// A soft elliptical glow over `area`: `color` at the center, fading out at the radii.
-    pub fn glow(&self, area: D2D_RECT_F, center: Vector2, rx: f32, ry: f32, color: D2D1_COLOR_F) {
+    /// A soft round glow brush: `color` at the center fading out at radius 1. Callers keep it between
+    /// frames and move it with SetCenter/SetRadiusX/SetRadiusY/SetOpacity.
+    pub fn radial(&self, color: D2D1_COLOR_F) -> Option<ID2D1RadialGradientBrush> {
         let stops = [
             D2D1_GRADIENT_STOP { position: 0.0, color },
             D2D1_GRADIENT_STOP { position: 0.45, color: with_alpha(color, 0.55) },
             D2D1_GRADIENT_STOP { position: 1.0, color: with_alpha(color, 0.0) },
         ];
         let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
-            center,
+            center: point(0.0, 0.0),
             gradientOriginOffset: point(0.0, 0.0),
-            radiusX: rx,
-            radiusY: ry,
+            radiusX: 1.0,
+            radiusY: 1.0,
         };
         unsafe {
-            let Ok(stops) = self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP)
-            else {
-                return;
-            };
-            if let Ok(brush) = self.target.CreateRadialGradientBrush(&props, None, &stops) {
-                self.target.FillRectangle(&area, &brush);
-            }
+            let stops =
+                self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP).ok()?;
+            self.target.CreateRadialGradientBrush(&props, None, &stops).ok()
         }
     }
 
-    /// `r` filled with a vertical gradient from `top` to `bottom`.
-    pub fn vertical(&self, r: D2D_RECT_F, top: D2D1_COLOR_F, bottom: D2D1_COLOR_F) {
-        let stops =
-            [D2D1_GRADIENT_STOP { position: 0.0, color: top }, D2D1_GRADIENT_STOP { position: 1.0, color: bottom }];
-        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-            startPoint: point(r.left, r.top),
-            endPoint: point(r.left, r.bottom),
-        };
+    /// A gradient brush from `a` at `from` to `b` at `to`.
+    pub fn linear(
+        &self,
+        from: Vector2,
+        to: Vector2,
+        a: D2D1_COLOR_F,
+        b: D2D1_COLOR_F,
+    ) -> Option<ID2D1LinearGradientBrush> {
+        let stops = [D2D1_GRADIENT_STOP { position: 0.0, color: a }, D2D1_GRADIENT_STOP { position: 1.0, color: b }];
+        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: from, endPoint: to };
         unsafe {
-            let Ok(stops) = self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP)
-            else {
-                return;
-            };
-            if let Ok(brush) = self.target.CreateLinearGradientBrush(&props, None, &stops) {
-                self.target.FillRectangle(&r, &brush);
-            }
+            let stops =
+                self.target.CreateGradientStopCollection(&stops, D2D1_GAMMA_1_0, D2D1_EXTEND_MODE_CLAMP).ok()?;
+            self.target.CreateLinearGradientBrush(&props, None, &stops).ok()
         }
+    }
+
+    pub fn solid(&self, color: D2D1_COLOR_F) -> Option<ID2D1SolidColorBrush> {
+        unsafe { self.target.CreateSolidColorBrush(&color, None).ok() }
+    }
+
+    pub fn fill_with<B: windows_core::Param<ID2D1Brush>>(&self, r: D2D_RECT_F, brush: B) {
+        unsafe { self.target.FillRectangle(&r, brush) }
     }
 
     /// A text layout drawn at `origin`; ranges without their own brush use `color`.
@@ -333,7 +339,7 @@ impl Surface {
             target.BindDC(hdc, &area)?;
             target.SetDpi(dpi, dpi);
             target.BeginDraw();
-            draw(&Canvas { target, brush });
+            draw(&Canvas { target, brush, generation: self.generation });
             target.EndDraw(None, None)
         }
     }

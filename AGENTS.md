@@ -40,6 +40,7 @@ The app targets Windows only (`windows` crate, WebView2), so it does not build o
 - Docs exist in English and pt-BR. When you change one, change its pair (`README.md`/`README.pt-BR.md`, `docs/PLAN.md`/`docs/PLAN.pt-BR.md`, `docs/PROMPTS.md`/`docs/PROMPTS.pt-BR.md`).
 - Match the surrounding style (`rustfmt.toml`: width 120). Minimal changes, no speculative abstractions.
 - Every Chromium feature flag goes in the single `--disable-features` in `BROWSER_ARGS` (Chromium only honors the last one).
+- UI work (native or HTML) follows the performance rules: draw only on change; any animation has a plugin switch, runs on one timer only while something is on screen to move (stops when the window is hidden, minimized or in the background, and when Windows animation effects or `prefers-reduced-motion` are off) and resumes where it stopped; invalidate only the region that changes; keep GPU resources (brushes, layouts, bitmaps) between frames; and measure it before it is on by default (the Phase 4 rule).
 - The page is untrusted. It may only call `player_state`; its payload is validated and never triggers an action. Do not widen `capabilities/` or `allowed()` without a reason written in the plan.
 
 ## Legal and safety limits (never cross)

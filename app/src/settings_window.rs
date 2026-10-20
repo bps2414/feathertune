@@ -159,6 +159,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             match id {
                 "global_shortcuts" => crate::shortcuts::register(&app),
                 "mini_player" if !on => crate::miniplayer::close(&app),
+                "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 _ => {}
             }
             Ok(!plugin.live)

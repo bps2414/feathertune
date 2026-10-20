@@ -52,6 +52,7 @@ global_shortcuts = true
 discord = true               # also needs client_id below
 lastfm = true                # also needs your account connected
 mini_player = true
+animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
 
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"

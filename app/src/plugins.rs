@@ -87,6 +87,17 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "animated_title_bar",
+        name: "Animated title bar",
+        description: "The colors of the title bar drift slowly. Pauses while the window is hidden, minimized or \
+                      in the background, and when Windows animation effects are off.",
+        cost: "Not measured yet: the 32 px strip repainted 30 times a second while the window is in front; \
+               nothing otherwise.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

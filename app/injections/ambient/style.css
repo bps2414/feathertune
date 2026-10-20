@@ -28,12 +28,12 @@
 
 #feathertune-ambient .ft-bg .ft-layer {
   inset: -20%;
-  filter: blur(60px) saturate(1.9) brightness(0.8);
+  filter: blur(60px) saturate(1.7) brightness(0.65);
   transform: scale(1.2);
 }
 
 #feathertune-ambient .ft-bg .ft-layer.ft-show {
-  opacity: 0.85;
+  opacity: 0.7;
 }
 
 #feathertune-ambient .ft-scrim {
@@ -46,26 +46,36 @@
   position: absolute;
   opacity: 0;
   transition: opacity 0.8s ease;
-  filter: blur(40px) saturate(2.2) brightness(1.2);
+  filter: blur(40px) saturate(1.8) brightness(0.9);
   mask-image: radial-gradient(closest-side, #000 45%, transparent 100%);
 }
 
 #feathertune-ambient .ft-halo.ft-on {
-  opacity: 0.9;
+  opacity: 0.65;
 }
 
 #feathertune-ambient .ft-halo .ft-layer {
   inset: 0;
 }
 
+/* The site's side and top panels are solid; they turn transparent so the glow runs under them instead of
+   ending at their edge. The top and bottom bars keep a short fade to dark so what scrolls under them
+   stays readable. */
 html[data-feathertune-ambient] {
   --ytmusic-background: transparent;
+  --ytmusic-general-background-c: transparent;
   --ytmusic-player-page-background: transparent;
-  --ytmusic-nav-bar: rgba(3, 3, 3, 0.55);
+  --ytmusic-nav-bar: transparent;
+  --ytmusic-search-background: rgba(255, 255, 255, 0.1);
+}
+
+html[data-feathertune-ambient] #nav-bar-background {
+  background-image: linear-gradient(to bottom, rgba(3, 3, 3, 0.5), transparent);
 }
 
 html[data-feathertune-ambient] ytmusic-player-bar {
-  --ytmusic-player-bar-background: rgba(3, 3, 3, 0.65);
+  --ytmusic-player-bar-background: transparent;
+  background-image: linear-gradient(to top, rgba(3, 3, 3, 0.55), transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {

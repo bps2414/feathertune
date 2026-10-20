@@ -110,9 +110,9 @@ html[data-feathertune-ambient] #items.ytmusic-guide-section-renderer > * {
    out itself. Its `#background` box has no height (the picture overflows it), so the mask goes on the
    picture. The darkening gradient over it is one half-screen tile that the site repeats down the whole
    page; it ends in the page color, so the repeats were invisible, but ending in transparent each one
-   started dark again, a line every half screen: it is drawn once. */
-html[data-feathertune-ambient] ytmusic-browse-response #background img,
-html[data-feathertune-ambient] ytmusic-browse-response .background-gradient {
+   started dark again, a line every half screen: it is drawn once. It is the box that holds the page's
+   content (the track list is its child), so it must not carry a mask: that cut long playlists off. */
+html[data-feathertune-ambient] ytmusic-browse-response #background img {
   -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
 }

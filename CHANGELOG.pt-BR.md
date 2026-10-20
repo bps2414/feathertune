@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.1.7 — 2026-10-20
+
+- **Playlists longas não somem mais.** Com o modo ambiente ligado, a lista de faixas de uma playlist ou álbum longo desaparecia poucas linhas abaixo. Agora rola normalmente.
+
 ## 0.1.6 — 2026-10-20
 
 ### Mini player

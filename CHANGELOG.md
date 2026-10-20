@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.1.7 — 2026-10-20
+
+- **Long playlists no longer fade out.** With ambient mode on, the track list of a long playlist or album faded to nothing a few rows down the page. It scrolls normally again.
+
 ## 0.1.6 — 2026-10-20
 
 ### Mini player

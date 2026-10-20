@@ -22,6 +22,8 @@ Medido até agora (árvore de processos, tocando): ~410 MB de memória privada e
 | 2. Ponte de estado do player, teclas de mídia, flyout | concluída |
 | 3. Integrações (instância única, autostart, atalhos, Discord, Last.fm) | bandeja e atalhos conferidos; Discord e Last.fm ainda a confirmar num perfil real |
 | 4. Dieta e instalador | medida (~400 MB privados, ~3,3% de CPU, ~190 MB na bandeja); instalação/desinstalação silenciosa conferida; comparação com o Electron e o caminho "excluir dados" da desinstalação em aberto |
+| 5. Casca nativa: barra de título própria, janela de configurações e plugins, mini player | planejada |
+| 6. Visual: cor do álbum, letras sincronizadas, modo ambiente | planejada |
 
 ## Compilar
 

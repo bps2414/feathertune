@@ -22,6 +22,8 @@ Measured so far (process tree, playing): ~410 MB private memory and ~3% of one C
 | 2. Player state bridge, media keys, flyout | done |
 | 3. Integrations (single instance, autostart, shortcuts, Discord, Last.fm) | tray and shortcuts checked; Discord and Last.fm still to be confirmed on a real profile |
 | 4. Slimming and installer | measured (~400 MB private, ~3.3% CPU, ~190 MB in the tray); silent install/uninstall checked; Electron comparison and the "delete data" uninstall path open |
+| 5. Native shell: own title bar, settings window and plugins, mini player | planned |
+| 6. Look: album color, synced lyrics, ambient mode | planned |
 
 ## Build
 

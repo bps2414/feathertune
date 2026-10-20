@@ -109,6 +109,8 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 | 2. Bridge and media keys | Opus 5.5 medium | untrusted page → Rust channel, SMTC via WinRT |
 | 3. Integrations | Sonnet 5.5 high | official plugins and public APIs on top of a ready state |
 | 4. Slimming and delivery | Sonnet 5.5 high | measured experiments, installer |
+| 5. Native shell | Opus 5.5 medium | Win32/Direct2D window interop, multiwebview, a local window's capability next to the untrusted page, the plugin model Phase 6 inherits |
+| 6. Look | Sonnet 5.5 high | injection modules and a public HTTP API on top of the Phase 5 shell, measured on and off |
 
 ### Phase 1: Shell (done 2026-10-19)
 
@@ -241,18 +243,42 @@ feathertune column: `app/target/dist/feathertune.exe`, kept experiments on, sign
 
 **Cloud session limits (history) and what was run on Windows:** the cloud session only ran `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings` and `cargo fmt --check` from Linux; the CI `dist` job builds the installer on Windows. On 2026-10-20 an unattended Windows session ran: the release build, the Phase 3 tray/shortcut checks listed there, the baseline and E1–E8 (3 open + 3 tray runs each), the `--profile dist` build and measurement, and the silent install/over-install/uninstall check. Still pending for the maintainer: Discord and a real Last.fm sign-in/scrobble; the Run-key and toast confirmation; the Electron comparison column; the "delete data" uninstall path; and the Phase 3 and 4 heading notes.
 
-## After Phase 4: plugins (future, out of current scope)
+### Phase 5: Native shell (Opus 5.5 medium) — planned 2026-10-20
 
-Goal: plugins you switch on and off. An injection module (`app/injections/<id>/`), a Rust part compiled into the app implementing a `Plugin` trait (receives the state, adds menu items), or both. On/off in a "Plugins" tray menu, saved in `config.toml`. No DLL loading and no code downloaded at runtime. Each plugin is measured on and off and its cost goes in its description; all of them on must stay within the CPU and RAM targets.
+The app gets its own look and controls around the site: a title bar, a settings window that lists the plugins, a mini player, and Last.fm without manual keys.
+
+**Why not a custom engine** (evaluated 2026-10-20): the page itself is most of the weight (empty WebView2 121 MB private, site playing ~450 MB), and any engine that runs the official site carries it. CEF and Electron ship their own Chromium (heavier, and 200+ MB more in the installer); Servo only started its Media Source Extensions work, which the player needs, in June 2026; there is no embeddable Gecko; a native client would need the private API (out, see the ground rules). WebView2 stays, and this phase changes what is around it.
+
+- **Title bar:** the window drops the system frame (`decorations(false)`), and Rust draws a strip at the top with Direct2D/DirectWrite: app name, menu button, minimize, maximize/restore, close. The site moves to a child webview placed below the strip (Tauri multiwebview: `Window` + `add_child`, the `unstable` feature). Hit-testing is native (`WM_NCHITTEST`: caption drags, `HTMAXBUTTON` on maximize so Windows 11 snap layouts appear, resize borders). The strip is DPI-aware and follows light/dark and a theme color (Phase 6 sets it from the artwork). The remote page gets no new permission, because the strip is not HTML. **Fallback** if multiwebview blocks (focus, keyboard, memory Low or SMTC break on the child webview): keep the system frame and color it with DWM (`DWMWA_CAPTION_COLOR`, `DWMWA_TEXT_COLOR`, dark mode), with the menu in the tray and a shortcut, and write in this section why.
+- **Settings window:** the menu button opens a separate window with our own HTML/CSS: plugins on/off, Last.fm connect/disconnect, Discord, shortcuts, notifications, privacy, start with Windows, mini player. It is created when opened and destroyed when closed, so it costs nothing while closed. It loads from a custom URI scheme, not `frontendDist` (Phase 2 removed it because it made the remote site count as a local origin). It has its own capability, limited to that window and that scheme. The site's capability is unchanged: `player_state` only, site webview only. Changes are written to `config.toml` keeping the user's comments (`toml_edit` may be added for this, if `toml` cannot). They apply live where possible; otherwise the window says a restart is needed.
+- **Plugins:** this formalizes the "plugins you switch on and off" goal. Every optional feature (an injection module, a Rust integration, or both) is a plugin with an id, name, description, measured cost and a switch in `config.toml`, and the settings window lists them. No DLL loading and no downloaded code. The tray keeps its quick items.
+- **Last.fm key at build time:** the API key and secret come from two repository secrets (`FEATHERTUNE_LASTFM_API_KEY`, `FEATHERTUNE_LASTFM_API_SECRET`) into the CI `dist` build through `option_env!`. Values in `config.toml` still override them, and a build without them (forks, local builds) behaves as today. They never go in Git. They can be read out of the exe, as with every desktop client; the session key stays in the Credential Manager. **Maintainer:** create the two secrets.
+- **Mini player:** a small always-on-top native window (Direct2D) with artwork, title, artist, progress and previous/play-pause/next. It is fed only by `Player`, and its commands go through the existing Rust → page path. Opening it hides the main window (memory Low, as in the tray). Rust fetches the artwork URL from the state, only from the image hosts the site uses, and decodes it with WIC (`windows` crate). It toggles from the title bar menu, the tray and an optional shortcut.
+- **Cost:** no new crate except `toml_edit` if needed. New `windows` features (Direct2D, DirectWrite, WIC, GDI) and the Tauri `unstable` feature are expected. Measure as in Phase 4 (3 runs, median, `--measure` keeps 1280×800 for the whole window).
+- **Done when:**
+  - the title bar drags, snaps, resizes, maximizes, restores and closes like a normal window, also at 150% scaling and on a second monitor;
+  - close still goes to the tray with memory Low, and media keys and the flyout still work;
+  - the settings window changes every setting, and closing it leaves no extra process;
+  - Last.fm connects in a CI build without editing `config.toml` (confirmed by the maintainer);
+  - the mini player controls playback with the main window hidden;
+  - window open stays within the Phase 4 dist row's spread (403 MB private, 733 MB WS, 3.3% CPU), the tray row is unchanged, and the mini player has its own row in the table.
+
+### Phase 6: Look (Sonnet 5.5 high) — planned 2026-10-20
+
+Builds on the Phase 5 shell (title bar, settings window, plugins, WIC artwork decoder). Each item is a plugin, measured on and off with the Phase 4 rule (it stays on by default only if it costs less than its spread); ambient mode is off by default whatever it measures.
+
+- **Album color:** once per track, Rust takes the dominant color of the current artwork (Phase 5 decoder, small thumbnail) and applies it to the title bar, the mini player and the page, through a CSS variable used by an injection module (`app/injections/theme/`). Presentation only, with readable contrast for text.
+- **Synced lyrics:** Rust queries LRCLIB (`https://lrclib.net/api/get` by title, artist, album and duration; `syncedLyrics` in the response) with a User-Agent naming the app, one request per track, cached in the profile. It pushes the timed lines to an injection module (`app/injections/lyrics/`) as JSON data. The module shows them in the site's Lyrics tab with the current line highlighted, following the `<video>` time, and leaves the site's own lyrics alone when LRCLIB has none. The page fetches nothing new and calls nothing in Rust for this.
+- **Ambient mode:** a blurred, glowing copy of the artwork behind the player (injection module, CSS/canvas). It costs GPU and some CPU with the window open, and pauses while hidden. Off by default.
+- **Done when:** each plugin works and toggles from the settings window, each has its measured row (on and off) in the table, and all of them on except ambient mode stay within the targets (≤ 480 MB private, ≤ 750 MB WS, ≤ 4% CPU). Ambient mode's cost goes in its description.
+
+### Later (out of current scope)
 
 | Candidate | Type |
 |---|---|
-| Themes and look (colors, font, compact mode, large artwork) | CSS |
-| Performance (the Phase 4 module, with levels) | CSS |
-| Audio equalizer and compressor (Web Audio on the `<video>`) | JS |
+| More looks (fonts, compact mode, large artwork) | CSS |
 | Media buttons on the taskbar thumbnail | Rust (Win32) |
-
-Before the first plugin, an Opus 5.5 medium session formalizes the `Plugin` trait and the menu.
+| Audio equalizer and compressor (Web Audio on the `<video>`) | JS; first decide whether it breaks the rule of not touching what the player plays |
 
 ## Reproducing the measurements
 

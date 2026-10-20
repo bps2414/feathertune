@@ -23,6 +23,17 @@ pub struct Plugin {
 
 pub const PLUGINS: &[Plugin] = &[
     Plugin {
+        id: "launcher",
+        name: "Launcher",
+        description: "A start screen that says what the app is doing while it opens. It checks for a newer \
+                      release and installs it (the app restarts), then shows the window once the player has \
+                      loaded. Without it the window opens at once and nothing is checked.",
+        cost: "Not measured: one small request to GitHub at each start; a still screen otherwise.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
         id: "controls",
         name: "Player controls",
         description: "Page module that presses the player's buttons for the tray, media keys, shortcuts and the \

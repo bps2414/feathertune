@@ -55,6 +55,7 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 
 | Plugin | Default | Cost |
 |---|---|---|
+| `launcher` (start screen, update check) | on | not measured: one small request to GitHub per start |
 | `controls` (presses the player's buttons) | on | none measurable |
 | `tracker_filter` | on | saves ~16 MB WS and some CPU |
 | `track_notifications`, `global_shortcuts` | on | none measurable |
@@ -70,6 +71,8 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 **Last.fm:** desktop auth (`auth.getToken` → browser → `auth.getSession`, polled); the session key lives in the Windows Credential Manager. CI release builds embed the maintainer's API key from the repository secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` (`option_env!`); keys in `config.toml` take priority. The scrobble point counts played time only; failed scrobbles wait in `lastfm-queue.json` (retried every 5 min, dropped after 14 days).
 
 **Synced lyrics:** one `GET https://lrclib.net/api/get` per track (title, artist, album, duration), cached in `lyrics-cache/` in the profile; shown in the site's Lyrics tab only when LRCLIB has synced lines. Entries in Enhanced LRC (a `<mm:ss.xx>` before each word) light up word by word, on the page's own `timeupdate` (about 4 per second, no extra timer); most entries are timed by line only. Other sources with word timing (Musixmatch, NetEase, Apple Music, or proxies of them) are private APIs and stay out.
+
+**Launcher:** on an interactive start (not `--hidden`, `--mini-player` or `--measure`) a small native start screen (Direct2D) opens first and says what the app is doing. The main window is created hidden, so the site loads meanwhile; the window is shown when the update check is done and the site has drawn its first content (a probe on the page, at most 8 s after `load`, 20 s overall), never on a blank page. The update check is one `GET` of the repository's latest release on the GitHub API. A newer release's installer is downloaded, its SHA-256 compared with the one GitHub lists for the asset (the installer is not signed, so a missing or different hash stops the update), and run silently (`/S /R /UPDATE`: it closes the app, replaces it and starts it again). Only an installed copy updates itself (the exe is in the profile folder, where the installer puts it); a build from `target/` never does. Any failure, offline included, just starts the current version.
 
 ## UI performance rules
 

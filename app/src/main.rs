@@ -26,7 +26,9 @@ mod settings;
 mod settings_window;
 mod shortcuts;
 mod smtc;
+mod splash;
 mod titlebar;
+mod updater;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,6 +90,8 @@ fn main() {
     let settings = settings::Settings::load(&profile);
     let args = browser_args(&settings.browser);
     let script = injections::script(&settings);
+    // The start screen (splash.rs) is for an interactive start; the window opens when it is done.
+    let launcher = settings.plugin("launcher") && !hidden && !mini && !measure;
 
     // A measurement must not read or overwrite the saved window state: it needs the fixed 1280x800.
     let denylist: &[&str] = if measure { &["main", "settings"] } else { &["settings"] };
@@ -123,12 +127,13 @@ fn main() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            let launcher = launcher && splash::show(&handle, profile.clone());
             let window = WindowBuilder::new(app, "main")
                 .title("feathertune")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(400.0, 300.0)
                 .decorations(false)
-                .visible(!hidden && !mini)
+                .visible(!hidden && !mini && !launcher)
                 .build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
             let top = f64::from(titlebar::HEIGHT);
@@ -141,6 +146,7 @@ fn main() {
                     .on_page_load(|site, payload| {
                         if payload.event() == tauri::webview::PageLoadEvent::Finished {
                             injections::resend(&site);
+                            splash::page_loaded(site.app_handle());
                         }
                     })
                     .on_navigation({

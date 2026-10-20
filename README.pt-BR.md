@@ -16,6 +16,7 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 
 ## Recursos
 
+- Uma tela de abertura que procura atualizações (e instala uma versão nova) enquanto o player carrega, então a janela nunca abre numa página em branco.
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
@@ -47,6 +48,7 @@ cargo build --release
 
 ```toml
 [plugins]                    # todo recurso opcional; a janela de configurações mostra descrição e custo
+launcher = true              # tela de abertura: procura versão nova no GitHub, instala e espera o player
 controls = true              # módulo da página que aperta os botões do player
 tracker_filter = true        # bloqueia requisições de analytics de terceiros; nunca anúncios (docs/DESIGN.pt-BR.md)
 track_notifications = true   # aviso na troca de faixa, só com a janela escondida

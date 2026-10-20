@@ -151,6 +151,9 @@ details { margin-top: 10px; }
 summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 summary:hover { color: var(--text); }
 
+/* An author `display` would otherwise beat the `hidden` attribute (the restart banner always showed). */
+[hidden] { display: none !important; }
+
 footer {
   position: fixed;
   left: 16px;

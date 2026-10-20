@@ -1,8 +1,9 @@
 // Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...] } for the current track, or null (the
 // track changed, or LRCLIB has none). In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
-// one by one in the current line. With no data the site's own lyrics are left alone. The page
-// fetches nothing and calls nothing; lines are shown with textContent only. Presentation only.
+// one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
+// click on a line seeks the <video> to it. With no data the site's own lyrics are left alone. The page
+// fetches nothing and calls nothing; lines are shown with textContent only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const MAX_LINES = 2000;
@@ -49,6 +50,14 @@ const build = () => {
   const onManual = () => (manualUntil = Date.now() + MANUAL_SCROLL_MS);
   box.addEventListener('wheel', onManual, { passive: true });
   box.addEventListener('touchmove', onManual, { passive: true });
+  box.addEventListener('click', (e) => {
+    const index = items.indexOf(e.target instanceof Element ? e.target.closest('.ft-line') : null);
+    const video = document.querySelector('video');
+    if (index < 0 || !lines[index].text || !video) return;
+    manualUntil = 0;
+    video.currentTime = lines[index].ms / 1000;
+    sync(video, true);
+  });
   items = lines.map((l) => {
     const el = document.createElement('p');
     el.className = l.text ? 'ft-line' : 'ft-line ft-gap';
@@ -121,6 +130,22 @@ const singWords = (ms) => {
   sung = index;
 };
 
+// Distance from the current line, for the fade (0 to REACH; farther lines keep the default look).
+// Only the lines around the old and the new current one are touched.
+const REACH = 4;
+const fade = (from, to) => {
+  const near = new Set();
+  for (const center of [from, to]) {
+    if (center < 0) continue;
+    for (let i = Math.max(0, center - REACH - 1); i <= Math.min(items.length - 1, center + REACH + 1); i++) near.add(i);
+  }
+  for (const i of near) {
+    const d = to < 0 ? REACH + 1 : Math.abs(i - to);
+    if (d > REACH) delete items[i].dataset.d;
+    else items[i].dataset.d = String(d);
+  }
+};
+
 const sync = (video, force) => {
   if (!lines || !box || box.hidden || !video) return;
   const ms = video.currentTime * 1000 + 250;
@@ -132,9 +157,11 @@ const sync = (video, force) => {
   const old = items[current];
   old?.classList.remove('ft-current');
   if (old) for (const span of old.children) span.classList.remove('ft-sung');
+  const before = current;
   current = index;
   sung = -1;
   singWords(ms);
+  fade(before, index);
   const el = items[index];
   if (!el) return;
   el.classList.add('ft-current');

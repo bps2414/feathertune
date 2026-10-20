@@ -1,43 +1,62 @@
 /* Synced lyrics: the timed lines replace the site's own lyrics while the Lyrics tab is open (the
-   attribute is set by lyrics/page.js only then, and only when LRCLIB had lyrics). */
+   attribute is set by lyrics/page.js only then, and only when LRCLIB had lyrics). The site's root font
+   is small, so sizes are in px. Lines fade with their distance from the current one (`data-d`, set by
+   the page; lines without it are the farthest), the current one is large and bright. */
 ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   display: none;
 }
 
 #feathertune-lyrics {
-  padding: 24px 20px 45vh;
+  padding: 32px 24px 50vh;
 }
 
 #feathertune-lyrics .ft-line {
   margin: 0;
-  padding: 8px 0;
-  font-size: 2.2rem;
-  font-weight: 700;
-  line-height: 1.3;
-  color: rgba(255, 255, 255, 0.45);
+  padding: 10px 0;
+  font-size: clamp(24px, 2.4vw, 40px);
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  color: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  transform-origin: left center;
+  transform: scale(0.94);
 }
 
-#feathertune-lyrics .ft-gap {
+#feathertune-lyrics .ft-line.ft-gap {
   min-height: 1.35em;
+  cursor: default;
+}
+
+#feathertune-lyrics .ft-line[data-d='4'] { color: rgba(255, 255, 255, 0.3); }
+#feathertune-lyrics .ft-line[data-d='3'] { color: rgba(255, 255, 255, 0.36); }
+#feathertune-lyrics .ft-line[data-d='2'] { color: rgba(255, 255, 255, 0.44); }
+#feathertune-lyrics .ft-line[data-d='1'] { color: rgba(255, 255, 255, 0.56); }
+
+#feathertune-lyrics .ft-line:not(.ft-gap):hover {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 #feathertune-lyrics .ft-line.ft-current {
   color: #fff;
-  text-shadow: 0 0 18px color-mix(in srgb, var(--feathertune-accent, #fff) 55%, transparent);
+  transform: scale(1);
+  text-shadow: 0 0 28px color-mix(in srgb, var(--feathertune-accent, #fff) 65%, transparent);
 }
 
 /* A line timed word by word lights up as it is sung: its words start dim and turn white in turn. */
 #feathertune-lyrics .ft-line.ft-current.ft-words {
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 #feathertune-lyrics .ft-line.ft-current .ft-sung {
   color: #fff;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--feathertune-accent, #fff) 70%, transparent);
 }
 
 #feathertune-lyrics .ft-credit {
-  margin: 28px 0 0;
-  font-size: 1.2rem;
+  margin: 32px 0 0;
+  font-size: 14px;
   color: rgba(255, 255, 255, 0.4);
 }
 
@@ -45,7 +64,8 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   #feathertune-lyrics .ft-line,
   #feathertune-lyrics .ft-line span {
     transition:
-      color 0.25s ease,
-      text-shadow 0.25s ease;
+      color 0.35s ease,
+      text-shadow 0.35s ease,
+      transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 }

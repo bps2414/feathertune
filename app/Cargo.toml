@@ -1,6 +1,6 @@
 [package]
 name = "feathertune"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 publish = false
 
@@ -21,6 +21,7 @@ md5 = "0.8"
 # "native-tls", not "native-tls-no-default": ureq 3.4 only accepts the NativeTls provider with this
 # feature on, and panics on the first https request otherwise (it also pulls in webpki-root-certs,
 # unused here: the roots come from Windows through RootCerts::PlatformVerifier).
+sha2 = "0.11"
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
 # Toasts. tauri-plugin-notification would inject a script into the page that replaces
 # window.Notification, so the toast is shown from Rust directly (the plugin uses this crate too).

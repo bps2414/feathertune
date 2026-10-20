@@ -55,6 +55,7 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 
 | Plugin | Padrão | Custo |
 |---|---|---|
+| `launcher` (tela de abertura, checagem de atualização) | ligado | não medido: uma requisição pequena ao GitHub por abertura |
 | `controls` (aperta os botões do player) | ligado | nenhum mensurável |
 | `tracker_filter` | ligado | economiza ~16 MB de WS e um pouco de CPU |
 | `track_notifications`, `global_shortcuts` | ligado | nenhum mensurável |
@@ -70,6 +71,8 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 **Last.fm:** autenticação desktop (`auth.getToken` → navegador → `auth.getSession`, consultado em intervalos); a session key fica no Gerenciador de Credenciais do Windows. Os builds de release da CI embutem a API key do mantenedor a partir dos secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` do repositório (`option_env!`); chaves no `config.toml` têm prioridade. O ponto do scrobble conta só o tempo tocado; scrobbles que falham esperam em `lastfm-queue.json` (nova tentativa a cada 5 min, descartados depois de 14 dias).
 
 **Letras sincronizadas:** um `GET https://lrclib.net/api/get` por faixa (título, artista, álbum, duração), em cache em `lyrics-cache/` no perfil; mostradas na aba Letra do site só quando o LRCLIB tem linhas sincronizadas. Entradas em Enhanced LRC (um `<mm:ss.xx>` antes de cada palavra) acendem palavra por palavra, no próprio `timeupdate` da página (umas 4 vezes por segundo, sem timer extra); a maioria das entradas é sincronizada só por linha. Outras fontes com tempo por palavra (Musixmatch, NetEase, Apple Music, ou proxies delas) são APIs privadas e ficam de fora.
+
+**Launcher:** numa abertura interativa (sem `--hidden`, `--mini-player` ou `--measure`) uma tela de abertura nativa pequena (Direct2D) aparece primeiro e diz o que o app está fazendo. A janela principal é criada escondida, então o site carrega enquanto isso; ela é mostrada quando a checagem de atualização termina e o site desenhou o primeiro conteúdo (uma sonda na página, no máximo 8 s depois do `load`, 20 s no total), nunca numa página em branco. A checagem é um `GET` do último release do repositório na API do GitHub. O instalador de um release mais novo é baixado, o SHA-256 dele é comparado com o que o GitHub lista para o arquivo (o instalador não é assinado, então hash ausente ou diferente interrompe a atualização) e executado em silêncio (`/S /R /UPDATE`: ele fecha o app, substitui e abre de novo). Só uma cópia instalada se atualiza (o exe está na pasta do perfil, onde o instalador o coloca); um build de `target/` nunca. Qualquer falha, inclusive sem internet, só abre a versão atual.
 
 ## Regras de desempenho da UI
 

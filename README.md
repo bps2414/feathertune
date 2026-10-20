@@ -16,6 +16,7 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 
 ## Features
 
+- A start screen that checks for updates (and installs a newer release) while the player loads, so the window never opens on a blank page.
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
@@ -47,6 +48,7 @@ cargo build --release
 
 ```toml
 [plugins]                    # every optional feature; the settings window shows its description and cost
+launcher = true              # start screen: checks GitHub for a newer release, installs it, waits for the player
 controls = true              # page module that presses the player's buttons
 tracker_filter = true        # blocks third-party analytics requests; never ads (docs/DESIGN.md)
 track_notifications = true   # toast on track change, only while the window is hidden

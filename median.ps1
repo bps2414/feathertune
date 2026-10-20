@@ -1,7 +1,7 @@
 # Median of several measure.ps1 runs. Run measure.ps1 three times with names <prefix>1..3, then:
 #   ./median.ps1 -Prefix base-open-
 # Reads results\<prefix>*.json (written by measure.ps1) and prints the median of each column,
-# plus the min-max range, ready to paste into the plan tables.
+# plus the min-max range, ready to paste into the tables in docs/DESIGN.md.
 param([Parameter(Mandatory)][string]$Prefix)
 $ErrorActionPreference = 'Stop'
 $runs = @(Get-ChildItem (Join-Path $PSScriptRoot 'results') -Filter "$Prefix*.json" | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })

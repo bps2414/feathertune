@@ -274,3 +274,13 @@ input[type="range"] { accent-color: var(--accent); padding: 0; background: none;
 .eq .db { color: var(--text); font-variant-numeric: tabular-nums; }
 label .value { float: right; color: var(--text); font-variant-numeric: tabular-nums; }
 label input[type="range"] { width: 100%; }
+
+/* Mix tab. */
+.mix-pairs { list-style: none; margin: 8px 0 0; padding: 0; }
+.mix-pairs li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.mix-pairs li.edited { background: rgba(255, 255, 255, 0.06); }
+.mix-pairs .body { flex: 1; min-width: 0; }
+.mix-pairs .title, .mix-pairs .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mix-pairs .detail, .mix-pairs .empty { color: var(--muted); font-size: 12px; }
+#mix-canvas { display: block; width: 100%; height: 150px; margin: 8px 0; border-radius: 10px; background: var(--glass); border: 1px solid var(--edge); touch-action: none; cursor: crosshair; }
+#mix-import-text { display: block; width: 100%; box-sizing: border-box; margin: 6px 0; font: 12px/1.4 ui-monospace, monospace; color: var(--text); background: var(--glass); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px; resize: vertical; }

@@ -1,0 +1,32 @@
+/* The mix buttons between two rows (page.js, mix buttons). */
+ytmusic-responsive-list-item-renderer:has(> .feathertune-mix),
+ytmusic-player-queue-item:has(> .feathertune-mix) {
+  position: relative;
+  overflow: visible;
+}
+.feathertune-mix {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  z-index: 2;
+  padding: 1px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(30, 30, 30, 0.92);
+  color: rgba(255, 255, 255, 0.7);
+  font: 500 11px/16px Roboto, Arial, sans-serif;
+  cursor: pointer;
+  opacity: 0;
+}
+ytmusic-responsive-list-item-renderer:hover > .feathertune-mix,
+ytmusic-player-queue-item:hover > .feathertune-mix,
+.feathertune-mix:hover,
+.feathertune-mix:focus-visible,
+.feathertune-mix.edited {
+  opacity: 1;
+}
+.feathertune-mix.edited {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}

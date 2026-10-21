@@ -29,8 +29,10 @@ use serde::Deserialize;
 use tauri::Url;
 use tokio::sync::broadcast;
 
-/// Raw payload limit, before parsing.
-const MAX_PAYLOAD: usize = 8 * 1024;
+/// Raw payload limit, before parsing (a queue of 200 tracks fits).
+const MAX_PAYLOAD: usize = 96 * 1024;
+const MAX_QUEUE: usize = 200;
+const MAX_ITEM_TEXT: usize = 200;
 const MAX_TEXT: usize = 512;
 const MAX_URL: usize = 2048;
 /// 24 h: longer than any track or mix.
@@ -47,6 +49,24 @@ pub struct Track {
     pub artwork: Option<String>,
     /// Seconds; 0 while unknown.
     pub duration: f64,
+}
+
+/// A track of the play queue (`player_state`'s `next` and `queue`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueItem {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+}
+
+/// Where the track plays from, for the mixes (mixes.rs): the playlist id (`list=` of the URL), the next
+/// track and, when the queue changed, the queue. Data only, like `State`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Context {
+    pub list: Option<String>,
+    pub next: Option<QueueItem>,
+    pub queue: Option<Vec<QueueItem>>,
 }
 
 #[derive(Clone, Debug)]
@@ -121,9 +141,12 @@ impl Player {
 /// The one command the page may call (see `capabilities/`). It only stores data: invalid payloads
 /// are dropped and nothing here triggers an action.
 #[tauri::command]
-pub fn player_state(state: String, player: tauri::State<'_, Player>) {
+pub fn player_state(state: String, player: tauri::State<'_, Player>, app: tauri::AppHandle) {
     match parse(&state) {
-        Some(s) => player.update(s),
+        Some((s, context)) => {
+            player.update(s);
+            crate::mixes::observe(&app, context);
+        }
         None => eprintln!("player_state: invalid payload dropped ({} bytes)", state.len()),
     }
 }
@@ -139,9 +162,15 @@ struct Payload {
     duration: f64,
     position: f64,
     paused: bool,
+    #[serde(default)]
+    list: Option<String>,
+    #[serde(default)]
+    next: Option<QueueItem>,
+    #[serde(default)]
+    queue: Option<Vec<QueueItem>>,
 }
 
-fn parse(json: &str) -> Option<State> {
+fn parse(json: &str) -> Option<(State, Context)> {
     if json.len() > MAX_PAYLOAD {
         return None;
     }
@@ -150,9 +179,7 @@ fn parse(json: &str) -> Option<State> {
         |s: String| (s.chars().count() <= MAX_TEXT && !s.chars().any(char::is_control)).then(|| s.trim().to_owned());
     let seconds = |x: f64| (x.is_finite() && (0.0..=MAX_SECONDS).contains(&x)).then_some(x);
     let id = match p.id {
-        Some(id) if id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => {
-            Some(id)
-        }
+        Some(id) if valid_id(&id) => Some(id),
         Some(_) => return None,
         None => None,
     };
@@ -161,7 +188,27 @@ fn parse(json: &str) -> Option<State> {
         Some(a) => Some(artwork(&a)?),
         None => None,
     };
-    Some(State {
+    let item = |i: QueueItem| {
+        let short = |s: String| {
+            (s.chars().count() <= MAX_ITEM_TEXT && !s.chars().any(char::is_control)).then(|| s.trim().to_owned())
+        };
+        Some(QueueItem { title: short(i.title)?, artist: short(i.artist)?, id: valid_id(&i.id).then_some(i.id)? })
+    };
+    let list = match p.list {
+        Some(l) if valid_list(&l) => Some(l),
+        Some(_) => return None,
+        None => None,
+    };
+    let next = match p.next {
+        Some(n) => Some(item(n)?),
+        None => None,
+    };
+    let queue = match p.queue {
+        Some(q) if q.len() <= MAX_QUEUE => Some(q.into_iter().map(item).collect::<Option<Vec<_>>>()?),
+        Some(_) => return None,
+        None => None,
+    };
+    let state = State {
         track: Track {
             id,
             title,
@@ -173,7 +220,17 @@ fn parse(json: &str) -> Option<State> {
         position: seconds(p.position)?,
         paused: p.paused,
         at: Instant::now(),
-    })
+    };
+    Some((state, Context { list, next, queue }))
+}
+
+pub fn valid_id(id: &str) -> bool {
+    crate::audio_facts::valid_id(id)
+}
+
+/// A playlist id: the `list=` of a URL.
+pub fn valid_list(list: &str) -> bool {
+    (1..=64).contains(&list.len()) && list.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The URL if it is an https URL on one of the image hosts (the mini player checks downloads with it too).
@@ -189,4 +246,35 @@ pub(crate) fn artwork(url: &str) -> Option<String> {
         && u.port().is_none()
         && ARTWORK_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")));
     ok.then(|| u.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(extra: &str) -> String {
+        format!(
+            r#"{{"id":"dQw4w9WgXcQ","title":"T","artist":"A","album":"","artwork":null,"duration":200,"position":3,"paused":false{extra}}}"#
+        )
+    }
+
+    #[test]
+    fn list_next_and_queue_are_validated() {
+        let (_, c) = parse(&payload("")).unwrap();
+        assert_eq!(c, Context::default());
+        let item = r#"{"id":"aaaaaaaaaaa","title":"Next","artist":"Someone"}"#;
+        let (_, c) = parse(&payload(&format!(r#","list":"PLx_1-2","next":{item},"queue":[{item}]"#))).unwrap();
+        assert_eq!(c.list.as_deref(), Some("PLx_1-2"));
+        assert_eq!(c.next.as_ref().map(|n| n.title.as_str()), Some("Next"));
+        assert_eq!(c.queue.map(|q| q.len()), Some(1));
+        for bad in [
+            r#","list":"../etc""#.to_owned(),
+            format!(r#","list":"{}""#, "a".repeat(65)),
+            r#","next":{"id":"short","title":"","artist":""}"#.to_owned(),
+            r#","next":{"id":"aaaaaaaaaaa","title":"x","artist":"y","extra":1}"#.to_owned(),
+            format!(r#","queue":[{}]"#, vec![item; MAX_QUEUE + 1].join(",")),
+        ] {
+            assert!(parse(&payload(&bad)).is_none(), "{bad}");
+        }
+    }
 }

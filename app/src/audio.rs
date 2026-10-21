@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Map, Value, json};
 use tauri::{AppHandle, Manager};
 
-use crate::audio_facts::Store;
 use crate::player::Player;
 use crate::settings::{Live, Settings};
 
@@ -84,15 +83,15 @@ pub fn push(app: &AppHandle) {
     }
     let mut data = payload(&app.state::<Live>().get());
     let current = app.state::<Player>().current().and_then(|s| s.track.id);
-    data["facts"] = json!({ "current": current.and_then(|id| page_facts(app, &id)) });
+    let mix = crate::mixes::page_data(app, current.as_deref());
+    data["facts"] = json!({
+        "current": current.as_deref().and_then(|id| crate::mixes::page_facts(app, id)),
+        "next": mix["next_facts"],
+    });
+    for key in ["list", "next", "transition", "mixes", "command"] {
+        data[key] = mix[key].clone();
+    }
     crate::injections::send(app, "audio", &data);
-}
-
-/// A track's facts for the page: everything but the envelope (only the Mix tab draws it).
-fn page_facts(app: &AppHandle, id: &str) -> Option<Value> {
-    let mut facts = serde_json::to_value(app.state::<Store>().load(id)?).ok()?;
-    facts.as_object_mut()?.remove("envelope");
-    Some(facts)
 }
 
 /// The equalizer gains the settings ask for (flat for anything unknown).

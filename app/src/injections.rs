@@ -79,7 +79,7 @@ const INJECTIONS: &[Injection] = &[
     Injection {
         id: "audio",
         js: Some(include_str!("../injections/audio/page.js")),
-        css: None,
+        css: Some(include_str!("../injections/audio/style.css")),
         plugins: crate::audio::PLUGINS,
     },
 ];

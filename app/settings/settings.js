@@ -50,6 +50,7 @@ for (const t of tabs) {
   t.addEventListener('click', () => {
     clearSearch();
     showTab(t.dataset.tab);
+    if (t.dataset.tab === 'mix') loadMix();
   });
 }
 
@@ -341,6 +342,319 @@ const renderAudio = (a) => {
 // A preset chosen from the list moves the bands to it.
 $('eq-preset').addEventListener('change', () => setTimeout(load, 100));
 
+// Mix: through settings_mix (mixes.rs). Track titles come from the site's queue and are shown with
+// textContent only.
+const CURVE_NAMES = { equal_power: 'Equal power', linear: 'Linear', s_curve: 'S-curve', exponential: 'Exponential' };
+const EFFECT_NAMES = {
+  echo: 'Echo on the outgoing tail',
+  filter: 'High-pass rising on the outgoing track',
+  bass_swap: 'Bass swap (needs the overlap)',
+  tempo: 'Next track at this tempo (needs the overlap)',
+};
+const MIX_PRESETS = {
+  fade: { duration_ms: 6000, curve: 'equal_power', effects: {} },
+  rise: { duration_ms: 8000, curve: 's_curve', effects: { filter: true } },
+  bass_swap: { duration_ms: 8000, curve: 'equal_power', effects: { bass_swap: true } },
+  echo_out: { duration_ms: 4000, curve: 'exponential', effects: { echo: true } },
+};
+// Where the editor's canvas looks: the last and first seconds of the two tracks.
+const MIX_VIEW_S = 40;
+let mix = null;
+let mixList = null;
+// The pair being edited: { from, to, out_ms, in_ms, duration_ms, curve, effects }, its tracks' facts.
+let editing = null;
+let editFacts = { a: null, b: null };
+const mixCall = async (op, arg = {}) => {
+  try {
+    const r = await invoke('settings_mix', { op, arg: { list: mixList, ...arg } });
+    showError('');
+    return r ?? true;
+  } catch (e) {
+    showError(String(e));
+    return null;
+  }
+};
+const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
+const time = (ms) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+// Camelot neighbours mix well: the same code, one step round the wheel, or the same number.
+const keysMatch = (a, b) => {
+  if (!a || !b) return null;
+  const [na, la] = [parseInt(a, 10), a.slice(-1)];
+  const [nb, lb] = [parseInt(b, 10), b.slice(-1)];
+  const step = Math.min((na - nb + 12) % 12, (nb - na + 12) % 12);
+  return (la === lb && step <= 1) || (na === nb && la !== lb);
+};
+
+// A transition's fields (length, curve, effects); `onChange` gets the new transition.
+const transitionFields = (box, t, max, onChange) => {
+  const length = el('input');
+  length.type = 'range';
+  length.min = '0';
+  length.max = String(max);
+  length.step = '500';
+  length.value = String(t.duration_ms);
+  const shown = el('span', 'value', seconds(t.duration_ms));
+  const lengthLabel = el('label', '', 'Length ');
+  lengthLabel.append(shown, length);
+  const curve = el('select');
+  for (const [id, name] of Object.entries(CURVE_NAMES)) {
+    const o = el('option', '', name);
+    o.value = id;
+    curve.append(o);
+  }
+  curve.value = t.curve;
+  const curveLabel = el('label', '', 'Curve ');
+  curveLabel.append(curve);
+  const effects = Object.entries(EFFECT_NAMES).map(([id, name]) => {
+    const row = el('div', 'option');
+    const body = el('div', 'body');
+    body.append(el('div', 'name small', name));
+    const toggle = el('input', 'switch');
+    toggle.type = 'checkbox';
+    toggle.checked = !!t.effects?.[id];
+    toggle.setAttribute('aria-label', name);
+    toggle.dataset.effect = id;
+    row.append(body, toggle);
+    return row;
+  });
+  const read = () => ({
+    ...t,
+    duration_ms: Number(length.value),
+    curve: curve.value,
+    effects: Object.fromEntries(effects.map((r) => r.querySelector('input')).map((i) => [i.dataset.effect, i.checked])),
+  });
+  length.addEventListener('input', () => (shown.textContent = seconds(Number(length.value))));
+  for (const input of [length, curve, ...effects.map((r) => r.querySelector('input'))]) {
+    input.addEventListener('change', () => onChange(read()));
+  }
+  box.replaceChildren(lengthLabel, curveLabel, ...effects);
+};
+
+const renderMix = (m) => {
+  mix = m;
+  mixList = m.list;
+  $('mix-none').hidden = !!m.list;
+  $('mix-body').hidden = !m.list;
+  const select = $('mix-list');
+  const lists = [...new Set([...(m.list ? [m.list] : []), ...m.lists])];
+  select.replaceChildren(
+    ...lists.map((l) => {
+      const o = el('option', '', l === m.current ? `${l} (playing)` : l);
+      o.value = l;
+      return o;
+    }),
+  );
+  select.value = m.list || '';
+  if (!m.list) return;
+  $('mix-enabled').checked = m.mix.enabled;
+  $('mix-auto').checked = m.mix.defaults.auto;
+  $('mix-defaults').hidden = m.mix.defaults.auto;
+  transitionFields($('mix-defaults'), m.mix.defaults, m.max_ms, async (t) => {
+    if (await mixCall('defaults', { defaults: t })) loadMix();
+  });
+  const edited = new Map(m.mix.pairs.map((p) => [`${p.from}>${p.to}`, p]));
+  const items = m.queue;
+  $('mix-pairs').replaceChildren(
+    ...items.slice(0, -1).map((a, i) => {
+      const b = items[i + 1];
+      const li = el('li', edited.has(`${a.id}>${b.id}`) ? 'edited' : '');
+      const text = el('div', 'body');
+      text.append(el('div', 'title', `${a.title || a.id} → ${b.title || b.id}`));
+      const detail = [a.artist && b.artist ? `${a.artist} → ${b.artist}` : '', a.bpm ? `${Math.round(a.bpm)} BPM` : '', a.camelot && b.camelot ? `${a.camelot} → ${b.camelot}` : '']
+        .filter(Boolean)
+        .join(' · ');
+      if (detail) text.append(el('div', 'detail', detail));
+      const button = el('button', 'secondary', edited.has(`${a.id}>${b.id}`) ? 'Edited' : 'Auto');
+      button.type = 'button';
+      button.addEventListener('click', () => editPair(a, b));
+      li.append(text, button);
+      return li;
+    }),
+  );
+  if (items.length < 2) $('mix-pairs').append(el('li', 'empty', 'Play this playlist once to list its tracks.'));
+  if (m.open && m.open.list === m.list) {
+    const a = items.find((x) => x.id === m.open.from) || { id: m.open.from, title: '' };
+    const b = items.find((x) => x.id === m.open.to) || { id: m.open.to, title: '' };
+    showTab('mix');
+    editPair(a, b);
+  } else if (editing) {
+    $('mix-editor').hidden = false;
+  }
+};
+
+const editPair = async (a, b) => {
+  const pair = mix.mix.pairs.find((p) => p.from === a.id && p.to === b.id);
+  const [fa, fb] = await Promise.all([mixCall('facts', { id: a.id }), mixCall('facts', { id: b.id })]);
+  editFacts = { a: fa && fa !== true ? fa : null, b: fb && fb !== true ? fb : null };
+  const base = mix.mix.defaults;
+  editing = pair
+    ? { ...pair, effects: { ...pair.effects } }
+    : { from: a.id, to: b.id, out_ms: null, in_ms: Math.round(editFacts.b?.lead_in_ms || 0), duration_ms: base.duration_ms, curve: base.curve, effects: { ...base.effects } };
+  $('mix-title').textContent = `${a.title || a.id} → ${b.title || b.id}`;
+  const match = keysMatch(editFacts.a?.camelot, editFacts.b?.camelot);
+  const tempo = [editFacts.a?.bpm, editFacts.b?.bpm].map((x) => (x ? `${Math.round(x)} BPM` : '?')).join(' → ');
+  $('mix-keys').textContent = [
+    `Tempo ${tempo}`,
+    match === null ? 'Keys not measured yet' : `Keys ${editFacts.a.key} → ${editFacts.b.key}: ${match ? 'they mix well' : 'they may clash'}`,
+  ].join(' · ');
+  $('mix-delete').disabled = !pair;
+  $('mix-editor').hidden = false;
+  drawPairFields();
+  drawMixCanvas();
+  $('mix-editor').scrollIntoView({ block: 'nearest' });
+};
+const drawPairFields = () =>
+  transitionFields($('mix-pair-fields'), editing, mix.max_ms, (t) => {
+    editing = t;
+    drawMixCanvas();
+  });
+
+// The end of A on the top lane and the start of B below, from their envelopes (loudness, 10 a
+// second); the fade's span and curve over A, B's entry point. Drawn only when something changes.
+const outMs = () => {
+  const end = editFacts.a ? editFacts.a.tail_ms ?? editFacts.a.duration_s * 1000 : null;
+  return editing.out_ms ?? (end !== null ? Math.max(0, end - editing.duration_ms) : null);
+};
+const envelope = (facts) => {
+  if (!facts?.envelope) return null;
+  const raw = atob(facts.envelope);
+  const out = new Float32Array(raw.length / 3);
+  for (let i = 0; i < out.length; i++) out[i] = Math.max(raw.charCodeAt(i * 3), raw.charCodeAt(i * 3 + 1), raw.charCodeAt(i * 3 + 2)) / 255;
+  return out;
+};
+const drawMixCanvas = () => {
+  const canvas = $('mix-canvas');
+  const g = canvas.getContext('2d');
+  const { width: w, height: h } = canvas;
+  const lane = h / 2;
+  const css = getComputedStyle(document.body);
+  const ink = css.color;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = ink;
+  g.strokeStyle = ink;
+  const view = MIX_VIEW_S * 1000;
+  const aEnd = editFacts.a ? editFacts.a.duration_s * 1000 : null;
+  const aStart = aEnd !== null ? Math.max(0, aEnd - view) : 0;
+  const lanes = [
+    { env: envelope(editFacts.a), from: aStart, y: 0 },
+    { env: envelope(editFacts.b), from: 0, y: lane },
+  ];
+  g.globalAlpha = 0.35;
+  for (const { env, from, y } of lanes) {
+    if (!env) continue;
+    for (let x = 0; x < w; x++) {
+      const v = env[Math.floor((from + (x / w) * view) / 100)] ?? 0;
+      g.fillRect(x, y + lane - 4 - v * (lane - 8), 1, v * (lane - 8));
+    }
+  }
+  g.globalAlpha = 1;
+  const out = outMs();
+  if (out !== null) {
+    const x0 = ((out - aStart) / view) * w;
+    const x1 = ((out + editing.duration_ms - aStart) / view) * w;
+    g.globalAlpha = 0.12;
+    g.fillRect(x0, 0, x1 - x0, lane);
+    g.globalAlpha = 1;
+    g.beginPath();
+    const curve = editing.curve;
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32;
+      const v = curve === 'linear' ? 1 - t : curve === 's_curve' ? 0.5 * (1 + Math.cos(Math.PI * t)) : curve === 'exponential' ? (10 ** (-3 * t) - 0.001) / 0.999 : Math.cos((t * Math.PI) / 2);
+      g.lineTo(x0 + t * (x1 - x0), 4 + (1 - v) * (lane - 8));
+    }
+    g.stroke();
+  }
+  const xin = (editing.in_ms / view) * w;
+  g.fillRect(xin, lane, 2, lane);
+  g.globalAlpha = 0.5;
+  g.fillRect(0, lane, w, 1);
+  g.globalAlpha = 1;
+  g.font = '11px system-ui, sans-serif';
+  g.fillText(out !== null ? `out ${time(out)}` : 'out: end of the track', 6, 12);
+  g.fillText(`in ${time(editing.in_ms)}`, 6, lane + 12);
+};
+// Top lane: the fade's start; bottom lane: where B starts.
+const dragMix = (e) => {
+  if (!editing || !(e.buttons & 1)) return;
+  const canvas = $('mix-canvas');
+  const r = canvas.getBoundingClientRect();
+  const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  const view = MIX_VIEW_S * 1000;
+  if (e.clientY - r.top < r.height / 2) {
+    if (!editFacts.a) return;
+    const aEnd = editFacts.a.duration_s * 1000;
+    const start = Math.max(0, aEnd - view);
+    editing.out_ms = Math.round(Math.min(aEnd - editing.duration_ms, start + x * view));
+    if (editing.out_ms < 0) editing.out_ms = 0;
+  } else {
+    editing.in_ms = Math.round(x * view);
+  }
+  drawMixCanvas();
+};
+$('mix-canvas').addEventListener('pointerdown', (e) => {
+  e.currentTarget.setPointerCapture(e.pointerId);
+  dragMix(e);
+});
+$('mix-canvas').addEventListener('pointermove', dragMix);
+
+for (const b of document.querySelectorAll('#mix-presets button')) {
+  b.addEventListener('click', async () => {
+    const id = b.dataset.preset;
+    if (id === 'auto') {
+      if (mix.mix.pairs.some((p) => p.from === editing.from && p.to === editing.to)) {
+        if (await mixCall('delete_pair', { from: editing.from, to: editing.to })) loadMix();
+      }
+      $('mix-editor').hidden = true;
+      editing = null;
+      return;
+    }
+    editing = { ...editing, ...MIX_PRESETS[id], effects: { ...MIX_PRESETS[id].effects } };
+    drawPairFields();
+    drawMixCanvas();
+  });
+}
+$('mix-save').addEventListener('click', async () => {
+  if (editing && (await mixCall('save_pair', { pair: editing }))) loadMix();
+});
+$('mix-preview').addEventListener('click', () => editing && mixCall('preview', { pair: editing }));
+$('mix-delete').addEventListener('click', async () => {
+  if (editing && (await mixCall('delete_pair', { from: editing.from, to: editing.to }))) {
+    $('mix-editor').hidden = true;
+    editing = null;
+    loadMix();
+  }
+});
+$('mix-list').addEventListener('change', () => {
+  editing = null;
+  $('mix-editor').hidden = true;
+  loadMix($('mix-list').value);
+});
+$('mix-enabled').addEventListener('change', async () => {
+  if (await mixCall('enable', { on: $('mix-enabled').checked })) loadMix();
+});
+$('mix-auto').addEventListener('change', async () => {
+  if (await mixCall('defaults', { defaults: { ...mix.mix.defaults, auto: $('mix-auto').checked } })) loadMix();
+});
+$('mix-export').addEventListener('click', () => mixCall('export'));
+$('mix-import').addEventListener('click', async () => {
+  if (!confirm("Replace this playlist's mix with the pasted one?")) return;
+  if (await mixCall('import', { json: $('mix-import-text').value })) {
+    $('mix-import-text').value = '';
+    loadMix();
+  }
+});
+
+const loadMix = async (list) => {
+  try {
+    renderMix(await invoke('settings_mix', { op: 'get', arg: list || mixList ? { list: list || mixList } : {} }));
+  } catch (e) {
+    showError(String(e));
+  }
+};
+
 const load = async () => {
   try {
     const s = await invoke('settings_get');
@@ -349,6 +663,8 @@ const load = async () => {
     renderLastFm(s.lastfm);
     renderDesktopLyrics(s.desktop_lyrics);
     renderAudio(s.audio);
+    // The Mix tab, and a pair the site asked to open (mix_open).
+    loadMix();
     if (!$('lyrics-providers').contains(document.activeElement)) renderSources(s.lyrics);
     statsRunning = s.stats_running;
     if (!document.querySelector('[data-panel="stats"]').hidden) loadStats();

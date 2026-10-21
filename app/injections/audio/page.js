@@ -21,6 +21,10 @@ const SELECTORS = {
   player: '#movie_player',
   // Its getState() is the site's state: `player.adPlaying`, `queue`.
   playerBar: 'ytmusic-player-bar',
+  // The rows of a playlist page and of the queue (the mix buttons go between them).
+  listRows: 'ytmusic-playlist-shelf-renderer ytmusic-responsive-list-item-renderer',
+  queueRows: 'ytmusic-player-queue ytmusic-player-queue-item',
+  rowLink: 'a[href*="watch?v="]',
 };
 const OFF_KEY = 'feathertune-audio-off';
 const RAMP = 0.03;
@@ -142,13 +146,16 @@ const wanted = () => {
   const list = [];
   eqGains().forEach((g, i) => g && list.push(nodes.eq[i]));
   if (compressor()) list.push(nodes.compressor);
+  if (sweep.on) list.push(nodes.sweep);
   return list;
 };
 // The fixed order of every effect node.
-const order = () => [...nodes.eq, nodes.compressor];
+const order = () => [...nodes.eq, nodes.compressor, nodes.sweep];
 
 const neutralize = (node) => {
-  if (node === nodes.compressor) {
+  if (node === nodes.sweep) {
+    ramp(node.frequency, SWEEP_FROM_HZ);
+  } else if (node === nodes.compressor) {
     ramp(node.threshold, 0);
     ramp(node.ratio, 1);
   } else {
@@ -156,6 +163,8 @@ const neutralize = (node) => {
   }
 };
 const target = (node) => {
+  // The sweep's frequency is scheduled by the fade (armSweep).
+  if (node === nodes.sweep) return;
   if (node === nodes.compressor) {
     const c = compressor();
     for (const k of ['threshold', 'knee', 'ratio', 'attack', 'release']) ramp(node[k], c[k]);
@@ -236,6 +245,8 @@ const createGraph = (element) => {
         return band;
       }),
       compressor: ctx.createDynamicsCompressor(),
+      // A mix's filter effect: a high-pass rising on the outgoing track.
+      sweep: ctx.createBiquadFilter(),
       // The echo on a fading tail: trim → send → delay ⇄ feedback, delay → wet → destination.
       echoSend: ctx.createGain(),
       delay: ctx.createDelay(2),
@@ -248,6 +259,9 @@ const createGraph = (element) => {
     nodes.analyser.fftSize = 2048;
     nodes.compressor.threshold.value = 0;
     nodes.compressor.ratio.value = 1;
+    nodes.sweep.type = 'highpass';
+    nodes.sweep.frequency.value = SWEEP_FROM_HZ;
+    nodes.sweep.Q.value = 0.7;
     testWorklet();
   }
   if (!sources.has(element)) {
@@ -335,6 +349,13 @@ const ECHO_WET = 0.5;
 const ECHO_DEFAULT_S = 0.375;
 // How long the echo keeps ringing after the fade.
 const ECHO_RING_S = 5;
+// The filter effect: the high-pass rises from (neutral) to this over the fade.
+const SWEEP_FROM_HZ = 10;
+const SWEEP_TO_HZ = 2500;
+// A command from Rust older than this is dropped (the page reloaded meanwhile, say).
+const COMMAND_TTL_MS = 5000;
+// A preview starts this long before the transition.
+const PREVIEW_LEAD_S = 3;
 
 // Fade-out curves, from 1 to 0 (the fade-in is the same curve backwards).
 const CURVES = (() => {
@@ -362,13 +383,19 @@ const facts = () => {
   const f = data?.facts?.current;
   return f && f.id === trackId ? f : null;
 };
-// The fade of the current track: { out, dur, curve } in video seconds, or null.
+// The fade of the current track: { out, dur, curve, echo, filter, to, in } in video seconds, or null.
 let fade = null;
 let armed = false;
 // The fade-out reached its end (or was cut short by a track change).
 let faded = false;
 let ownSeek = false;
 const echo = { on: false, until: 0 };
+const sweep = { on: false };
+// A mix's transition being previewed from the Mix tab (a pair, while its `from` track plays).
+let preview = null;
+// After a mix's fade: where its incoming track starts, { from, id, at }.
+let pendingIn = null;
+let lastSeq = 0;
 
 const currentId = () => {
   const player = document.querySelector(SELECTORS.player);
@@ -384,16 +411,37 @@ const seekTo = (v, t, silence = false) => {
   v.currentTime = t;
 };
 
-// The fade for this track from the global settings (a mix replaces it, see below).
+// The mix's transition out of this track (mixes.rs `plan`: a pair, a playlist's defaults or auto),
+// or the one being previewed.
+const transition = () => {
+  if (preview?.from === trackId) return preview;
+  const t = data?.transition;
+  return t && t.from === trackId ? t : null;
+};
+
+// The fade for this track: the mix's transition, else the global settings.
 const planFade = (v) => {
   const c = data?.crossfade;
-  if (!on('crossfade') || !c?.duration_ms || ad || repeatOne(v)) return null;
-  const dur = c.duration_ms / 1000;
+  const m = transition();
+  const ms = m ? m.duration_ms : c?.duration_ms;
+  if (!on('crossfade') || !ms || ad || repeatOne(v) || !Number.isFinite(v.duration)) return null;
+  const dur = ms / 1000;
   // Before the final silence, once it is known.
   const tail = facts()?.tail_ms;
   const end = tail && tail / 1000 < v.duration ? tail / 1000 : v.duration;
-  if (!Number.isFinite(end) || end < 3 * dur) return null;
-  return { out: end - dur, dur, curve: CURVES[c.curve] || CURVES.equal_power, echo: !!c.echo };
+  let out = end - dur;
+  if (m && Number.isFinite(m.out_ms)) out = Math.min(m.out_ms / 1000, v.duration - dur);
+  else if (end < 3 * dur) return null;
+  if (out < 0) return null;
+  return {
+    out,
+    dur,
+    curve: CURVES[m ? m.curve : c.curve] || CURVES.equal_power,
+    echo: m ? !!m.effects?.echo : !!c.echo,
+    filter: !!m?.effects?.filter,
+    to: m?.to ?? null,
+    in: m ? (m.in_ms || 0) / 1000 : 0,
+  };
 };
 
 // Schedules the fade-out (or what is left of it) from the video's time now.
@@ -414,6 +462,27 @@ const arm = (v) => {
   }
   armed = true;
   if (fade.echo) armEcho(v, begin, p, length);
+  if (fade.filter) armSweep(begin, p, length);
+};
+
+// The filter: the high-pass enters the chain and rises along the fade (exponentially, as heard).
+const armSweep = (begin, p, length) => {
+  if (!sweep.on) {
+    sweep.on = true;
+    apply();
+  }
+  const f = nodes.sweep.frequency;
+  const now = ctx.currentTime;
+  f.cancelAndHoldAtTime(now);
+  f.setValueAtTime(Math.max(SWEEP_FROM_HZ, f.value), now);
+  f.exponentialRampToValueAtTime(SWEEP_FROM_HZ * Math.pow(SWEEP_TO_HZ / SWEEP_FROM_HZ, p), begin);
+  f.exponentialRampToValueAtTime(SWEEP_TO_HZ, begin + Math.max(0.02, length));
+};
+// The high-pass back to neutral and out of the chain.
+const stopSweep = () => {
+  if (!sweep.on) return;
+  sweep.on = false;
+  apply();
 };
 
 // The echo: the send opens for the middle of the fade, so its repeats ring on after the track.
@@ -444,6 +513,7 @@ const holdFade = () => {
   if (!armed) return;
   nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
   nodes.echoSend.gain.cancelAndHoldAtTime(ctx.currentTime);
+  nodes.sweep.frequency.cancelAndHoldAtTime(ctx.currentTime);
   armed = false;
 };
 // Back to full level in 30 ms, nothing scheduled.
@@ -451,6 +521,7 @@ const cancelFade = () => {
   armed = false;
   ramp(nodes.master.gain, 1);
   stopEcho(false);
+  stopSweep();
 };
 
 const inWindow = (t) => fade && t >= fade.out - ARM_BEFORE_S && t < fade.out + fade.dur;
@@ -460,9 +531,13 @@ const startTrack = (v, id) => {
   if (analysis && analysis.id !== id) stopAnalysis(analysis.t >= analysis.duration - 1.5);
   const cut = armed && !faded;
   const prev = nodes.master.gain.value;
+  // A mix's incoming track: where it starts (see enterAt).
+  if (pendingIn && pendingIn.id !== id) pendingIn = null;
   trackId = id;
   armed = false;
   faded = false;
+  preview = null;
+  stopSweep();
   resetQuiet();
   fade = planFade(v);
   if (ad || !on('crossfade') || prev > 0.98) return;
@@ -493,6 +568,7 @@ const onTime = (v) => {
   if (ad || v.paused) return;
   const id = currentId();
   if (id && id !== trackId) startTrack(v, id);
+  if (pendingIn && id) enterAt(v, id);
   if (!fade && on('crossfade')) fade = planFade(v);
   const t = v.currentTime;
   if (analysis && Math.abs(analysis.t - t) > 0.5) {
@@ -509,8 +585,38 @@ const onTime = (v) => {
   // The fade is over: let the track end by itself (unless the fade already ends with it).
   if (armed && !faded && t >= fade.out + fade.dur - 0.05) {
     faded = true;
+    if (fade.to && fade.in > 0) pendingIn = { from: trackId, id: fade.to, at: fade.in };
     if (fade.out + fade.dur < v.duration - 0.1) seekTo(v, v.duration - 0.05);
   }
+};
+
+// A mix's incoming track starts at its in point, once its duration is known (before the analysis
+// would start: a track entered late is not measured).
+const enterAt = (v, id) => {
+  if (id === pendingIn.from) return;
+  if (id !== pendingIn.id) return void (pendingIn = null);
+  if (!Number.isFinite(v.duration)) return;
+  const at = pendingIn.at;
+  pendingIn = null;
+  if (at < v.duration - 5 && v.currentTime < at) seekTo(v, at);
+};
+
+// Commands from Rust (mixes.rs): each runs once, and only while fresh.
+const runCommand = (c) => {
+  if (!c || !(c.seq > lastSeq)) return;
+  lastSeq = c.seq;
+  if (!(Date.now() - c.issued_ms < COMMAND_TTL_MS)) return;
+  if (c.preview) previewMix(c.preview);
+};
+// The Mix tab's preview: the pair's transition, from a few seconds before it (only on its `from` track).
+const previewMix = (pair) => {
+  const v = video;
+  if (!v || !nodes || ad || v.paused || pair.from !== trackId) return;
+  if (armed) cancelFade();
+  faded = false;
+  preview = pair;
+  fade = planFade(v);
+  if (fade) seekTo(v, Math.max(0, fade.out - PREVIEW_LEAD_S));
 };
 
 const onSeek = (v, type) => {
@@ -986,10 +1092,84 @@ const onAd = (now) => {
   if (!now || !nodes) return;
   armed = false;
   fade = null;
+  preview = null;
+  pendingIn = null;
+  sweep.on = false;
   nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
+  nodes.sweep.frequency.cancelAndHoldAtTime(ctx.currentTime);
   stopEcho(true);
   stopAnalysis(false);
 };
+
+// --- mix buttons ---
+//
+// In a playlist whose mix is on (data.mixes), a small button between two rows (of the playlist page
+// and of the queue) opens the Mix tab on that pair through `mix_open`; it is marked when the pair was
+// edited. The buttons are redrawn when the data changes, on the site's navigation and when the rows
+// change (an observer per list, settled for 300 ms), never on a timer.
+
+const BUTTON_CLASS = 'feathertune-mix';
+const rowId = (row) => {
+  const id = row.data?.videoId;
+  if (typeof id === 'string') return id;
+  const href = row.querySelector(SELECTORS.rowLink)?.getAttribute('href') || '';
+  return new URLSearchParams(href.split('?')[1] || '').get('v');
+};
+const pageList = () => new URLSearchParams(location.search).get('list');
+
+const renderButtons = () => {
+  const list = pageList();
+  const edited = list && data?.mixes?.[list];
+  for (const selector of [SELECTORS.listRows, SELECTORS.queueRows]) {
+    const rows = [...document.querySelectorAll(selector)];
+    rows.forEach((row, i) => {
+      let button = row.querySelector(`:scope > .${BUTTON_CLASS}`);
+      const from = rowId(row);
+      const to = rows[i + 1] && rowId(rows[i + 1]);
+      const valid = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{11}$/.test(x);
+      if (!Array.isArray(edited) || !valid(from) || !valid(to) || from === to) {
+        button?.remove();
+        return;
+      }
+      if (!button) {
+        button = document.createElement('button');
+        button.className = BUTTON_CLASS;
+        button.type = 'button';
+        button.addEventListener('mousedown', (e) => e.stopPropagation(), true);
+        button.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const { list, from, to } = button.dataset;
+          window.__TAURI_INTERNALS__?.invoke('mix_open', { list, from, to }).catch(() => {});
+        });
+        row.append(button);
+      }
+      const mark = edited.includes(`${from}>${to}`);
+      Object.assign(button.dataset, { list, from, to });
+      button.classList.toggle('edited', mark);
+      button.textContent = mark ? '⇄ Edited' : '⇄ Auto';
+      button.title = 'Edit the transition between these tracks';
+    });
+  }
+  watchRows();
+};
+
+let rowsTimer = 0;
+// Only the rows' parents are watched (the buttons go inside the rows, so they do not count).
+const rowsObserver = new MutationObserver(() => {
+  clearTimeout(rowsTimer);
+  rowsTimer = setTimeout(renderButtons, 300);
+});
+const watchedRows = new WeakSet();
+const watchRows = () => {
+  for (const selector of [SELECTORS.listRows, SELECTORS.queueRows]) {
+    const parent = document.querySelector(selector)?.parentElement;
+    if (!parent || watchedRows.has(parent)) continue;
+    watchedRows.add(parent);
+    rowsObserver.observe(parent, { childList: true });
+  }
+};
+document.addEventListener('yt-navigate-finish', () => setTimeout(renderButtons, 300));
 
 // --- media events ---
 
@@ -1029,7 +1209,7 @@ const onMedia = (e) => {
     case 'durationchange':
       // A new duration: the fade is planned again.
       if (!armed) fade = null;
-    if (analysis && d?.facts?.current?.id === analysis.id) stopAnalysis(false);
+      if (analysis && data?.facts?.current?.id === analysis.id) stopAnalysis(false);
       break;
     case 'playing':
       // After a pause or a stall, the samples dropped meanwhile: back in step.
@@ -1061,6 +1241,8 @@ feathertune.audio = Object.freeze({
       createGraph(playing);
     }
     apply();
+    runCommand(d?.command);
+    renderButtons();
   },
   // --measure: one line of state.
   probe: () => {

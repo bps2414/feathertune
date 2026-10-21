@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settings-mix"
+description = "Enables the settings_mix command without any pre-configured scope."
+commands.allow = ["settings_mix"]
+
+[[permission]]
+identifier = "deny-settings-mix"
+description = "Denies the settings_mix command without any pre-configured scope."
+commands.deny = ["settings_mix"]

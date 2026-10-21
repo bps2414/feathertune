@@ -20,6 +20,7 @@
       <button role="tab" type="button" data-tab="look">Look</button>
       <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
       <button role="tab" type="button" data-tab="audio">Audio</button>
+      <button role="tab" type="button" data-tab="mix">Mix</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
       <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
@@ -127,6 +128,65 @@
             <option value="strong">Strong</option>
           </select>
         </label>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="mix" hidden>
+      <p class="hint">Transitions for a playlist and for each pair of its tracks, kept on this PC. They use the Crossfade switch; ads are never mixed.</p>
+      <p id="mix-none" class="notice" hidden>Play a playlist once to list its tracks here.</p>
+      <div id="mix-body">
+        <div class="card">
+          <label>Playlist <select id="mix-list"></select></label>
+          <div class="option">
+            <div class="body">
+              <div class="name small">Mix this playlist</div>
+              <div class="hint">Off: the Crossfade settings of the Audio tab.</div>
+            </div>
+            <input type="checkbox" class="switch" id="mix-enabled" aria-label="Mix this playlist">
+          </div>
+          <div class="name small">Every other pair</div>
+          <div class="option">
+            <div class="body">
+              <div class="name small">Auto</div>
+              <div class="hint">16 beats of the outgoing track, ending before its final silence, into the start of the next track's sound. Needs both tracks measured; otherwise 6 s from the end.</div>
+            </div>
+            <input type="checkbox" class="switch" id="mix-auto" aria-label="Auto">
+          </div>
+          <div id="mix-defaults"></div>
+        </div>
+        <div class="card">
+          <div class="name">Transitions</div>
+          <ol class="mix-pairs" id="mix-pairs"></ol>
+        </div>
+        <div class="card" id="mix-editor" hidden>
+          <div class="name" id="mix-title"></div>
+          <div class="hint" id="mix-keys"></div>
+          <canvas id="mix-canvas" width="560" height="150" aria-label="The end of the first track over the start of the next"></canvas>
+          <p class="hint">Click or drag on the top lane to set where the first track starts to fade, on the bottom lane where the next one starts.</p>
+          <div class="segmented" id="mix-presets" role="group" aria-label="Presets">
+            <button type="button" data-preset="fade">Fade</button>
+            <button type="button" data-preset="rise">Rise</button>
+            <button type="button" data-preset="bass_swap">Bass swap</button>
+            <button type="button" data-preset="echo_out">Echo out</button>
+            <button type="button" data-preset="auto">Auto</button>
+          </div>
+          <div id="mix-pair-fields"></div>
+          <div class="actions">
+            <button id="mix-save" type="button">Save</button>
+            <button id="mix-preview" type="button" class="secondary">Preview</button>
+            <button id="mix-delete" type="button" class="secondary">Back to auto</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="actions">
+            <button id="mix-export" type="button" class="secondary">Export</button>
+          </div>
+          <details>
+            <summary>Import</summary>
+            <textarea id="mix-import-text" rows="4" spellcheck="false" placeholder="Paste a mix's JSON"></textarea>
+            <div class="actions"><button id="mix-import" type="button" class="secondary">Replace this playlist's mix</button></div>
+          </details>
+        </div>
       </div>
     </section>
 

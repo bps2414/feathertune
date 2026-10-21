@@ -5,9 +5,9 @@
 // The main window has no system frame: titlebar.rs draws the title bar and the site is a child
 // webview (label `site`) below it.
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
-// login state, and the audio graph's state, so measure.ps1 can record them. The page can call two Tauri
-// commands, `player_state` (player.rs) and `audio_facts` (audio_facts.rs), which only report data
-// (see capabilities/).
+// login state, and the audio graph's state, so measure.ps1 can record them. The page can call three
+// Tauri commands: `player_state` (player.rs) and `audio_facts` (audio_facts.rs), which only report
+// data, and `mix_open` (mixes.rs), which only opens the Mix tab (see capabilities/).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -23,6 +23,7 @@ mod lastfm;
 mod lyric_view;
 mod lyrics;
 mod miniplayer;
+mod mixes;
 mod notify;
 mod player;
 mod plugins;
@@ -127,16 +128,19 @@ fn main() {
         .manage(injections::PageData::default())
         .manage(lyrics::Lyrics::default())
         .manage(audio_facts::Store::new(&profile))
+        .manage(mixes::Mixes::new(&profile))
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
         .invoke_handler(tauri::generate_handler![
             player::player_state,
             audio_facts::audio_facts,
+            mixes::mix_open,
             settings_window::settings_get,
             settings_window::settings_set,
             settings_window::settings_action,
             settings_window::settings_stats,
+            mixes::settings_mix,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mix-open"
+description = "Enables the mix_open command without any pre-configured scope."
+commands.allow = ["mix_open"]
+
+[[permission]]
+identifier = "deny-mix-open"
+description = "Denies the mix_open command without any pre-configured scope."
+commands.deny = ["mix_open"]

@@ -38,7 +38,7 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 └─ tracker filter (privacy lists only)
 ```
 
-- **Window:** `main` has no system frame; Rust paints a 32 DIP strip (app name, current track, share lyrics (only while the track has synced lyrics), mini player and settings buttons, caption buttons) and answers `WM_NCHITTEST` natively, so snap layouts, dragging and resizing are Windows' own. The site is a child webview below the strip.
+- **Window:** `main` has no system frame; Rust paints a 32 DIP strip (app name, current track, share lyrics (only while the track has synced lyrics), mini player and settings buttons, caption buttons) and answers `WM_NCHITTEST` natively, so snap layouts, dragging and resizing are Windows' own. The site is a child webview below the strip. When the page goes fullscreen (the player's own button; WebView2's `ContainsFullScreenElementChanged`) the window goes fullscreen with it and the site takes the strip's place; leaving it (or hiding the window, which makes the page exit) restores both. The site is laid out again on show, on a DPI or display change and on fullscreen changes, not only on `WM_SIZE`. The tray menu has "Reload page" as a way out of a stuck page.
 - **Memory:** hidden (tray or mini player) sets WebView2's `MemoryUsageTargetLevel=Low`; shown sets `Normal`. Playback continues.
 - **Bridge:** the `core` injection observes `navigator.mediaSession` and the `<video>` and sends Rust title, artist, artwork, time and state, only on track change, play/pause and seek plus a correction every 15 s (sending 1×/s cost ~3% CPU); Rust extrapolates the position. Rust treats the payload as untrusted: it validates it and never acts on it. Rust → page commands click the player's buttons, so a site redesign breaks about three CSS selectors, not a protocol.
 - **Data to the page:** modules get data only, as `window.__feathertune.<module>.set(JSON.parse("…"))`, never code built from strings. The last data of each module is re-sent after a reload.
@@ -150,6 +150,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 - The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost; the new parked scroll's timings.
 - In the running app: the taskbar buttons and progress (also after Explorer restarts and when running elevated); the themed tray menu (position on each taskbar edge, closing on a click outside, keyboard, 150% scaling); the floating lyrics (readability, word timing against the site, dragging, a second monitor); the Stats tab with a real history and the CSV export.
 - The share lyrics window in the running app (the looks on light and dark covers, pasting into chat apps, Save, 150% scaling) and its title bar button; the mini player's lyrics band (the lyrics glyph, timing, the roll between lines, resizing near the screen edge) and its larger buttons with hover labels; the tray menu no longer left open after a click elsewhere.
+- The player's fullscreen button (the window goes fullscreen with the site covering it, Esc and the page's exit button restore it, hiding to the tray while fullscreen), the site's bounds after restoring from the tray or moving between monitors of different DPI, and the tray's "Reload page".
 - The cost of the five new plugins.
 
 ## Ideas

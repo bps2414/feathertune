@@ -138,6 +138,7 @@ fn entries(app: &AppHandle) -> Vec<Entry> {
         list.push(item("desktop_lyrics_lock", label, None, true));
     }
     list.push(item("share_lyrics", "Share lyrics...", None, live.plugin("share_lyrics")));
+    list.push(item("reload", "Reload page", None, true));
     list.extend([
         Entry::Separator,
         item("autostart", "Start with Windows", Some(app.autolaunch().is_enabled().unwrap_or(false)), true),

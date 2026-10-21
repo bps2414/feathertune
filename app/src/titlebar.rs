@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, Webview, Window};
 use tokio::sync::broadcast::error::RecvError;
+use webview2_com::ContainsFullScreenElementChangedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
 };
@@ -48,9 +49,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
     IsWindowVisible, IsZoomed, KillTimer, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SIZE_MINIMIZED,
     SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, WM_ACTIVATE, WM_APP, WM_CLOSE,
-    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS,
-    WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE,
+    WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
+    WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
 
 use crate::gfx::{self, ICON_FONT, point, rect};
@@ -72,6 +73,8 @@ pub const WM_MOUSELEAVE: u32 = 0x02a3;
 const WM_TRACK: u32 = WM_APP + 2;
 /// Posted to re-check whether the animation timer should run.
 const WM_ANIMATE: u32 = WM_APP + 3;
+/// Posted to lay the site webview out again (fullscreen entered or left).
+const WM_RELAYOUT: u32 = WM_APP + 4;
 const TIMER: usize = 0xfea8;
 /// 30 fps: smooth for slow drift, half the repaints of 60.
 const FRAME_MS: u32 = 33;
@@ -81,6 +84,9 @@ static ANIMATED: AtomicBool = AtomicBool::new(false);
 /// The `share_lyrics` plugin was on at startup, and the current track has synced lyrics.
 static SHARE_ON: AtomicBool = AtomicBool::new(false);
 static LYRICS_READY: AtomicBool = AtomicBool::new(false);
+/// The page has a fullscreen element (the player's fullscreen button): the window is fullscreen and the
+/// site takes the strip's place too.
+static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 /// The main window, for `set_lyrics`.
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 const NAME_FONT: &str = "Segoe UI Variable Display";
@@ -262,6 +268,7 @@ struct TitleBar {
 pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Result<()> {
     let hwnd = window.hwnd()?.0 as isize;
     let window = window.clone();
+    let fullscreen_window = window.clone();
     ANIMATED.store(app.state::<Live>().plugin("animated_title_bar"), Ordering::Relaxed);
     SHARE_ON.store(app.state::<Live>().plugin("share_lyrics"), Ordering::Relaxed);
     WINDOW.store(hwnd, Ordering::Relaxed);
@@ -329,11 +336,36 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
                 drop(Box::from_raw(bar));
                 return;
             }
-            let mut client = RECT::default();
-            let _ = GetClientRect(hwnd, &mut client);
-            (*bar).layout(hwnd, client.right, client.bottom);
+            (*bar).relayout(hwnd);
+            // The player's fullscreen button: without this the page fills only the webview, and if it
+            // never gets its Esc the bar of the player stays hidden.
+            if let Ok(core) = wv.controller().CoreWebView2() {
+                let handler = ContainsFullScreenElementChangedEventHandler::create(Box::new(move |core, _| {
+                    let mut on = windows_core::BOOL::default();
+                    if let Some(core) = core {
+                        core.ContainsFullScreenElement(&mut on)?;
+                    }
+                    set_fullscreen(&fullscreen_window, on.as_bool());
+                    Ok(())
+                }));
+                let mut token = 0;
+                let _ = core.add_ContainsFullScreenElementChanged(&handler, &mut token);
+            }
         }
     })
+}
+
+/// Makes the window (and the site, which then also takes the strip's place) fullscreen or back.
+fn set_fullscreen(window: &Window, on: bool) {
+    if FULLSCREEN.swap(on, Ordering::Relaxed) == on {
+        return;
+    }
+    let _ = window.set_fullscreen(on);
+    if let Ok(hwnd) = window.hwnd() {
+        unsafe {
+            let _ = PostMessageW(Some(HWND(hwnd.0)), WM_RELAYOUT, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 /// Turns the drift on or off (the `animated_title_bar` switch).
@@ -378,7 +410,11 @@ fn invalidate(hwnd: HWND) {
 impl TitleBar {
     /// The site webview takes the client area below the strip.
     fn layout(&self, hwnd: HWND, width: i32, height: i32) {
-        let top = ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height);
+        let top = if FULLSCREEN.load(Ordering::Relaxed) {
+            0
+        } else {
+            ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height)
+        };
         unsafe {
             let _ = self.controller.SetBounds(RECT { left: 0, top: 0, right: width, bottom: height - top });
             let mut container = HWND::default();
@@ -387,6 +423,20 @@ impl TitleBar {
             }
         }
         invalidate(hwnd);
+    }
+
+    /// `layout` for the window's current client area (the size, the DPI or the strip changed without a
+    /// WM_SIZE of its own).
+    fn relayout(&self, hwnd: HWND) {
+        let mut client = RECT::default();
+        unsafe {
+            if IsIconic(hwnd).as_bool() || GetClientRect(hwnd, &mut client).is_err() {
+                return;
+            }
+        }
+        if client.right > 0 && client.bottom > 0 {
+            self.layout(hwnd, client.right, client.bottom);
+        }
     }
 
     /// The button under a point of the strip, in DIPs.
@@ -457,7 +507,8 @@ impl TitleBar {
 
     /// Starts or stops the frame timer: it runs only while there is something to move on screen.
     fn schedule(&mut self, hwnd: HWND) {
-        let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
+        let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() }
+            && !FULLSCREEN.load(Ordering::Relaxed);
         let drifting = ANIMATED.load(Ordering::Relaxed) && self.active && on_screen;
         let run = ((self.morph.is_some() || gfx::fading()) && on_screen) || drifting;
         if run == self.ticking {
@@ -675,7 +726,7 @@ unsafe extern "system" fn subclass(
             }
             let scale = gfx::scale(hwnd);
             let (x, y) = (p.x as f32 / scale, p.y as f32 / scale);
-            if y >= HEIGHT {
+            if y >= HEIGHT || FULLSCREEN.load(Ordering::Relaxed) {
                 return result;
             }
             let code = match bar.hit(x, y, width_dip(hwnd)) {
@@ -748,9 +799,26 @@ unsafe extern "system" fn subclass(
             return LRESULT(0);
         }
         // Shown or hidden (the tray): IsWindowVisible changes after this message, so check later.
-        WM_SHOWWINDOW => unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_ANIMATE, WPARAM(0), LPARAM(0));
-        },
+        WM_SHOWWINDOW => {
+            unsafe {
+                let _ = PostMessageW(Some(hwnd), WM_ANIMATE, WPARAM(0), LPARAM(0));
+            }
+            if wparam.0 != 0 {
+                bar.relayout(hwnd);
+            }
+        }
+        // The window got its new size from the layer below; the strip's height changed with the DPI.
+        WM_DPICHANGED | WM_DISPLAYCHANGE => {
+            let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            bar.relayout(hwnd);
+            return result;
+        }
+        WM_RELAYOUT => {
+            bar.relayout(hwnd);
+            bar.schedule(hwnd);
+            invalidate(hwnd);
+            return LRESULT(0);
+        }
         WM_SIZE => {
             if wparam.0 != SIZE_MINIMIZED as usize {
                 bar.layout(hwnd, (lparam.0 & 0xffff) as i32, ((lparam.0 >> 16) & 0xffff) as i32);

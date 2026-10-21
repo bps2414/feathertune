@@ -339,6 +339,7 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
             &MenuItem::with_id(app, "desktop_lyrics", "Floating lyrics", true, None::<&str>)?,
             &MenuItem::with_id(app, "desktop_lyrics_lock", "Lock / unlock floating lyrics", true, None::<&str>)?,
             &MenuItem::with_id(app, "share_lyrics", "Share lyrics...", true, None::<&str>)?,
+            &MenuItem::with_id(app, "reload", "Reload page", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &autostart,
             &lastfm_item,
@@ -360,6 +361,11 @@ pub(crate) fn tray_command(app: &AppHandle, id: &str) {
         "desktop_lyrics" => desktop_lyrics::toggle(app),
         "desktop_lyrics_lock" => desktop_lyrics::set_locked(!desktop_lyrics::is_locked()),
         "share_lyrics" => share_lyrics::open(app),
+        "reload" => {
+            if let Some(site) = app.get_webview("site") {
+                let _ = site.eval("location.reload()");
+            }
+        }
         "settings" => settings_window::open(app),
         "autostart" => {
             let manager = app.autolaunch();
@@ -427,6 +433,8 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
 
     let (Some(window), Some(site)) = (app.get_window("main"), app.get_webview("site")) else { return };
     if hidden {
+        // A page left in fullscreen would keep the window fullscreen (titlebar.rs) once it is back.
+        let _ = site.eval("document.fullscreenElement && document.exitFullscreen()");
         let _ = window.hide();
     }
     let _ = site.with_webview(move |wv| unsafe {

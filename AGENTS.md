@@ -47,7 +47,8 @@ The app targets Windows only (`windows` crate, WebView2), so it does not build o
 
 ## Legal and safety limits (never cross)
 
-- Never block, hide, skip or alter ads, and never touch what the player streams. Network filtering is privacy lists only.
+- Never block, hide, skip, shorten, mute, fade or cover ads; every audio effect is bypassed while one plays. Network filtering is privacy lists only.
+- The audio the page plays may be processed and measured locally, for the listener only (Web Audio on the page's own media element). Never record, store, upload or re-encode audio and never fetch a stream; only numbers derived from it (tempo, key, a loudness envelope) may be kept, in the profile.
 - No private APIs, stream extraction, downloading or DRM handling.
 - No user-agent spoofing and no automation flags.
 - Never type or store account credentials; sign-in and account checks are done by the maintainer.

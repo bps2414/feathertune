@@ -16,7 +16,7 @@ use crate::player::Player;
 use crate::settings::{Live, Settings};
 
 /// The plugins of the `audio` page module.
-pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis"];
+pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis", "skip_silence"];
 
 /// Equalizer presets: gains in dB for 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz ("custom" is
 /// `[audio] eq_bands`).

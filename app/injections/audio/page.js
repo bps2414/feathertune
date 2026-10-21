@@ -463,6 +463,7 @@ const startTrack = (v, id) => {
   trackId = id;
   armed = false;
   faded = false;
+  resetQuiet();
   fade = planFade(v);
   if (ad || !on('crossfade') || prev > 0.98) return;
   const curveName = data?.crossfade?.curve;
@@ -500,6 +501,7 @@ const onTime = (v) => {
     analysis.t = t;
   }
   if (id) startAnalysis(v, id);
+  skipSilence(v, t);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
   if (faded && t < 2) startTrack(v, id);
   if (!fade) return;
@@ -519,6 +521,7 @@ const onSeek = (v, type) => {
   if (type !== 'seeking') return;
   // A seek by the user: this track is not measured in this session.
   stopAnalysis(false);
+  quiet.userSeek = true;
   holdFade();
   if (!inWindow(v.currentTime)) {
     cancelFade();
@@ -892,6 +895,71 @@ const key = (chroma) => {
   const major = best.mode === 'major' ? best.tonic : (best.tonic + 3) % 12;
   const number = ((((major * 7) % 12) + 7) % 12) + 1;
   return { key: `${KEY_NAMES[best.tonic]} ${best.mode}`, camelot: `${number}${best.mode === 'major' ? 'B' : 'A'}` };
+};
+
+// --- skip silence (start and end only, never in the middle) ---
+//
+// Start: with the analysis' lead-in (over 1.5 s), one seek to it; without it, the input level is read
+// on each timeupdate (about 4 a second) for the first 15 s, and after 1.5 s under -50 dBFS it seeks
+// 2 s on, at most 4 times, stopping at the first sound. End: with the known end of the sound, the
+// crossfade already stops there; without a crossfade it seeks to the end once the sound is over (or
+// after 1.5 s of silence in the last 20 s, when the end is not known). Never during an ad, and never
+// on a track the user has seeked in.
+
+const QUIET = { MIN_LEAD_S: 1.5, FOR_S: 1.5, STEP_S: 2, MAX_STEPS: 4, START_S: 15, END_S: 20 };
+let quiet = { userSeek: false, startDone: false, endDone: false, steps: 0, from: null };
+
+const resetQuiet = () => {
+  quiet = { userSeek: false, startDone: false, endDone: false, steps: 0, from: null };
+  useAnalyser('silence', false);
+};
+// Whether the input has been under the threshold for long enough (reading the analyser now).
+const quietFor = (t) => {
+  useAnalyser('silence', true);
+  if (level() > A.SILENCE_DB) {
+    quiet.from = null;
+    return false;
+  }
+  quiet.from ??= t;
+  return t - quiet.from >= QUIET.FOR_S;
+};
+const skipSilence = (v, t) => {
+  if (!on('skip_silence') || quiet.userSeek || ad) return useAnalyser('silence', false);
+  const f = facts();
+  const end = v.duration;
+  let listening = false;
+  if (!quiet.startDone) {
+    if (f) {
+      quiet.startDone = true;
+      const lead = f.lead_in_ms / 1000;
+      if (lead > QUIET.MIN_LEAD_S && t < lead - 0.5) seekTo(v, lead - 0.1, true);
+    } else if (t > QUIET.START_S || quiet.steps >= QUIET.MAX_STEPS) {
+      quiet.startDone = true;
+    } else {
+      listening = true;
+      if (level() > A.SILENCE_DB && analyserUsers.has('silence')) quiet.startDone = true;
+      else if (quietFor(t)) {
+        quiet.steps++;
+        quiet.from = null;
+        seekTo(v, t + QUIET.STEP_S, true);
+      }
+    }
+  } else if (!fade && !quiet.endDone && Number.isFinite(end)) {
+    if (f?.tail_ms) {
+      const tail = f.tail_ms / 1000;
+      if (tail < end - 1 && t >= tail) {
+        quiet.endDone = true;
+        seekTo(v, end - 0.05, true);
+      }
+    } else if (t >= end - QUIET.END_S && t < end - 1) {
+      listening = true;
+      if (quietFor(t)) {
+        quiet.endDone = true;
+        seekTo(v, end - 0.05, true);
+      }
+    }
+  }
+  if (!listening) useAnalyser('silence', false);
 };
 
 // --- ads ---

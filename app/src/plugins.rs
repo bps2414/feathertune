@@ -286,6 +286,17 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "skip_silence",
+        name: "Skip silence",
+        description: "Skips silence at the start and the end of a track (never in the middle), using the track \
+                      analysis when there is one. Never during an ad or after you seek in the track.",
+        cost: "Not measured yet: a level read 4 times a second in the first 15 s and the last 20 s of a track \
+               not measured yet; one seek otherwise.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

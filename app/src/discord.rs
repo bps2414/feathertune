@@ -112,7 +112,7 @@ impl Presence {
         }
         activity = activity.assets(assets);
         if let Some(w) = &watch {
-            activity = activity.buttons(vec![Button::new("Listen on YouTube Music", w.as_str())]);
+            activity = activity.buttons(vec![Button::new(crate::i18n::t("Listen on YouTube Music"), w.as_str())]);
         }
         match self.client.set_activity(activity) {
             Ok(()) => self.sent = Some((key, start)),

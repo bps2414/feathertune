@@ -39,6 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Result, w};
 
 use crate::gfx::{self, ICON_FONT, rect, rgb, rgba};
+use crate::i18n::t;
 use crate::lyric_view::View;
 use crate::player::Player;
 use crate::settings::Live;
@@ -322,7 +323,7 @@ impl Floating {
             if view.is_empty() {
                 // Unlocked with nothing to show: say what it is, so it can be placed.
                 let r = rect(PAD, CURRENT_TOP, WIDTH - PAD, CURRENT_BOTTOM);
-                c.text("Floating lyrics: drag to place, then lock", small, r, rgba(0xffffff, 0.8));
+                c.text(t("Floating lyrics: drag to place, then lock"), small, r, rgba(0xffffff, 0.8));
             } else {
                 view.draw(c, PAD, CURRENT_TOP, rgb(0xffffff), true);
             }

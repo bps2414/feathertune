@@ -22,6 +22,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use serde_json::{Value, json};
+
+use crate::i18n::{t, tf};
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, UriSchemeContext, Url, Webview, WebviewUrl, WebviewWindowBuilder, Wry};
 use tauri_plugin_autostart::ManagerExt;
@@ -66,8 +68,9 @@ pub fn protocol(ctx: UriSchemeContext<'_, Wry>, request: Request<Vec<u8>>) -> Re
     .expect("static response")
 }
 
-/// The What's new tab.
+/// The What's new tab, in each language.
 const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
+const CHANGELOG_PT_BR: &str = include_str!("../../CHANGELOG.pt-BR.md");
 const LAST_VERSION: &str = "last-version.txt";
 /// After an update, the version that ran before ("": one older than the record, which came in 0.2.0).
 static UPDATED_FROM: OnceLock<String> = OnceLock::new();
@@ -125,7 +128,7 @@ fn open_tab(app: &AppHandle, tab: &str) {
     std::thread::spawn(move || {
         let live = app.state::<Live>();
         let result = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::CustomProtocol(url))
-            .title("feathertune settings")
+            .title(t("feathertune settings"))
             .inner_size(740.0, 720.0)
             .min_inner_size(420.0, 400.0)
             .theme(Some(tauri::Theme::Dark))
@@ -164,9 +167,9 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         .iter()
         .map(|p| PluginView {
             id: p.id,
-            name: p.name,
-            description: p.description,
-            cost: p.cost,
+            name: t(p.name),
+            description: t(p.description),
+            cost: t(p.cost),
             on: s.plugin(p.id),
             live: p.live,
         })
@@ -182,6 +185,14 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
     Ok(json!({
         "theme": theme.map(|t| json!({ "ink": hex(t.ink), "glows": t.glows.map(hex) })),
         "plugins": plugins,
+        // null: English, the page's own text.
+        "strings": crate::i18n::strings(),
+        "ui": {
+            "language": s.ui.language,
+            // The language in use (the setting may be newer, until a restart).
+            "active": crate::i18n::language(),
+            "languages": crate::i18n::LANGUAGES.iter().map(|(tag, name)| json!({ "tag": tag, "name": name })).collect::<Vec<_>>(),
+        },
         "shortcuts": {
             "play_pause": s.shortcuts.play_pause,
             "next": s.shortcuts.next,
@@ -223,7 +234,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         // false: the plugin was off at startup, so nothing is recorded.
         "stats_running": app.try_state::<Stats>().is_some(),
         "restart_needed": live.restart_needed(),
-        "changelog": CHANGELOG,
+        "changelog": if crate::i18n::language() == "pt-BR" { CHANGELOG_PT_BR } else { CHANGELOG },
         // null: this start was not an update.
         "updated_from": UPDATED_FROM.get(),
     }))
@@ -232,8 +243,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `audio.eq_preset`, `audio.eq_bands`,
-/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer` or
-/// `autostart`. Returns whether a restart is needed for it to apply.
+/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer`,
+/// `ui.language` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
     guard(&webview)?;
@@ -246,6 +257,14 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             if on { manager.enable() } else { manager.disable() }.map_err(|e| e.to_string())?;
             crate::sync_autostart_item(&app);
             Ok(false)
+        }
+        ("ui", "language") => {
+            let lang = value.as_str().ok_or("expected a language")?;
+            if lang != "auto" && !crate::i18n::LANGUAGES.iter().any(|(tag, _)| *tag == lang) {
+                return Err("unknown language".into());
+            }
+            live.write("ui", name, toml_edit::value(lang), None, true)?;
+            Ok(true)
         }
         ("plugins", id) => {
             let plugin = plugins::get(id).ok_or("unknown plugin")?;
@@ -268,7 +287,8 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("shortcuts", "play_pause" | "next" | "previous" | "mini_player" | "volume_up" | "volume_down") => {
             let keys = text(&value, 64)?;
             if !keys.is_empty() {
-                keys.parse::<tauri_plugin_global_shortcut::Shortcut>().map_err(|e| format!("invalid shortcut: {e}"))?;
+                keys.parse::<tauri_plugin_global_shortcut::Shortcut>()
+                    .map_err(|e| tf("invalid shortcut: {}", &[&e.to_string()]))?;
             }
             live.write("shortcuts", name, toml_edit::value(keys), None, false)?;
             crate::shortcuts::register(&app);
@@ -277,7 +297,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("discord", "client_id") => {
             let id = text(&value, 32)?;
             if !id.bytes().all(|b| b.is_ascii_digit()) {
-                return Err("the application id is a number".into());
+                return Err(t("the application id is a number").into());
             }
             live.write("discord", name, toml_edit::value(id), None, true)?;
             Ok(true)
@@ -285,7 +305,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("lastfm", "api_key" | "api_secret") => {
             let v = text(&value, 64)?;
             if !v.bytes().all(|b| b.is_ascii_alphanumeric()) {
-                return Err("letters and digits only".into());
+                return Err(t("letters and digits only").into());
             }
             live.write("lastfm", name, toml_edit::value(v), None, true)?;
             Ok(true)
@@ -296,7 +316,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             for f in list {
                 let f = f.as_str().map(str::trim).ok_or("expected names")?;
                 if !valid_feature(f) || f.len() > 100 {
-                    return Err(format!("invalid feature name {f:?}"));
+                    return Err(tf("invalid feature name {}", &[&format!("{f:?}")]));
                 }
                 names.push(f);
             }
@@ -329,7 +349,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 .as_i64()
                 .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
                 .filter(|ms| (-5000..=5000).contains(ms))
-                .ok_or("a whole number of ms, from -5000 to 5000")?;
+                .ok_or(t("a whole number of ms, from -5000 to 5000"))?;
             live.write("lyrics", name, toml_edit::value(ms), None, false)?;
             crate::lyrics::republish(&app);
             Ok(false)
@@ -371,7 +391,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 .as_f64()
                 .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
                 .filter(|ms| (0.0..=f64::from(max)).contains(ms))
-                .ok_or(format!("from 0 to {max} ms"))?;
+                .ok_or(tf("from 0 to {} ms", &[&max.to_string()]))?;
             live.write("audio", name, toml_edit::value(ms.round() as i64), None, false)?;
             crate::audio::push(&app);
             Ok(false)
@@ -409,8 +429,8 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
 #[tauri::command]
 pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Result<(), String> {
     guard(&webview)?;
-    let lastfm = || app.try_state::<LastFm>().ok_or("Last.fm is not running; restart after setting it up");
-    let stats = || app.try_state::<Stats>().ok_or("Listening stats are not running; turn them on and restart");
+    let lastfm = || app.try_state::<LastFm>().ok_or(t("Last.fm is not running; restart after setting it up"));
+    let stats = || app.try_state::<Stats>().ok_or(t("Listening stats are not running; turn them on and restart"));
     match action.as_str() {
         "lastfm_connect" => lastfm()?.connect(&app),
         "lastfm_disconnect" => lastfm()?.disconnect(),
@@ -441,7 +461,7 @@ pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i
     if !matches!(range.as_str(), "week" | "month" | "year" | "all") || !(-1440..=1440).contains(&offset) {
         return Err("invalid range".into());
     }
-    let stats = app.try_state::<Stats>().ok_or("Listening stats are not running; turn them on and restart")?;
+    let stats = app.try_state::<Stats>().ok_or(t("Listening stats are not running; turn them on and restart"))?;
     Ok(stats.summary(&range, offset))
 }
 

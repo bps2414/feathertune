@@ -45,6 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Result, w};
 
 use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
+use crate::i18n::t;
 use crate::player::Player;
 use crate::settings::Live;
 use crate::titlebar::WM_MOUSELEAVE;
@@ -122,7 +123,7 @@ pub fn open(app: &AppHandle) {
 
 /// The items and their states, now.
 fn entries(app: &AppHandle) -> Vec<Entry> {
-    let item = |id, label: &str, checked, enabled| Entry::Item { id, label: label.into(), checked, enabled };
+    let item = |id, label: &'static str, checked, enabled| Entry::Item { id, label: t(label).into(), checked, enabled };
     let shown = app.get_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
     let live = app.state::<Live>();
     let lyrics = live.plugin("desktop_lyrics");
@@ -229,7 +230,7 @@ impl Menu {
                 c.text(title, name, rect(14.0, 12.0, text_right, 32.0), pal.text);
                 c.text(artist, small, rect(14.0, 32.0, text_right, 50.0), gfx::with_alpha(pal.text, 0.7));
             } else {
-                c.text("Nothing playing", name, rect(14.0, 12.0, text_right, 50.0), gfx::with_alpha(pal.text, 0.7));
+                c.text(t("Nothing playing"), name, rect(14.0, 12.0, text_right, 50.0), gfx::with_alpha(pal.text, 0.7));
             }
             for (i, glyph) in ["\u{e892}", if playing { "\u{e769}" } else { "\u{e768}" }, "\u{e893}"].iter().enumerate()
             {

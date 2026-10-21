@@ -23,6 +23,7 @@ mod deck;
 mod desktop_lyrics;
 mod discord;
 mod gfx;
+mod i18n;
 mod injections;
 mod lastfm;
 mod lyric_view;
@@ -58,6 +59,8 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, Webv
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
+
+use crate::i18n::t;
 
 const START_URL: &str = "https://music.youtube.com";
 // wry's defaults (dropped once we pass our own args), Chromium's media keys and flyout entry (ours
@@ -110,6 +113,7 @@ fn main() {
     let profile = profile_dir();
     let existed = profile.join("config.toml").exists();
     let mut settings = settings::Settings::load(&profile);
+    i18n::init(&settings.ui.language);
     if measure {
         settings.force_off(&plugins_off);
     } else {
@@ -342,7 +346,7 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
     let autostart = CheckMenuItem::with_id(
         app,
         "autostart",
-        "Start with Windows",
+        t("Start with Windows"),
         true,
         app.autolaunch().is_enabled().unwrap_or(false),
         None::<&str>,
@@ -365,20 +369,20 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
     Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?,
-            &MenuItem::with_id(app, "play_pause", "Play / pause", true, None::<&str>)?,
-            &MenuItem::with_id(app, "next", "Next", true, None::<&str>)?,
-            &MenuItem::with_id(app, "mini_player", "Mini player", true, None::<&str>)?,
-            &MenuItem::with_id(app, "desktop_lyrics", "Floating lyrics", true, None::<&str>)?,
-            &MenuItem::with_id(app, "desktop_lyrics_lock", "Lock / unlock floating lyrics", true, None::<&str>)?,
-            &MenuItem::with_id(app, "share_lyrics", "Share lyrics...", true, None::<&str>)?,
-            &MenuItem::with_id(app, "reload", "Reload page", true, None::<&str>)?,
+            &MenuItem::with_id(app, "toggle", t("Show / hide"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "play_pause", t("Play / pause"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "next", t("Next"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "mini_player", t("Mini player"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "desktop_lyrics", t("Floating lyrics"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "desktop_lyrics_lock", t("Lock / unlock floating lyrics"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "share_lyrics", t("Share lyrics..."), true, None::<&str>)?,
+            &MenuItem::with_id(app, "reload", t("Reload page"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &autostart,
             &lastfm_item,
-            &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
+            &MenuItem::with_id(app, "settings", t("Settings"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", t("Quit"), true, None::<&str>)?,
         ],
     )
 }
@@ -424,9 +428,9 @@ pub(crate) fn tray_command(app: &AppHandle, id: &str) {
 /// `None`: the keys are not configured.
 pub(crate) fn lastfm_label(connected: Option<bool>) -> &'static str {
     match connected {
-        None => "Last.fm: add the keys to config.toml",
-        Some(true) => "Disconnect Last.fm",
-        Some(false) => "Connect Last.fm",
+        None => t("Last.fm: add the keys to config.toml"),
+        Some(true) => t("Disconnect Last.fm"),
+        Some(false) => t("Connect Last.fm"),
     }
 }
 

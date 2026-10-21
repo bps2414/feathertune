@@ -34,6 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Result, w};
 
 use crate::gfx::{self, TEXT_FONT, rect};
+use crate::i18n::{t, tf};
 use crate::updater;
 
 /// Steps `step_done` waits for.
@@ -93,7 +94,7 @@ struct Splash {
 /// yet) and starts the update check. Main thread. `false`: no screen, show the window as usual.
 pub fn show(app: &AppHandle, profile: PathBuf) -> bool {
     // Set before the window exists, so the first paint has the text.
-    set("Checking for updates…", None);
+    set(t("Checking for updates…"), None);
     match unsafe { create() } {
         Ok(()) => {
             ACTIVE.store(true, Ordering::Relaxed);
@@ -123,14 +124,14 @@ fn run(app: &AppHandle, profile: &std::path::Path) {
         match updater::check() {
             Ok(Some(update)) => {
                 let text = |fraction: Option<f32>| match fraction {
-                    Some(f) => format!("Downloading version {} ({:.0}%)", update.version, f * 100.0),
-                    None => format!("Downloading version {}…", update.version),
+                    Some(f) => tf("Downloading version {} ({}%)", &[&update.version, &format!("{:.0}", f * 100.0)]),
+                    None => tf("Downloading version {}…", &[&update.version]),
                 };
                 set(&text(Some(0.0)), Some(0.0));
                 match updater::install(&update, profile, |f| set(&text(f), f)) {
                     Ok(()) => {
                         INSTALLING.store(true, Ordering::Relaxed);
-                        set(&format!("Installing version {}, feathertune will restart", update.version), None);
+                        set(&tf("Installing version {}, feathertune will restart", &[&update.version]), None);
                         // The installer closes this process; leave before it has to.
                         std::thread::sleep(Duration::from_millis(1200));
                         app.exit(0);
@@ -138,7 +139,7 @@ fn run(app: &AppHandle, profile: &std::path::Path) {
                     }
                     Err(e) => {
                         eprintln!("update failed: {e}");
-                        set("The update failed, starting the current version", None);
+                        set(t("The update failed, starting the current version"), None);
                         std::thread::sleep(Duration::from_millis(1500));
                     }
                 }
@@ -148,7 +149,7 @@ fn run(app: &AppHandle, profile: &std::path::Path) {
             Err(e) => eprintln!("update check failed: {e}"),
         }
     }
-    set("Starting the player…", None);
+    set(t("Starting the player…"), None);
     step_done(app, UPDATE);
 }
 
@@ -176,7 +177,7 @@ pub fn page_loaded(app: &AppHandle) {
         return;
     }
     if PENDING.load(Ordering::Relaxed) & UPDATE == 0 {
-        set("Loading your music…", None);
+        set(t("Loading your music…"), None);
     }
     let app = app.clone();
     std::thread::spawn(move || {

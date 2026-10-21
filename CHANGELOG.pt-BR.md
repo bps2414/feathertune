@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.4 — 2026-10-21
+
+- **O app em português.** Menus, mini player, letra flutuante e compartilhada, a tela de início, as configurações e as Novidades seguem o idioma do Windows; escolha English ou Português na aba Geral das configurações (vale depois de reiniciar).
+
 ## 0.2.3 — 2026-10-21
 
 - **Tradução da letra.** Uma tradução embaixo de cada linha sincronizada, no idioma do Windows por padrão (ou num escolhido na aba Letras das configurações): a tradução da própria fonte quando ela tem, senão uma tradução automática feita para letras. O original continua acendendo palavra por palavra; a tradução acende com a linha. A letra flutuante e o mini player a mostram no lugar da próxima linha. Linhas que já estão nesse idioma ficam sem tradução, e dá para desligar.

@@ -134,6 +134,8 @@ Linhas com tempo por palavra próprio (Better Lyrics, Unison, lrcmux, entradas E
 
 **Novidades:** a cópia instalada grava sua versão em `last-version.txt` no perfil a cada abertura. Quando a versão subiu (ou o arquivo falta mas o `config.toml` já existia: uma atualização de antes da 0.2.0), na primeira vez que a janela aparece naquela execução ela abre a janela de configurações na aba What's new: o `CHANGELOG.md`, compilado no exe, um cartão por versão, com as posteriores à versão antiga marcadas. Nada é baixado para isso. Uma primeira instalação e um build de `target/` não mostram nada. Um release não pode ser pre-release no GitHub: a checagem de atualização lê `releases/latest`, que deixa pre-releases de fora.
 
+**Idioma** (`[ui] language`: "auto", "en" ou "pt-BR"; aba Geral): "auto" escolhe pt-BR quando o formato regional do Windows é português, senão inglês. Lido uma vez na abertura, então uma mudança vale depois de reiniciar. O `src/i18n.rs` usa o próprio texto em inglês como chave: `t("Quit")` devolve a entrada de `app/locales/pt-BR.json` (inglês → português, compilado no exe) ou o inglês quando não há, e `tf` preenche os `{}` em ordem. A UI nativa, os menus da bandeja, a tela de início, os nomes, descrições e custos dos plugins e os erros mostrados pelos comandos das configurações passam por ele. A página de configurações recebe a mesma tabela do `settings_get` e traduz seu HTML uma vez ao carregar, além dos próprios textos dinâmicos; os scripts da página recebem seus poucos textos do Rust como dados (o crédito da letra, os botões de mixagem), nunca a tabela. Novidades mostra o `CHANGELOG.pt-BR.md` em português. Para adicionar um texto: escreva em inglês numa chamada `t()` e adicione a entrada no JSON; uma entrada faltando mostra o inglês. Não traduzidos: o próprio site (segue o idioma da conta), os nomes das fontes de letra, as linhas de log e os erros de importação de mixagens. Os botões nativos têm largura fixa e o texto que não cabe termina em "…"; os textos em português ainda não foram conferidos na tela.
+
 ## Áudio
 
 O próprio `<video>` da página pode ser processado com Web Audio, localmente e só para quem ouve (ver Regras de base). Todos os plugins de áudio dividem um módulo de página, `audio`, que entra quando qualquer um deles está ligado.
@@ -233,6 +235,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 ## Ainda não conferido
 
 - A aba What's new abrindo depois de uma atualização real a partir da 0.1.7 (cópia instalada), e a barra lateral das configurações em 150% de escala e numa janela estreita.
+- O app em português na tela: os textos mais longos nos botões nativos, no menu da bandeja, na tela de início e na página de configurações.
 - Com mouse de verdade: snap layouts, arrastar, redimensionar e maximizar/restaurar, em 150% de escala e num segundo monitor; digitar no site depois de trocar de janela.
 - Discord Rich Presence e um login e scrobble reais no Last.fm, inclusive num build da CI com a chave e o id de aplicativo embutidos (`FEATHERTUNE_DISCORD_CLIENT_ID`, um secret do repositório como as chaves do Last.fm).
 - "Start with Windows" gravando a entrada Run; o aviso de faixa sendo visto.

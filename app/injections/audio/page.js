@@ -1334,8 +1334,10 @@ const renderButtons = () => {
       const mark = edited.includes(`${from}>${to}`);
       Object.assign(button.dataset, { list, from, to });
       button.classList.toggle('edited', mark);
-      button.textContent = mark ? '⇄ Edited' : '⇄ Auto';
-      button.title = 'Edit the transition between these tracks';
+      const labels = data?.labels || {};
+      const text = (s, fallback) => (typeof s === 'string' ? s.slice(0, 80) : fallback);
+      button.textContent = `⇄ ${mark ? text(labels.edited, 'Edited') : text(labels.auto, 'Auto')}`;
+      button.title = text(labels.edit, 'Edit the transition between these tracks');
     });
   }
   watchRows();

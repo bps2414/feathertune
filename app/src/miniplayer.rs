@@ -56,6 +56,7 @@ use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
 use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
+use crate::i18n::t;
 use crate::lyric_view::View;
 use crate::player::{Event, Player, State};
 use crate::settings::Live;
@@ -212,10 +213,10 @@ fn button_rect(b: Button) -> windows::Win32::Graphics::Direct2D::Common::D2D_REC
 /// What a top button does, shown under it on hover.
 fn hint_text(b: Button, lyrics_open: bool) -> Option<&'static str> {
     match b {
-        Button::Lyrics if lyrics_open => Some("Hide lyrics"),
-        Button::Lyrics => Some("Show lyrics"),
-        Button::Back => Some("Open the full window"),
-        Button::Close => Some("Close mini player"),
+        Button::Lyrics if lyrics_open => Some(t("Hide lyrics")),
+        Button::Lyrics => Some(t("Show lyrics")),
+        Button::Back => Some(t("Open the full window")),
+        Button::Close => Some(t("Close mini player")),
         _ => None,
     }
 }
@@ -558,7 +559,7 @@ impl Mini {
                     c.text(&s.track.title, title, rect(x, 10.0, text_right, 30.0), pal.text);
                     c.text(&s.track.artist, artist, rect(x, 30.0, text_right, 50.0), gfx::with_alpha(pal.text, 0.7));
                 }
-                None => c.text("Nothing playing", title, rect(x, 10.0, text_right, 30.0), pal.text),
+                None => c.text(t("Nothing playing"), title, rect(x, 10.0, text_right, 30.0), pal.text),
             }
 
             // Top buttons sit on faint glass pills (brighter on hover); previous and next get a pill on
@@ -619,7 +620,7 @@ impl Mini {
                 c.fill(rect(12.0, HEIGHT, WIDTH - 12.0, HEIGHT + 1.0), gfx::with_alpha(pal.text, 0.1));
                 if lyrics.is_empty() {
                     let r = rect(12.0, LYRIC_TOP, WIDTH - 12.0, LYRIC_TOP + LYRIC_CURRENT);
-                    c.text("No synced lyrics for this track", artist, r, gfx::with_alpha(pal.text, 0.55));
+                    c.text(t("No synced lyrics for this track"), artist, r, gfx::with_alpha(pal.text, 0.55));
                 } else {
                     // Clipped to the band, so a rolling line never runs into the controls.
                     let band = rect(0.0, HEIGHT + 1.0, WIDTH, full_height);

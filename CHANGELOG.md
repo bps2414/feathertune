@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.4 — 2026-10-21
+
+- **The app in Portuguese (Brazil).** Menus, mini player, floating and shared lyrics, the start screen, the settings and What's new follow Windows' language; pick English or Português in the General tab of the settings (applies after a restart).
+
 ## 0.2.3 — 2026-10-21
 
 - **Lyrics translation.** A translation under each synced line, in Windows' language by default (or one picked in the Lyrics tab of the settings): the source's own translation when it has one, else a machine translation made for lyrics. The original still lights word by word; the translation lights with its line. The floating lyrics and the mini player show it in place of the next line. Lines already in that language get none, and it can be turned off.

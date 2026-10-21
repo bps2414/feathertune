@@ -73,6 +73,7 @@ use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
 use crate::gfx::{self, Canvas, ICON_FONT, TEXT_FONT, point, rect, rgb, rgba, with_alpha};
+use crate::i18n::{t, tf};
 use crate::lyrics::{Lyrics, track_key};
 use crate::player::Player;
 use crate::settings::Live;
@@ -154,10 +155,10 @@ enum Look {
 impl Look {
     fn name(self) -> &'static str {
         match self {
-            Look::Cover => "Cover",
-            Look::Ink => "Ink",
-            Look::Dark => "Dark",
-            Look::Paper => "Paper",
+            Look::Cover => t("Cover"),
+            Look::Ink => t("Ink"),
+            Look::Dark => t("Dark"),
+            Look::Paper => t("Paper"),
         }
     }
 }
@@ -754,7 +755,7 @@ fn layout_card(rows: &[(u32, String)], picks: &[usize], lyric: &IDWriteTextForma
     let width = CARD_W - 2.0 * PAD;
     let hint = picks.is_empty();
     let texts: Vec<&str> =
-        if hint { vec!["Pick lines on the left"] } else { picks.iter().map(|i| rows[*i].1.as_str()).collect() };
+        if hint { vec![t("Pick lines on the left")] } else { picks.iter().map(|i| rows[*i].1.as_str()).collect() };
     let mut y = PAD + ART + 34.0;
     let (mut lines, mut skips) = (Vec::new(), Vec::new());
     for (n, text) in texts.iter().enumerate() {
@@ -875,7 +876,7 @@ impl Share {
             for p in wanted {
                 if !self.picks.contains(&p) {
                     if self.picks.len() == MAX_PICKS {
-                        self.set_status(hwnd, format!("Up to {MAX_PICKS} lines fit on a card"));
+                        self.set_status(hwnd, tf("Up to {} lines fit on a card", &[&MAX_PICKS.to_string()]));
                         break;
                     }
                     self.picks.push(p);
@@ -974,11 +975,11 @@ impl Share {
             c.fill(rect(0.0, 0.0, WIDTH, HEIGHT), pal.background);
 
             // Header.
-            c.text("Share lyrics", &f.heading, rect(24.0, 14.0, 400.0, 40.0), text);
+            c.text(t("Share lyrics"), &f.heading, rect(24.0, 14.0, 400.0, 40.0), text);
             let hint = if snap.rows.is_empty() {
-                "No synced lyrics for this track"
+                t("No synced lyrics for this track")
             } else {
-                "Pick any lines, skip the rest. Shift-click picks a range."
+                t("Pick any lines, skip the rest. Shift-click picks a range.")
             };
             c.text(hint, &f.small, rect(24.0, 40.0, 560.0, 58.0), sub);
             if let Some(s) = status {
@@ -991,7 +992,12 @@ impl Share {
             unsafe { c.target.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
             if snap.rows.is_empty() {
                 let format = &f.small;
-                c.text("Lines appear here when LRCLIB has synced lyrics.", format, rect(30.0, 90.0, 340.0, 110.0), sub);
+                c.text(
+                    t("Lines appear here when a source has synced lyrics."),
+                    format,
+                    rect(30.0, 90.0, 340.0, 110.0),
+                    sub,
+                );
             }
             let first = (scroll / ROW) as usize;
             let visible = ((clip.bottom - clip.top) / ROW) as usize + 2;
@@ -1063,10 +1069,10 @@ impl Share {
                         c.text("\u{e8bb}", &f.small_icons, r, text);
                         continue;
                     }
-                    Button::Look => format!("Look: {}  \u{25be}", look.name()),
-                    Button::Clear => "Clear".into(),
-                    Button::Save => "Save PNG".into(),
-                    Button::Copy => "Copy image".into(),
+                    Button::Look => format!("{}  \u{25be}", tf("Look: {}", &[look.name()])),
+                    Button::Clear => t("Clear").into(),
+                    Button::Save => t("Save PNG").into(),
+                    Button::Copy => t("Copy image").into(),
                 };
                 let radius = (r.bottom - r.top) / 2.0;
                 if b == Button::Copy {
@@ -1183,8 +1189,8 @@ fn press(s: &mut Share, hwnd: HWND, b: Button) {
         _ if s.picks.is_empty() => {}
         Button::Copy => {
             let status = match s.copy(hwnd) {
-                Ok(()) => "Copied. Paste it anywhere".to_owned(),
-                Err(e) => format!("Not copied: {e}"),
+                Ok(()) => t("Copied. Paste it anywhere").to_owned(),
+                Err(e) => tf("Not copied: {}", &[&e.to_string()]),
             };
             s.set_status(hwnd, status);
         }
@@ -1192,9 +1198,9 @@ fn press(s: &mut Share, hwnd: HWND, b: Button) {
             let status = match s.save() {
                 Ok(file) => {
                     let _ = s.app.opener().reveal_item_in_dir(&file);
-                    "Saved to Downloads".to_owned()
+                    t("Saved to Downloads").to_owned()
                 }
-                Err(e) => format!("Not saved: {e}"),
+                Err(e) => tf("Not saved: {}", &[&e.to_string()]),
             };
             s.set_status(hwnd, status);
         }

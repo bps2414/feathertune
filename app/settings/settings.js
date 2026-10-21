@@ -11,6 +11,26 @@ const el = (tag, className, text) => {
   return e;
 };
 
+// The app's language: `strings` (English → translation, from settings_get; empty for English).
+// `t` translates one text, `tf` fills its `{}` in order; the HTML's own text is translated once.
+let strings = {};
+const t = (s) => strings[s] ?? s;
+const tf = (s, ...args) => args.reduce((out, a) => out.replace('{}', a), t(s));
+const translatePage = () => {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n.nodeValue.trim();
+    if (text && strings[text]) n.nodeValue = n.nodeValue.replace(text, strings[text]);
+  }
+  for (const e of document.querySelectorAll('[placeholder], [aria-label], [title]')) {
+    for (const name of ['placeholder', 'aria-label', 'title']) {
+      const text = e.getAttribute(name);
+      if (text && strings[text]) e.setAttribute(name, strings[text]);
+    }
+  }
+  document.title = t(document.title);
+};
+
 const showError = (message) => {
   $('error').textContent = message || '';
   $('error').hidden = !message;
@@ -109,10 +129,10 @@ const buildPlugins = (plugins) => {
     const extra = el('div', 'extra');
     extra.append(...card.childNodes);
     const name = el('div', 'name', p.name);
-    if (!p.live) name.append(el('span', 'badge', 'restart'));
+    if (!p.live) name.append(el('span', 'badge', t('restart')));
     const body = el('div', 'body');
     const cost = el('details', 'cost');
-    cost.append(el('summary', '', 'Cost'), document.createTextNode(p.cost));
+    cost.append(el('summary', '', t('Cost')), document.createTextNode(p.cost));
     body.append(name, el('div', 'description', p.description), cost);
     const toggle = el('input', 'switch');
     toggle.type = 'checkbox';
@@ -142,16 +162,18 @@ const renderLastFm = (l) => {
   button.hidden = l.connected === null;
   $('lastfm-dot').classList.toggle('on', l.connected === true);
   if (l.connected === null) {
-    $('lastfm-status').textContent = 'Not running: turn the plugin on (with API keys) and restart.';
+    $('lastfm-status').textContent = t('Not running: turn the plugin on (with API keys) and restart.');
   } else {
-    $('lastfm-status').textContent = l.connected ? 'Connected' : 'Not connected';
-    button.textContent = l.connected ? 'Disconnect' : 'Connect';
+    $('lastfm-status').textContent = t(l.connected ? 'Connected' : 'Not connected');
+    button.textContent = t(l.connected ? 'Disconnect' : 'Connect');
     button.className = l.connected ? 'secondary' : '';
     button.dataset.action = l.connected ? 'lastfm_disconnect' : 'lastfm_connect';
   }
-  $('lastfm-keys').textContent = l.built_in
-    ? 'This build has its own API keys; keys typed here take their place.'
-    : 'This build has no API keys of its own: add yours (from last.fm/api).';
+  $('lastfm-keys').textContent = t(
+    l.built_in
+      ? 'This build has its own API keys; keys typed here take their place.'
+      : 'This build has no API keys of its own: add yours (from last.fm/api).',
+  );
 };
 
 // Lyrics sources: the enabled ones in their order, then the others; a switch and up/down for each.
@@ -178,7 +200,7 @@ const drawSources = () => {
       const move = (by, label) => {
         const b = el('button', 'secondary', label === 'up' ? '↑' : '↓');
         b.type = 'button';
-        b.setAttribute('aria-label', `Move ${src.name} ${label}`);
+        b.setAttribute('aria-label', tf(label === 'up' ? 'Move {} up' : 'Move {} down', src.name));
         b.disabled = i + by < 0 || i + by >= sources.length;
         b.addEventListener('click', () => {
           const next = [...sources];
@@ -202,9 +224,9 @@ const renderSources = (l) => {
 };
 
 const renderDesktopLyrics = (d) => {
-  $('desktop-lyrics').textContent = d.open ? 'Hide floating lyrics' : 'Show floating lyrics';
+  $('desktop-lyrics').textContent = t(d.open ? 'Hide floating lyrics' : 'Show floating lyrics');
   $('desktop-lyrics-lock').hidden = !d.open;
-  $('desktop-lyrics-lock').textContent = d.locked ? 'Unlock to move' : 'Lock in place';
+  $('desktop-lyrics-lock').textContent = t(d.locked ? 'Unlock to move' : 'Lock in place');
 };
 
 // Stats: everything comes from settings_stats as numbers and names, shown with textContent only.
@@ -212,10 +234,11 @@ let statsRange = 'month';
 let statsRunning = true;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const month = (m) => t(MONTHS[m - 1]);
 const duration = (seconds) => {
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds % 3600) / 60);
-  return h ? `${h} h ${m} min` : `${m} min`;
+  return h ? tf('{} h {} min', h, m) : tf('{} min', m);
 };
 const tile = (value, label) => {
   const t = el('div', 'tile');
@@ -231,24 +254,24 @@ const renderTop = (list, items) => {
       const text = el('div', 'body');
       text.append(el('div', 'title', item.name));
       if (item.detail) text.append(el('div', 'detail', item.detail));
-      li.append(text, el('div', 'amount', `${duration(item.seconds)} · ${item.plays} plays`));
+      li.append(text, el('div', 'amount', tf('{} · {} plays', duration(item.seconds), item.plays)));
       return li;
     }),
   );
-  if (!items.length) list.append(el('li', 'empty', 'Nothing yet.'));
+  if (!items.length) list.append(el('li', 'empty', t('Nothing yet.')));
 };
 // A point of the series: a day (days since 1970, local) or a month.
-const pointLabel = (p) => (p.day !== undefined ? String(new Date(p.day * 86400000).getUTCDate()) : MONTHS[p.month - 1]);
+const pointLabel = (p) => (p.day !== undefined ? String(new Date(p.day * 86400000).getUTCDate()) : month(p.month));
 const pointTitle = (p) =>
   p.day !== undefined
     ? new Date(p.day * 86400000).toLocaleDateString(undefined, { timeZone: 'UTC' })
-    : `${MONTHS[p.month - 1]} ${p.year}`;
+    : `${month(p.month)} ${p.year}`;
 const renderStats = (s) => {
   $('stats-tiles').replaceChildren(
-    tile(duration(s.seconds), 'listened'),
-    tile(String(s.plays), `plays (${s.skips} skipped)`),
-    tile(String(s.artists), s.new_artists ? `artists, ${s.new_artists} new` : 'artists'),
-    tile(`${s.streak} d`, `streak (best ${s.longest_streak} d)`),
+    tile(duration(s.seconds), t('listened')),
+    tile(String(s.plays), tf('plays ({} skipped)', s.skips)),
+    tile(String(s.artists), s.new_artists ? tf('artists, {} new', s.new_artists) : t('artists')),
+    tile(tf('{} d', s.streak), tf('streak (best {} d)', s.longest_streak)),
   );
   const max = Math.max(1, ...s.series.map((p) => p.seconds));
   $('stats-series').replaceChildren(
@@ -265,11 +288,11 @@ const renderStats = (s) => {
   const heat = $('stats-heat');
   heat.replaceChildren();
   s.heat.forEach((hours, d) => {
-    heat.append(el('span', 'day', DAYS[d]));
+    heat.append(el('span', 'day', t(DAYS[d])));
     hours.forEach((seconds, h) => {
       const cell = el('i');
       cell.style.opacity = String(0.08 + 0.92 * (seconds / hottest));
-      cell.title = `${DAYS[d]} ${h}:00: ${duration(seconds)}`;
+      cell.title = `${t(DAYS[d])} ${h}:00: ${duration(seconds)}`;
       heat.append(cell);
     });
   });
@@ -313,7 +336,7 @@ const renderAudio = (a) => {
   const select = $('eq-preset');
   if (!select.options.length) {
     for (const id of [...a.eq_presets, 'custom']) {
-      const o = el('option', '', PRESET_NAMES[id] || id);
+      const o = el('option', '', PRESET_NAMES[id] ? t(PRESET_NAMES[id]) : id);
       o.value = id;
       select.append(o);
     }
@@ -391,39 +414,40 @@ const keysMatch = (a, b) => {
 };
 
 // A transition's fields (length, curve, effects); `onChange` gets the new transition.
-const transitionFields = (box, t, max, onChange) => {
+const transitionFields = (box, transition, max, onChange) => {
   const length = el('input');
   length.type = 'range';
   length.min = '0';
   length.max = String(max);
   length.step = '500';
-  length.value = String(t.duration_ms);
-  const shown = el('span', 'value', seconds(t.duration_ms));
-  const lengthLabel = el('label', '', 'Length ');
+  length.value = String(transition.duration_ms);
+  const shown = el('span', 'value', seconds(transition.duration_ms));
+  const lengthLabel = el('label', '', `${t('Length')} `);
   lengthLabel.append(shown, length);
   const curve = el('select');
   for (const [id, name] of Object.entries(CURVE_NAMES)) {
-    const o = el('option', '', name);
+    const o = el('option', '', t(name));
     o.value = id;
     curve.append(o);
   }
-  curve.value = t.curve;
-  const curveLabel = el('label', '', 'Curve ');
+  curve.value = transition.curve;
+  const curveLabel = el('label', '', `${t('Curve')} `);
   curveLabel.append(curve);
-  const effects = Object.entries(EFFECT_NAMES).map(([id, name]) => {
+  const effects = Object.entries(EFFECT_NAMES).map(([id, english]) => {
+    const name = t(english);
     const row = el('div', 'option');
     const body = el('div', 'body');
     body.append(el('div', 'name small', name));
     const toggle = el('input', 'switch');
     toggle.type = 'checkbox';
-    toggle.checked = !!t.effects?.[id];
+    toggle.checked = !!transition.effects?.[id];
     toggle.setAttribute('aria-label', name);
     toggle.dataset.effect = id;
     row.append(body, toggle);
     return row;
   });
   const read = () => ({
-    ...t,
+    ...transition,
     duration_ms: Number(length.value),
     curve: curve.value,
     effects: Object.fromEntries(effects.map((r) => r.querySelector('input')).map((i) => [i.dataset.effect, i.checked])),
@@ -444,7 +468,7 @@ const renderMix = (m) => {
   const lists = [...new Set([...(m.list ? [m.list] : []), ...m.lists])];
   select.replaceChildren(
     ...lists.map((l) => {
-      const o = el('option', '', l === m.current ? `${l} (playing)` : l);
+      const o = el('option', '', l === m.current ? tf('{} (playing)', l) : l);
       o.value = l;
       return o;
     }),
@@ -469,14 +493,14 @@ const renderMix = (m) => {
         .filter(Boolean)
         .join(' · ');
       if (detail) text.append(el('div', 'detail', detail));
-      const button = el('button', 'secondary', edited.has(`${a.id}>${b.id}`) ? 'Edited' : 'Auto');
+      const button = el('button', 'secondary', t(edited.has(`${a.id}>${b.id}`) ? 'Edited' : 'Auto'));
       button.type = 'button';
       button.addEventListener('click', () => editPair(a, b));
       li.append(text, button);
       return li;
     }),
   );
-  if (items.length < 2) $('mix-pairs').append(el('li', 'empty', 'Play this playlist once to list its tracks.'));
+  if (items.length < 2) $('mix-pairs').append(el('li', 'empty', t('Play this playlist once to list its tracks.')));
   if (m.open && m.open.list === m.list) {
     const a = items.find((x) => x.id === m.open.from) || { id: m.open.from, title: '' };
     const b = items.find((x) => x.id === m.open.to) || { id: m.open.to, title: '' };
@@ -499,8 +523,10 @@ const editPair = async (a, b) => {
   const match = keysMatch(editFacts.a?.camelot, editFacts.b?.camelot);
   const tempo = [editFacts.a?.bpm, editFacts.b?.bpm].map((x) => (x ? `${Math.round(x)} BPM` : '?')).join(' → ');
   $('mix-keys').textContent = [
-    `Tempo ${tempo}`,
-    match === null ? 'Keys not measured yet' : `Keys ${editFacts.a.key} → ${editFacts.b.key}: ${match ? 'they mix well' : 'they may clash'}`,
+    tf('Tempo {}', tempo),
+    match === null
+      ? t('Keys not measured yet')
+      : tf(match ? 'Keys {} → {}: they mix well' : 'Keys {} → {}: they may clash', editFacts.a.key, editFacts.b.key),
   ].join(' · ');
   $('mix-delete').disabled = !pair;
   $('mix-editor').hidden = false;
@@ -575,8 +601,8 @@ const drawMixCanvas = () => {
   g.fillRect(0, lane, w, 1);
   g.globalAlpha = 1;
   g.font = '11px system-ui, sans-serif';
-  g.fillText(out !== null ? `out ${time(out)}` : 'out: end of the track', 6, 12);
-  g.fillText(`in ${time(editing.in_ms)}`, 6, lane + 12);
+  g.fillText(out !== null ? tf('out {}', time(out)) : t('out: end of the track'), 6, 12);
+  g.fillText(tf('in {}', time(editing.in_ms)), 6, lane + 12);
 };
 // Top lane: the fade's start; bottom lane: where B starts.
 const dragMix = (e) => {
@@ -642,7 +668,7 @@ $('mix-auto').addEventListener('change', async () => {
 });
 $('mix-export').addEventListener('click', () => mixCall('export'));
 $('mix-import').addEventListener('click', async () => {
-  if (!confirm("Replace this playlist's mix with the pasted one?")) return;
+  if (!confirm(t("Replace this playlist's mix with the pasted one?"))) return;
   if (await mixCall('import', { json: $('mix-import-text').value })) {
     $('mix-import-text').value = '';
     loadMix();
@@ -686,7 +712,7 @@ const renderChangelog = (text, since) => {
       first = false;
       card = el('div', isNew ? 'card release new' : 'card release');
       const name = inline(el('div', 'name'), line.slice(3));
-      if (isNew) name.append(el('span', 'badge', 'new'));
+      if (isNew) name.append(el('span', 'badge', t('new')));
       card.append(name);
       box.append(card);
       list = null;
@@ -707,13 +733,25 @@ const renderChangelog = (text, since) => {
 const load = async () => {
   try {
     const s = await invoke('settings_get');
+    if (!document.documentElement.dataset.lang) {
+      strings = s.strings || {};
+      document.documentElement.lang = document.documentElement.dataset.lang = s.ui.active;
+      translatePage();
+      for (const l of s.ui.languages) {
+        const o = el('option', '', l.name);
+        o.value = l.tag;
+        $('language').append(o);
+      }
+    }
     applyTheme(s.theme);
     renderChangelog(s.changelog, s.updated_from);
     renderPlugins(s.plugins);
     renderLastFm(s.lastfm);
-    $('discord-id').textContent = s.discord.built_in
-      ? 'Optional: this build has its own; an id typed here takes its place.'
-      : 'Rich Presence is off while this is empty.';
+    $('discord-id').textContent = t(
+      s.discord.built_in
+        ? 'Optional: this build has its own; an id typed here takes its place.'
+        : 'Rich Presence is off while this is empty.',
+    );
     renderDesktopLyrics(s.desktop_lyrics);
     renderAudio(s.audio);
     // The Mix tab, and a pair the site asked to open (mix_open).
@@ -727,7 +765,7 @@ const load = async () => {
       const value = input.dataset.key.split('.').reduce((o, k) => o?.[k], s);
       if (input.type === 'checkbox') input.checked = !!value;
       else input.value = Array.isArray(value) ? value.join(', ') : (value ?? '');
-      if ('shortcut' in input.dataset) input.placeholder = 'Off';
+      if ('shortcut' in input.dataset) input.placeholder = t('Off');
       if (input.type === 'range') showSeconds(input);
     }
   } catch (e) {
@@ -770,7 +808,7 @@ for (const input of document.querySelectorAll('[data-shortcut]')) {
   input.addEventListener('focus', () => {
     before = input.value;
     input.classList.add('recording');
-    input.value = 'Press keys…';
+    input.value = t('Press keys…');
   });
   input.addEventListener('blur', () => {
     if (input.classList.contains('recording')) stop(before);
@@ -786,7 +824,7 @@ for (const input of document.querySelectorAll('[data-shortcut]')) {
     if (MODIFIERS.includes(e.key)) return;
     const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
     if (!mods.length) {
-      input.value = 'Add Ctrl, Alt, Shift or Win';
+      input.value = t('Add Ctrl, Alt, Shift or Win');
       return;
     }
     const keys = [...mods, keyName(e.code)].join('+');
@@ -822,7 +860,7 @@ for (const [id, name] of [
 }
 $('stats-export').addEventListener('click', () => action('stats_export'));
 $('stats-clear').addEventListener('click', async () => {
-  if (!confirm('Delete the whole listening history? This cannot be undone.')) return;
+  if (!confirm(t('Delete the whole listening history? This cannot be undone.'))) return;
   await action('stats_clear');
   loadStats();
 });

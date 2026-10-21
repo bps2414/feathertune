@@ -126,5 +126,11 @@ fn payload(s: &Settings) -> Value {
     json!({
         "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade,
         "visualizer": visualizer,
+        // The mix buttons' texts, in the app's language.
+        "labels": {
+            "edited": crate::i18n::t("Edited"),
+            "auto": crate::i18n::t("Auto"),
+            "edit": crate::i18n::t("Edit the transition between these tracks"),
+        },
     })
 }

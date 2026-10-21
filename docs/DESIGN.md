@@ -134,6 +134,8 @@ Lines with word times of their own (Better Lyrics, Unison, lrcmux, Enhanced LRC 
 
 **What's new:** the installed copy writes its version to `last-version.txt` in the profile at each start. When the version went up (or the file is missing but `config.toml` was already there: an update from before 0.2.0), the first time the window shows that run it opens the settings window on its What's new tab: `CHANGELOG.md`, compiled into the exe, one card per release, those since the old version marked. Nothing is fetched for it. A first install and a build from `target/` show nothing. Pushing a release must not be a GitHub pre-release: the update check reads `releases/latest`, which leaves pre-releases out.
 
+**Language** (`[ui] language`: "auto", "en" or "pt-BR"; General tab): "auto" picks pt-BR when Windows' regional format is Portuguese, else English. Read once at startup, so a change applies after a restart. `src/i18n.rs` keys on the English text itself: `t("Quit")` returns the entry of `app/locales/pt-BR.json` (English → Portuguese, compiled in) or the English when there is none, and `tf` fills `{}` in order. The native UI, the tray menus, the splash, the plugin names, descriptions and costs, and the user-facing errors of the settings commands go through it. The settings page gets the same table from `settings_get` and translates its HTML once on load plus its own dynamic texts; the page scripts get their few texts from Rust as data (the lyrics credit, the mix buttons), never the table. What's new shows `CHANGELOG.pt-BR.md` in Portuguese. To add a text: write it in English in a `t()` call and add its entry to the JSON; a missing entry shows the English. Not translated: the site itself (it follows the account's language), lyrics source names, log lines and the mixes' import errors. Native buttons have fixed widths and text that does not fit ends in "…"; the Portuguese texts were not checked on screen yet.
+
 ## Audio
 
 The page's own `<video>` may be processed with Web Audio, locally and for the listener only (see Ground rules). All audio plugins share one page module, `audio`, which is loaded when any of them is on.
@@ -233,6 +235,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 ## Not verified yet
 
 - The What's new tab opening after a real update from 0.1.7 (installed copy), and the settings sidebar at 150% scaling and in a narrow window.
+- The app in Portuguese on screen: the longer texts in the native buttons, the tray menu, the splash and the settings page.
 - With a real mouse: snap layouts, dragging, resizing and maximize/restore, at 150% scaling and on a second monitor; typing in the site after switching windows.
 - Discord Rich Presence and a real Last.fm sign-in and scrobble, including on a CI build with the embedded key and application id (`FEATHERTUNE_DISCORD_CLIENT_ID`, a repository secret like the Last.fm keys).
 - "Start with Windows" writing its Run entry; the track toast being seen.

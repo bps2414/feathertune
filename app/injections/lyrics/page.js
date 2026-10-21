@@ -1,5 +1,6 @@
-// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...], source, estimated, translation?,
-// translationSource? } for the current track, or null (the track changed, or no source has any).
+// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...], estimated, translation?, credit } for
+// the current track, or null (the track changed, or no source has any). `credit` is the line under the
+// lyrics (sources, in the app's language).
 // `estimated`: the word times are a guess. `translation` has one text (or null) per line, shown under
 // it in a smaller type; it lights with its line as a whole, never word by word. In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
@@ -30,7 +31,7 @@ const MOVE_AFTER = 0.45;
 const MOVE_AFTER_MAX_MS = 1800;
 
 let lines = null; // [{ ms, text, words?, translation? }], sorted by ms
-let meta = { source: '', estimated: false, translationSource: '' };
+let meta = { credit: '', estimated: false };
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let current = -1;
@@ -116,9 +117,7 @@ const build = () => {
   });
   const credit = document.createElement('p');
   credit.className = 'ft-credit';
-  credit.textContent =
-    `Synced lyrics: ${meta.source}${meta.estimated ? ' · word timing estimated' : ''}` +
-    (meta.translationSource ? ` · Translation: ${meta.translationSource}` : '');
+  credit.textContent = meta.credit;
   box.append(credit);
   current = -1;
   sung = -1;
@@ -311,10 +310,8 @@ feathertune.lyrics = Object.freeze({
     clear();
     if (!valid(data)) return;
     meta = {
-      source: typeof data.source === 'string' ? data.source.slice(0, 40) : '',
+      credit: typeof data.credit === 'string' ? data.credit.slice(0, 160) : '',
       estimated: data.estimated === true,
-      translationSource:
-        data.translation && typeof data.translationSource === 'string' ? data.translationSource.slice(0, 40) : '',
     };
     lines = data.lines.map(([ms, text, words], i) => ({
       ms,

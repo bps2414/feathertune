@@ -168,7 +168,8 @@ impl Taskbar {
     }
 }
 
-fn button(id: usize, icon: HICON, tip: &str) -> THUMBBUTTON {
+fn button(id: usize, icon: HICON, tip: &'static str) -> THUMBBUTTON {
+    let tip = crate::i18n::t(tip);
     let mut b = THUMBBUTTON {
         dwMask: THB_ICON | THB_TOOLTIP | THB_FLAGS,
         iId: id as u32,

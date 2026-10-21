@@ -4,6 +4,9 @@
 //! comments and layout.
 //!
 //! ```toml
+//! [ui]
+//! language = "auto"                # auto (Windows' language), en, pt-BR; applies after a restart
+//!
 //! [plugins]                        # one switch per plugin (plugins.rs), all optional
 //! tracker_filter = true            # extra rules go in privacy-list.txt in the profile
 //!
@@ -53,6 +56,7 @@ use crate::plugins::{self, PLUGINS};
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
+    pub ui: Ui,
     pub shortcuts: Shortcuts,
     pub discord: Discord,
     pub lastfm: LastFm,
@@ -65,6 +69,19 @@ pub struct Settings {
     /// Plugins forced off in memory by `--measure --plugins-off=...`; never written to the file.
     #[serde(skip)]
     forced_off: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct Ui {
+    /// "auto" (Windows' language) or a tag of `i18n::LANGUAGES`.
+    pub language: String,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Ui { language: "auto".into() }
+    }
 }
 
 #[derive(Deserialize)]

@@ -125,11 +125,14 @@ fade_in_ms = 1500            # 0 a 5000, entrando na próxima faixa
 echo_out = false             # um eco no fim da faixa que some
 visualizer = "bars"          # bars, wave
 
+[ui]
+language = "auto"            # auto (idioma do Windows: português vira pt-BR, o resto inglês), en, pt-BR; vale depois de reiniciar
+
 [browser]
 disable_features = []        # features extras do Chromium a desligar (experimentos, veja docs/DESIGN.pt-BR.md)
 ```
 
-As chaves antigas `[injections] controls`, `[privacy] tracker_filter` e `[notifications] track_change` ainda são lidas; a janela de configurações as troca pela entrada em `[plugins]`. "Start with Windows", "Connect Last.fm" e o mini player também ficam no menu da bandeja. Um build local sem chave do Last.fm precisa de `api_key` e `api_secret` aqui. O login do Last.fm acontece no navegador; a session key fica no Windows Credential Manager, nunca em arquivo.
+As chaves antigas `[injections] controls`, `[privacy] tracker_filter` e `[notifications] track_change` ainda são lidas; a janela de configurações as troca pela entrada em `[plugins]`. "Iniciar com o Windows", "Conectar Last.fm" e o mini player também ficam no menu da bandeja. Um build local sem chave do Last.fm precisa de `api_key` e `api_secret` aqui. O login do Last.fm acontece no navegador; a session key fica no Windows Credential Manager, nunca em arquivo.
 
 ## Aviso
 

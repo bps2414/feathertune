@@ -39,8 +39,8 @@
 //!   a translation line by line into that language: the source's own (translations in its TTML, by
 //!   people) when it covers half the lines, else Unison's `POST /translate` (machine, made for lyrics;
 //!   only the lines' text and the language are sent). Cached with the lines, per language. Lines already
-//!   in that language get none. The page gets `translation: [text | null, ...]` (one per line) and
-//!   `translationSource`; a new language applies from the next track, "off" at once.
+//!   in that language get none. The page gets `translation: [text | null, ...]` (one per line), and
+//!   its source in `credit`; a new language applies from the next track, "off" at once.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,9 +52,6 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::error::RecvError;
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
-
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
-use windows::core::w;
 
 use crate::player::{Player, Track};
 use crate::settings::{Live, Settings};
@@ -256,32 +253,9 @@ pub fn translation_target(s: &Settings) -> Option<String> {
     }
     match s.lyrics.translate_to.as_str() {
         "off" => None,
-        "auto" => windows_language(),
+        "auto" => crate::i18n::windows_language(),
         code => TRANSLATION_LANGUAGES.iter().any(|(c, _)| *c == code).then(|| code.to_owned()),
     }
-}
-
-/// The language of Windows' regional format (Settings > Time & language), as an ISO 639 code.
-fn windows_language() -> Option<String> {
-    let mut buf = [0u16; 85];
-    let mut size = (buf.len() * 2) as u32;
-    let result = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!(r"Control Panel\International"),
-            w!("LocaleName"),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if result.is_err() {
-        return None;
-    }
-    let name = String::from_utf16_lossy(&buf[..(size as usize / 2).min(buf.len())]);
-    let lang = name.trim_end_matches('\0').split(['-', '_']).next()?.to_ascii_lowercase();
-    ((2..=3).contains(&lang.len()) && lang.bytes().all(|b| b.is_ascii_lowercase())).then_some(lang)
 }
 
 /// Finds a translation into `lang` of the current lines (track `key`) and shows it: the source's own
@@ -435,12 +409,17 @@ fn publish(app: &AppHandle) {
     if lyrics.page.load(Ordering::Relaxed) {
         let payload = synced.as_ref().map_or(Value::Null, |(id, s)| {
             let lines: Vec<Value> = s.lines.iter().map(Line::to_json).collect();
-            let mut payload = json!({ "id": id, "lines": lines, "source": s.source, "estimated": s.estimated });
+            let mut credit = crate::i18n::tf("Synced lyrics: {}", &[s.source]);
+            if s.estimated {
+                credit = crate::i18n::tf("{} · word timing estimated", &[&credit]);
+            }
+            let mut payload = json!({ "id": id, "lines": lines, "estimated": s.estimated });
             if let Some(source) = s.translated {
                 let translation: Vec<Option<&str>> = s.lines.iter().map(|l| l.translation.as_deref()).collect();
                 payload["translation"] = json!(translation);
-                payload["translationSource"] = json!(source);
+                credit = crate::i18n::tf("{} · Translation: {}", &[&credit, source]);
             }
+            payload["credit"] = json!(credit);
             payload
         });
         crate::injections::send(app, "lyrics", &payload);

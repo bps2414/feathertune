@@ -125,6 +125,9 @@ fade_in_ms = 1500            # 0 to 5000, into the next track
 echo_out = false             # an echo on the tail of the track that fades out
 visualizer = "bars"          # bars, wave
 
+[ui]
+language = "auto"            # auto (Windows' language: Portuguese gets pt-BR, anything else English), en, pt-BR; applies after a restart
+
 [browser]
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/DESIGN.md)
 ```

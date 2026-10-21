@@ -20,6 +20,11 @@
 //! api_key = ""                     # both set: used instead of the keys built into a CI release
 //! api_secret = ""
 //!
+//! [lyrics]
+//! providers = ["lrclib", "betterlyrics"]  # synced lyrics sources, tried in this order
+//! estimate_words = true            # word times for lines timed only as a whole
+//! offset_ms = 0                    # moves the lyrics in time; positive: later
+//!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
 //! ```
@@ -39,6 +44,7 @@ pub struct Settings {
     pub discord: Discord,
     pub lastfm: LastFm,
     pub browser: Browser,
+    pub lyrics: LyricsSettings,
     /// The whole file, for the plugin switches (`plugin`).
     #[serde(skip)]
     raw: toml::Table,
@@ -75,6 +81,25 @@ pub struct Discord {
 pub struct LastFm {
     pub api_key: String,
     pub api_secret: String,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct LyricsSettings {
+    /// Source ids (`lyrics::PROVIDERS`); unknown ones are skipped.
+    pub providers: Vec<String>,
+    pub estimate_words: bool,
+    pub offset_ms: i32,
+}
+
+impl Default for LyricsSettings {
+    fn default() -> Self {
+        LyricsSettings {
+            providers: crate::lyrics::PROVIDERS.iter().map(|(id, _)| id.to_string()).collect(),
+            estimate_words: true,
+            offset_ms: 0,
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]

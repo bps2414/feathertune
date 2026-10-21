@@ -148,6 +148,12 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "connected": lastfm,
         },
         "browser": { "disable_features": s.browser.disable_features },
+        "lyrics": {
+            "providers": s.lyrics.providers,
+            "all_providers": crate::lyrics::PROVIDERS.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect::<Vec<_>>(),
+            "estimate_words": s.lyrics.estimate_words,
+            "offset_ms": s.lyrics.offset_ms,
+        },
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
         "desktop_lyrics": { "open": crate::desktop_lyrics::is_open(), "locked": crate::desktop_lyrics::is_locked() },
         // false: the plugin was off at startup, so nothing is recorded.
@@ -157,7 +163,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 }
 
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
-/// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features` or `autostart`. Returns whether a
+/// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
+/// `lyrics.estimate_words`, `lyrics.offset_ms` or `autostart`. Returns whether a
 /// restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
@@ -222,6 +229,37 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             }
             live.write("browser", name, toml_edit::value(names), None, true)?;
             Ok(true)
+        }
+        ("lyrics", "providers") => {
+            let list = value.as_array().ok_or("expected a list")?;
+            let mut ids = toml_edit::Array::new();
+            let mut seen = Vec::new();
+            for p in list {
+                let p = p.as_str().ok_or("expected names")?;
+                if !crate::lyrics::PROVIDERS.iter().any(|(id, _)| *id == p) || seen.contains(&p) {
+                    return Err(format!("unknown lyrics source {p:?}"));
+                }
+                seen.push(p);
+                ids.push(p);
+            }
+            live.write("lyrics", name, toml_edit::value(ids), None, false)?;
+            Ok(false)
+        }
+        ("lyrics", "estimate_words") => {
+            let on = value.as_bool().ok_or("expected true or false")?;
+            live.write("lyrics", name, toml_edit::value(on), None, false)?;
+            crate::lyrics::republish(&app);
+            Ok(false)
+        }
+        ("lyrics", "offset_ms") => {
+            let ms = value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+                .filter(|ms| (-5000..=5000).contains(ms))
+                .ok_or("a whole number of ms, from -5000 to 5000")?;
+            live.write("lyrics", name, toml_edit::value(ms), None, false)?;
+            crate::lyrics::republish(&app);
+            Ok(false)
         }
         _ => Err("unknown setting".into()),
     }

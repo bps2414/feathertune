@@ -1,5 +1,5 @@
 /* Synced lyrics: the timed lines replace the site's own lyrics while the Lyrics tab is open (the
-   attribute is set by lyrics/page.js only then, and only when LRCLIB had lyrics). The site's root font
+   attribute is set by lyrics/page.js only then, and only when a source had lyrics). The site's root font
    is small, so sizes are in px. Lines fade with their distance from the current one (`data-d`, set by
    the page; lines without it are the farthest), the current one is large and bright, and every change
    between them is a cross-fade. */
@@ -82,4 +82,11 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   transition:
     color 0.25s ease,
     text-shadow 0.4s ease;
+}
+
+/* Estimated word times are a guess: the words light up more softly, so an early or late one jars less. */
+#feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-sung {
+  transition:
+    color 0.45s ease,
+    text-shadow 0.6s ease;
 }

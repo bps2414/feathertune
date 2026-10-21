@@ -1,5 +1,5 @@
-// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...] } for the current track, or null (the
-// track changed, or LRCLIB has none). In the site's Lyrics tab the timed lines replace the site's own text
+// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...], source, estimated } for the current
+// track, or null (the track changed, or no source has any). `estimated`: the word times are a guess. In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
 // one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
 // click on a line seeks the <video> to it. While the song plays and the window is in front, the list scrolls
@@ -7,8 +7,10 @@
 // switch (eased, a little before and a little after), and eases to a new place after a seek, a click or
 // a manual scroll (one animation
 // frame loop, only while that is so; it writes the scroll only when it moves by a whole device pixel).
-// Otherwise each new line scrolls smoothly to the middle. With no data the site's own lyrics are left
-// alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
+// Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
+// the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
+// `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
+// left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const MAX_LINES = 2000;
@@ -25,12 +27,12 @@ const MOVE_AFTER = 0.45;
 const MOVE_AFTER_MAX_MS = 1800;
 
 let lines = null; // [{ ms, text }], sorted by ms
+let meta = { source: '', estimated: false };
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let current = -1;
 let sung = -1; // in the current line, the last word whose time has come
 let manualUntil = 0;
-let observed = null;
 const observer = new MutationObserver(() => refresh());
 let centers = null; // middle of each line in the tab's scroll space, measured when needed
 const resizes = new ResizeObserver(() => (centers = null));
@@ -39,7 +41,8 @@ let last = 0; // time of the previous frame
 let pos = 0; // the scroll position the loop is at, in CSS px
 let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
 
-const tab = () => document.querySelector(TAB);
+const tab = () => document.querySelector(`${TAB}[page-type="${LYRICS_PAGE}"]`) ?? document.querySelector(TAB);
+const isOpen = (t) => t.getAttribute('page-type') === LYRICS_PAGE;
 
 const timed = (l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string';
 
@@ -60,14 +63,16 @@ const clear = () => {
   items = [];
   centers = null;
   resizes.disconnect();
+  observer.disconnect();
   box?.remove();
   box = null;
-  tab()?.removeAttribute('data-feathertune-lyrics');
+  for (const t of document.querySelectorAll('[data-feathertune-lyrics]')) t.removeAttribute('data-feathertune-lyrics');
 };
 
 const build = () => {
   box = document.createElement('div');
   box.id = 'feathertune-lyrics';
+  box.classList.toggle('ft-estimated', meta.estimated);
   const onManual = () => (manualUntil = Date.now() + MANUAL_SCROLL_MS);
   box.addEventListener('wheel', onManual, { passive: true });
   box.addEventListener('touchmove', onManual, { passive: true });
@@ -97,7 +102,7 @@ const build = () => {
   });
   const credit = document.createElement('p');
   credit.className = 'ft-credit';
-  credit.textContent = 'Synced lyrics: LRCLIB';
+  credit.textContent = `Synced lyrics: ${meta.source}${meta.estimated ? ' · word timing estimated' : ''}`;
   box.append(credit);
   current = -1;
   sung = -1;
@@ -108,16 +113,15 @@ const build = () => {
 // Puts the box in the tab renderer and shows it only while the Lyrics tab is the open one.
 const refresh = () => {
   if (!lines) return;
+  observer.observe(document.body, { attributes: true, attributeFilter: ['page-type'], subtree: true });
   const t = tab();
   if (!t) return;
-  if (observed !== t) {
-    observer.disconnect();
-    observer.observe(t, { attributes: true, attributeFilter: ['page-type'] });
-    observed = t;
-  }
   if (!box) build();
-  if (box.parentNode !== t) t.prepend(box);
-  const open = t.getAttribute('page-type') === LYRICS_PAGE;
+  if (box.parentNode !== t) {
+    box.parentElement?.removeAttribute('data-feathertune-lyrics');
+    t.prepend(box);
+  }
+  const open = isOpen(t);
   box.hidden = !open;
   t.toggleAttribute('data-feathertune-lyrics', open);
   if (open) {
@@ -274,7 +278,8 @@ const run = () => {
 // Media events do not bubble, but a capturing listener on the document gets them (same as the bridge).
 const onTime = (e) => {
   if (!lines || !(e.target instanceof HTMLVideoElement)) return;
-  if (!box || !box.isConnected || box.parentNode !== tab()) {
+  const t = tab();
+  if (!box || !t || box.parentNode !== t || box.hidden === isOpen(t)) {
     refresh();
     return;
   }
@@ -289,6 +294,10 @@ feathertune.lyrics = Object.freeze({
   set(data) {
     clear();
     if (!valid(data)) return;
+    meta = {
+      source: typeof data.source === 'string' ? data.source.slice(0, 40) : '',
+      estimated: data.estimated === true,
+    };
     lines = data.lines.map(([ms, text, words]) => ({ ms, text, words: words?.map(([ms, text]) => ({ ms, text })) }));
     refresh();
   },

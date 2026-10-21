@@ -20,7 +20,7 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
-- Letras sincronizadas do LRCLIB na aba Letra do site: as linhas (ou palavras) acendem conforme são cantadas, uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
+- Letras sincronizadas do LRCLIB e do Better Lyrics na aba Letra do site: linhas e palavras acendem conforme são cantadas (o tempo das palavras é estimado pelo ritmo da música quando a fonte só marca as linhas), uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
@@ -67,7 +67,7 @@ lastfm = true                # também precisa conectar a conta
 mini_player = true
 animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
 album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
-synced_lyrics = true          # letras sincronizadas do LRCLIB na aba Letra, rolando no ritmo; uma requisição por faixa, com cache
+synced_lyrics = true          # letras sincronizadas na aba Letra, rolando no ritmo; de uma a três requisições por faixa, com cache
 ambient_mode = true           # capa desfocada e brilhante atrás do site
 taskbar_controls = true       # botões na miniatura da barra de tarefas, progresso no botão da barra
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
@@ -87,6 +87,11 @@ client_id = ""               # o id do seu próprio aplicativo do Discord
 [lastfm]
 api_key = ""                 # opcional: os builds de release trazem uma chave própria; estes valores têm prioridade
 api_secret = ""
+
+[lyrics]
+providers = ["lrclib", "betterlyrics"]  # fontes de letras sincronizadas, tentadas nessa ordem
+estimate_words = true        # estima o tempo das palavras quando a fonte só marca linhas inteiras
+offset_ms = 0                # move a letra no tempo; positivo: mais tarde
 
 [browser]
 disable_features = []        # features extras do Chromium a desligar (experimentos, veja docs/DESIGN.pt-BR.md)

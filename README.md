@@ -20,7 +20,7 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
-- Time-synced lyrics from LRCLIB in the site's Lyrics tab: lines (or words) light up as they are sung, cross-fade into each other, and the list scrolls slowly in time with the song.
+- Time-synced lyrics from LRCLIB and Better Lyrics in the site's Lyrics tab: lines and words light up as they are sung (word times are estimated from the song's pace when the source only times lines), cross-fade into each other, and the list scrolls slowly in time with the song.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
@@ -67,7 +67,7 @@ lastfm = true                # also needs your account connected
 mini_player = true
 animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
 album_color = true            # title bar, mini player and site take the cover's colors (once per track)
-synced_lyrics = true          # LRCLIB time-synced lyrics in the Lyrics tab, scrolling in time; one request per track, cached
+synced_lyrics = true          # time-synced lyrics in the Lyrics tab, scrolling in time; one to three requests per track, cached
 ambient_mode = true           # blurred, glowing cover behind the site
 taskbar_controls = true       # buttons on the taskbar thumbnail, progress on the taskbar button
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
@@ -87,6 +87,11 @@ client_id = ""               # your own Discord application id
 [lastfm]
 api_key = ""                 # optional: release builds carry their own key; these values take priority
 api_secret = ""
+
+[lyrics]
+providers = ["lrclib", "betterlyrics"]  # synced lyrics sources, tried in this order
+estimate_words = true        # guess word times when a source times whole lines only
+offset_ms = 0                # moves the lyrics in time; positive: later
 
 [browser]
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/DESIGN.md)

@@ -125,7 +125,7 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Floating lyrics",
         description: "The current line of the synced lyrics (and the next one) over the desktop, in a window that \
                       clicks pass through. Open it from the tray or below; unlock it in the tray to move it. \
-                      Uses LRCLIB like Synced lyrics, even with that one off.",
+                      Uses the same lyrics sources as Synced lyrics, even with that one off.",
         cost: "Not measured yet: nothing while closed. Open: a repaint per line or word change and a short \
                fade; hidden while paused.",
         default_on: true,
@@ -147,7 +147,8 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Share lyrics",
         description: "Makes a picture card of the synced lyrics: pick any lines (skipped ones are marked), choose \
                       a look (cover colors, album ink, dark or paper), then copy it or save it as a PNG. Open it \
-                      from the title bar, the tray or below. Uses LRCLIB like Synced lyrics, even with that one off.",
+                      from the title bar, the tray or below. Uses the same lyrics sources as Synced lyrics, even \
+                      with that one off.",
         cost: "Not measured yet: nothing until opened; the window repaints only on input.",
         default_on: true,
         live: false,
@@ -177,12 +178,13 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "synced_lyrics",
         name: "Synced lyrics",
-        description: "Shows time-synced lyrics from LRCLIB in the site's Lyrics tab, with the current line \
-                      (or word, when the entry has word times) highlighted. Lines cross-fade and the list \
-                      scrolls slowly in time with the song while it plays and the window is in front. One \
-                      request per track, cached on disk; when LRCLIB has none, the site's own lyrics stay.",
+        description: "Shows time-synced lyrics in the site's Lyrics tab, from LRCLIB and Better Lyrics (below), \
+                      with the current line and word highlighted (word times are estimated when the source has \
+                      none). Lines cross-fade and the list scrolls slowly in time with the song while it plays \
+                      and the window is in front. One to three requests per track, cached on disk; when no \
+                      source has any, the site's own lyrics stay.",
         cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread. \
-               The cross-fade and the scroll are not measured yet.",
+               The cross-fade, the scroll and the extra sources are not measured yet.",
         default_on: true,
         live: false,
         legacy: None,

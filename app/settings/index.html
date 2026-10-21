@@ -11,10 +11,14 @@
   <div class="glows" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 
   <header>
-    <h1>Settings</h1>
+    <div class="top-row">
+      <h1>Settings</h1>
+      <input id="search" type="search" placeholder="Search" aria-label="Search settings" autocomplete="off" spellcheck="false">
+    </div>
     <nav role="tablist" aria-label="Sections">
       <button role="tab" type="button" data-tab="general" aria-selected="true">General</button>
       <button role="tab" type="button" data-tab="look">Look</button>
+      <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
       <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
@@ -24,6 +28,7 @@
 
   <main>
     <p id="error" class="notice error" role="alert" hidden></p>
+    <p id="no-results" class="notice" hidden>Nothing matches.</p>
 
     <section role="tabpanel" data-panel="general">
       <div class="card">
@@ -47,7 +52,25 @@
 
     <section role="tabpanel" data-panel="look" hidden>
       <div class="card" data-plugin="album_color"></div>
-      <div class="card" data-plugin="synced_lyrics"></div>
+      <div class="card" data-plugin="ambient_mode"></div>
+      <div class="card" data-plugin="animated_title_bar"></div>
+    </section>
+
+    <section role="tabpanel" data-panel="lyrics" hidden>
+      <div class="card" data-plugin="synced_lyrics">
+        <div class="name small">Sources</div>
+        <p class="hint">Tried from the top until one has the track. Also used by Floating and Share lyrics.</p>
+        <ol class="sources" id="lyrics-providers"></ol>
+        <p class="hint">Better Lyrics is timed word by word, but without an API key it only answers for tracks it already has.</p>
+        <div class="option">
+          <div class="body">
+            <div class="name small">Estimate word timing</div>
+            <div class="hint">When a source times whole lines only, words light up at guessed times (from the song's pace). Turn off for line-only lyrics.</div>
+          </div>
+          <input type="checkbox" class="switch" data-key="lyrics.estimate_words" aria-label="Estimate word timing">
+        </div>
+        <label>Timing offset, ms (positive: later) <input data-key="lyrics.offset_ms" type="number" step="50" min="-5000" max="5000"></label>
+      </div>
       <div class="card" data-plugin="desktop_lyrics">
         <div class="actions">
           <button id="desktop-lyrics" type="button" class="secondary">Show floating lyrics</button>
@@ -59,8 +82,6 @@
           <button id="share-lyrics" type="button" class="secondary">Make a lyrics card</button>
         </div>
       </div>
-      <div class="card" data-plugin="ambient_mode"></div>
-      <div class="card" data-plugin="animated_title_bar"></div>
     </section>
 
     <section role="tabpanel" data-panel="integrations" hidden>

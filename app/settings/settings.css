@@ -49,7 +49,9 @@ header {
   border-bottom: 1px solid var(--edge);
 }
 
-h1 { font: 600 22px/1.2 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 0 0 14px; }
+h1 { font: 600 22px/1.2 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 0; flex: 1; }
+.top-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#search { width: min(220px, 45vw); padding: 5px 12px; border-radius: 999px; }
 
 nav {
   display: flex;
@@ -71,6 +73,8 @@ nav button {
 }
 nav button:hover { color: var(--text); background: var(--glass-hover); }
 nav button[aria-selected="true"] { color: var(--text); background: rgba(255, 255, 255, 0.14); }
+/* While searching, matches from every tab are shown, so no tab is the current one. */
+body.searching nav button[aria-selected="true"] { color: var(--muted); background: transparent; }
 
 main { padding: 16px 24px 88px; }
 
@@ -97,6 +101,20 @@ main { padding: 16px 24px 88px; }
 }
 .description { margin: 2px 0 0; color: rgba(244, 242, 255, 0.85); }
 .cost { color: var(--muted); font-size: 12px; margin-top: 4px; }
+details.cost summary { font-size: 12px; }
+.name.small { font-size: 13px; }
+
+.option { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.option .body { flex: 1; min-width: 0; }
+.option .hint { margin: 2px 0 0; }
+
+.sources { list-style: none; margin: 6px 0 0; padding: 0; }
+.sources li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin-bottom: 4px; border-radius: 10px; background: var(--field); border: 1px solid var(--edge); }
+.sources li.off .label { color: var(--muted); }
+.sources .label { flex: 1; }
+.sources button { padding: 2px 9px; }
+.sources button:disabled { opacity: 0.3; cursor: default; filter: none; }
+.sources .switch { transform: scale(0.85); }
 .extra:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edge); }
 .card.off .extra { opacity: 0.5; }
 

@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.5 — 2026-10-21
+
+- **Letra palavra por palavra em músicas rápidas.** As palavras acendem na hora em que são cantadas, também com a janela fora de foco, e palavras rápidas acendem de uma vez em vez de surgirem atrás da voz. A aba Letra rola num ritmo constante pelas linhas rápidas em vez de parar a cada uma, e não fica mais atrás da linha atual.
+
 ## 0.2.4 — 2026-10-21
 
 - **O app em português.** Menus, mini player, letra flutuante e compartilhada, a tela de início, as configurações e as Novidades seguem o idioma do Windows; escolha English ou Português na aba Geral das configurações (vale depois de reiniciar).

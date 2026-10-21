@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.5 — 2026-10-21
+
+- **Word-by-word lyrics on fast songs.** Words light right when they are sung, also with the window not in front, and fast words light at once instead of fading in behind the voice. The Lyrics tab scrolls at a steady pace through fast lines instead of stopping at each one, and no longer trails the current line.
+
 ## 0.2.4 — 2026-10-21
 
 - **The app in Portuguese (Brazil).** Menus, mini player, floating and shared lyrics, the start screen, the settings and What's new follow Windows' language; pick English or Português in the General tab of the settings (applies after a restart).

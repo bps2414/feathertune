@@ -93,15 +93,17 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
     transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* A sung word fades in over a share of its own length (`--ft-word`, set by the page), at most these, so
+   fast words light at once instead of trailing the voice. */
 #feathertune-lyrics .ft-line.ft-current .ft-sung {
   transition:
-    color 0.25s ease,
-    text-shadow 0.4s ease;
+    color min(0.25s, var(--ft-word, 0.25s)) ease,
+    text-shadow min(0.4s, var(--ft-word, 0.4s)) ease;
 }
 
 /* Estimated word times are a guess: the words light up more softly, so an early or late one jars less. */
 #feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-sung {
   transition:
-    color 0.45s ease,
-    text-shadow 0.6s ease;
+    color min(0.45s, var(--ft-word, 0.45s)) ease,
+    text-shadow min(0.6s, var(--ft-word, 0.6s)) ease;
 }

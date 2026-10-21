@@ -4,13 +4,14 @@
 // `estimated`: the word times are a guess. `translation` has one text (or null) per line, shown under
 // it in a smaller type; it lights with its line as a whole, never word by word. In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
-// one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
-// click on a line seeks the <video> to it. While the song plays and the window is in front, the list scrolls
-// on its own, in time: the view parks on the current line and moves on to the next one around the
-// switch (eased, a little before and a little after), and eases to a new place after a seek, a click or
-// a manual scroll (one animation
-// frame loop, only while that is so; it writes the scroll only when it moves by a whole device pixel).
-// Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
+// one by one in the current line, each fading in over a share of its own length (fast words at once), and
+// a one-shot timer wakes the page when the next word or line is due. Lines fade with their distance from
+// the current one (`data-d`), and a click on a line seeks the <video> to it. While the song plays and the
+// window is in front, the list scrolls on its own, in time, on one smooth curve: the view rests on a line
+// with time to spare and moves on to the next one around the switch (a little before and a little after),
+// glides through lines too short to rest on, and eases to a new place after a seek, a click or a manual
+// scroll (one animation frame loop, only while that is so; it writes the scroll only when it moves by a
+// whole device pixel). Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
 // the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
 // `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
 // left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
@@ -20,17 +21,24 @@ const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MAX_TRANSLATION_CHARS = 600;
 const MANUAL_SCROLL_MS = 4000;
-// How fast the scroll catches up with where it should be (seconds to cover about two thirds of the way).
+// Lines and words change this much before their time.
+const LEAD_MS = 250;
+// A sung word fades in over this share of its length (at most the CSS duration).
+const WORD_FADE = 0.4;
+// After a seek, a click, a manual scroll or a resize, how fast the scroll catches up with the curve
+// (seconds to cover about two thirds of the way); otherwise it is on the curve.
 const FOLLOW_S = 0.25;
 // The move from one line to the next takes this share of the line that ends (at most the cap) and this
 // share of the line that starts, so when a line ends the view is still a little short of the middle
-// between the two.
+// between the two. A line left with less rest than PARK_MIN_MS is passed through without stopping.
 const MOVE_BEFORE = 0.4;
 const MOVE_BEFORE_MAX_MS = 1600;
 const MOVE_AFTER = 0.45;
 const MOVE_AFTER_MAX_MS = 1800;
+const PARK_MIN_MS = 600;
 
 let lines = null; // [{ ms, text, words?, translation? }], sorted by ms
+let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at ms (see `goal`)
 let meta = { credit: '', estimated: false };
 let box = null; // our container, first child of the tab renderer
 let items = [];
@@ -39,11 +47,17 @@ let sung = -1; // in the current line, the last word whose time has come
 let manualUntil = 0;
 const observer = new MutationObserver(() => refresh());
 let centers = null; // middle of each line in the tab's scroll space, measured when needed
-const resizes = new ResizeObserver(() => (centers = null));
 let frame = 0;
 let last = 0; // time of the previous frame
 let pos = 0; // the scroll position the loop is at, in CSS px
 let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
+let catchUp = true; // the scroll eases to the curve instead of being on it
+const resizes = new ResizeObserver(() => {
+  centers = null;
+  catchUp = true;
+});
+let timer = 0;
+let due = -1; // the time (with the lead) the timer is set for
 
 const tab = () => document.querySelector(`${TAB}[page-type="${LYRICS_PAGE}"]`) ?? document.querySelector(TAB);
 const isOpen = (t) => t.getAttribute('page-type') === LYRICS_PAGE;
@@ -66,10 +80,13 @@ const valid = (data) =>
 
 const clear = () => {
   lines = null;
+  keys = [];
   current = -1;
   sung = -1;
   items = [];
   centers = null;
+  clearTimeout(timer);
+  timer = 0;
   resizes.disconnect();
   observer.disconnect();
   box?.remove();
@@ -92,16 +109,18 @@ const build = () => {
     video.currentTime = lines[index].ms / 1000;
     sync(video, true);
   });
-  items = lines.map((l) => {
+  items = lines.map((l, i) => {
     const el = document.createElement('p');
     el.className = l.text ? 'ft-line' : 'ft-line ft-gap';
     if (l.words) {
       el.classList.add('ft-words');
-      for (const w of l.words) {
+      l.words.forEach((w, j) => {
         const span = document.createElement('span');
         span.textContent = w.text;
+        const end = l.words[j + 1]?.ms ?? lines[i + 1]?.ms;
+        if (end !== undefined) span.style.setProperty('--ft-word', `${Math.round((end - w.ms) * WORD_FADE)}ms`);
         el.append(span);
-      }
+      });
     } else {
       el.textContent = l.text;
     }
@@ -191,14 +210,38 @@ const fade = (from, to) => {
   }
 };
 
+// Wakes `sync` when the next word or line is due (`ms`: now, with the lead), so words light on time
+// without the frame loop, also while the window is shown but not in front. One timer, set only while
+// playing and shown; it is set again only when what is due next changes (or `force`).
+const arm = (video, ms, force) => {
+  const next = Math.min(lines[current + 1]?.ms ?? Infinity, lines[current]?.words?.[sung + 1]?.ms ?? Infinity);
+  if (!Number.isFinite(next) || video.paused || document.hidden || !(video.playbackRate > 0)) {
+    clearTimeout(timer);
+    timer = 0;
+    return;
+  }
+  if (timer && next === due && !force) return;
+  clearTimeout(timer);
+  due = next;
+  timer = setTimeout(
+    () => {
+      timer = 0;
+      sync(video, false);
+    },
+    Math.max(0, next - ms) / video.playbackRate + 1,
+  );
+};
+
 const sync = (video, force) => {
   if (!lines || !box || box.hidden || !video) return;
-  const ms = video.currentTime * 1000 + 250;
+  const ms = video.currentTime * 1000 + LEAD_MS;
   const index = indexAt(lines, ms);
   if (index === current && !force) {
     singWords(ms);
+    arm(video, ms, false);
     return;
   }
+  if (force) catchUp = true;
   const old = items[current];
   old?.classList.remove('ft-current');
   if (old) for (const span of old.children) span.classList.remove('ft-sung');
@@ -207,6 +250,7 @@ const sync = (video, force) => {
   sung = -1;
   singWords(ms);
   fade(before, index);
+  arm(video, ms, true);
   const el = items[index];
   if (!el) return;
   el.classList.add('ft-current');
@@ -227,29 +271,63 @@ const center = (i) => {
   return centers[i] ?? 0;
 };
 
-// The move from line k-1 to line k, in the time around the switch to k: it starts before the switch
-// (a share of line k-1, capped) and ends after it (a share of line k, capped). In between the view parks
-// on the current line; lines shorter than that keep the view moving all the time.
-const move = (k) => {
-  const before = lines[k].ms - lines[k - 1].ms;
-  const after = k + 1 < lines.length ? lines[k + 1].ms - lines[k].ms : MOVE_AFTER_MAX_MS;
-  const from = lines[k].ms - Math.min(MOVE_BEFORE_MAX_MS, before * MOVE_BEFORE);
-  return { from, to: lines[k].ms + Math.min(MOVE_AFTER_MAX_MS, after * MOVE_AFTER) };
+// The keys of the scroll curve. The view arrives on line k a share of it after it starts (capped; line 0
+// from its start) and leaves it a share of it before the next one (capped), so the move from one line
+// to the next spans the switch. A line with at least PARK_MIN_MS between the two gets both keys and the
+// view rests on it; a shorter one gets one key in the middle and the view glides through it.
+const buildKeys = () => {
+  keys = [];
+  const add = (ms, i) => {
+    while (keys.length && keys[keys.length - 1].ms >= ms) keys.pop();
+    keys.push({ ms, i });
+  };
+  lines.forEach((l, k) => {
+    const next = lines[k + 1];
+    const len = next ? next.ms - l.ms : MOVE_AFTER_MAX_MS;
+    const arrive = k === 0 ? l.ms : l.ms + Math.min(MOVE_AFTER_MAX_MS, len * MOVE_AFTER);
+    if (!next) return add(arrive, k);
+    const leave = next.ms - Math.min(MOVE_BEFORE_MAX_MS, len * MOVE_BEFORE);
+    if (leave - arrive >= PARK_MIN_MS) {
+      add(arrive, k);
+      add(leave, k);
+    } else {
+      add((arrive + leave) / 2, k);
+    }
+  });
 };
 
-// Where the middle of the view should be now: parked on the current line, or on the way between two.
+const keyY = (j) => center(keys[j].i);
+const secant = (j) => (keyY(j + 1) - keyY(j)) / (keys[j + 1].ms - keys[j].ms);
+// The curve's slope at key j: flat at the ends and where it rests, else a weighted harmonic mean of the
+// two sides (monotone cubic interpolation, so the view never overshoots a line or turns back).
+const slope = (j) => {
+  if (j === 0 || j === keys.length - 1) return 0;
+  const d0 = secant(j - 1);
+  const d1 = secant(j);
+  if (d0 * d1 <= 0) return 0;
+  const h0 = keys[j].ms - keys[j - 1].ms;
+  const h1 = keys[j + 1].ms - keys[j].ms;
+  return (3 * (h0 + h1)) / ((2 * h1 + h0) / d0 + (h1 + 2 * h0) / d1);
+};
+
+// Where the middle of the view should be at `ms`: on the curve through the keys, smooth in place and
+// speed, so the view never stops between lines it has no time to rest on.
 const goal = (ms) => {
-  const i = indexAt(lines, ms);
-  if (i < 0) return center(0);
-  // The move to the next line may have started; the one to this line may not have ended.
-  for (const k of [i + 1, i]) {
-    if (k < 1 || k >= lines.length) continue;
-    const { from, to } = move(k);
-    if (ms < from || ms >= to) continue;
-    const p = (ms - from) / (to - from);
-    return center(k - 1) + (center(k) - center(k - 1)) * p * p * (3 - 2 * p);
-  }
-  return center(i);
+  const n = keys.length;
+  if (!n) return center(0);
+  if (ms <= keys[0].ms) return keyY(0);
+  if (ms >= keys[n - 1].ms) return keyY(n - 1);
+  const j = indexAt(keys, ms);
+  const h = keys[j + 1].ms - keys[j].ms;
+  const s = (ms - keys[j].ms) / h;
+  const s2 = s * s;
+  const s3 = s2 * s;
+  return (
+    (2 * s3 - 3 * s2 + 1) * keyY(j) +
+    (s3 - 2 * s2 + s) * h * slope(j) +
+    (3 * s2 - 2 * s3) * keyY(j + 1) +
+    (s3 - s2) * h * slope(j + 1)
+  );
 };
 
 const media = () => document.querySelector('video');
@@ -270,10 +348,16 @@ const step = (now) => {
   if (Math.abs(t.scrollTop - seen) > 1) manualUntil = Date.now() + MANUAL_SCROLL_MS;
   if (Date.now() < manualUntil) {
     pos = t.scrollTop;
+    catchUp = true;
   } else {
-    const target = goal(v.currentTime * 1000 + 250) - t.clientHeight / 2;
-    pos += (target - pos) * (1 - Math.exp(-dt / FOLLOW_S));
+    const target = goal(v.currentTime * 1000 + LEAD_MS) - t.clientHeight / 2;
     const dpr = devicePixelRatio || 1;
+    if (catchUp) {
+      pos += (target - pos) * (1 - Math.exp(-dt / FOLLOW_S));
+      catchUp = Math.abs(target - pos) * dpr >= 0.5;
+    } else {
+      pos = target;
+    }
     const top = Math.round(pos * dpr) / dpr;
     if (Math.abs(top - t.scrollTop) * dpr >= 1) t.scrollTop = top;
   }
@@ -286,6 +370,7 @@ const run = () => {
   const t = tab();
   if (frame || !t || !canRun(media())) return;
   pos = seen = t.scrollTop;
+  catchUp = true;
   last = performance.now();
   frame = requestAnimationFrame(step);
 };
@@ -299,9 +384,15 @@ const onTime = (e) => {
     return;
   }
   run();
+  if (e.type === 'ratechange') {
+    clearTimeout(timer);
+    timer = 0;
+  }
   sync(e.target, e.type === 'seeked');
 };
-for (const type of ['timeupdate', 'seeked', 'play']) document.addEventListener(type, onTime, true);
+for (const type of ['timeupdate', 'seeked', 'play', 'pause', 'ratechange']) {
+  document.addEventListener(type, onTime, true);
+}
 window.addEventListener('focus', run);
 document.addEventListener('visibilitychange', run);
 
@@ -319,6 +410,7 @@ feathertune.lyrics = Object.freeze({
       words: words?.map(([ms, text]) => ({ ms, text })),
       translation: data.translation?.[i] ?? null,
     }));
+    buildKeys();
     refresh();
   },
 });

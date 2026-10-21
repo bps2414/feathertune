@@ -50,9 +50,11 @@ for (const t of tabs) {
   t.addEventListener('click', () => {
     clearSearch();
     showTab(t.dataset.tab);
-    if (t.dataset.tab === 'mix') loadMix();
+    if (t.dataset.tab === 'experimental') loadMix();
   });
 }
+// After an update the app opens the window on What's new (`#whats-new`).
+if (tabs.some((t) => t.dataset.tab === location.hash.slice(1))) showTab(location.hash.slice(1));
 
 // Search: the cards of every tab whose text has the query; empty, back to the current tab.
 const search = () => {
@@ -478,7 +480,7 @@ const renderMix = (m) => {
   if (m.open && m.open.list === m.list) {
     const a = items.find((x) => x.id === m.open.from) || { id: m.open.from, title: '' };
     const b = items.find((x) => x.id === m.open.to) || { id: m.open.to, title: '' };
-    showTab('mix');
+    showTab('experimental');
     editPair(a, b);
   } else if (editing) {
     $('mix-editor').hidden = false;
@@ -655,10 +657,58 @@ const loadMix = async (list) => {
   }
 };
 
+// What's new: CHANGELOG.md compiled into the app, shown with textContent only. Releases newer than
+// the version that ran before this update (`since`; "" when it is not known) are marked.
+const newer = (a, b) => {
+  const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return false;
+};
+// `**bold**` and `[text](url)` (shown as its text); everything else is plain text.
+const inline = (parent, text) => {
+  for (const part of text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]*\))/)) {
+    if (part.startsWith('**') && part.endsWith('**')) parent.append(el('strong', '', part.slice(2, -2)));
+    else if (part.startsWith('[')) parent.append(part.slice(1, part.indexOf(']')));
+    else if (part) parent.append(part);
+  }
+  return parent;
+};
+const renderChangelog = (text, since) => {
+  const box = $('changelog');
+  if (box.childElementCount) return;
+  let card = null;
+  let list = null;
+  let first = true;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('## ')) {
+      const version = line.slice(3).split(' ')[0];
+      const isNew = since !== null && (since ? newer(version, since) : first);
+      first = false;
+      card = el('div', isNew ? 'card release new' : 'card release');
+      const name = inline(el('div', 'name'), line.slice(3));
+      if (isNew) name.append(el('span', 'badge', 'new'));
+      card.append(name);
+      box.append(card);
+      list = null;
+    } else if (!card || !line.trim()) {
+      list = null;
+    } else if (line.startsWith('### ')) {
+      card.append(inline(el('h3'), line.slice(4)));
+      list = null;
+    } else if (line.startsWith('- ')) {
+      if (!list) card.append((list = el('ul')));
+      list.append(inline(el('li'), line.slice(2)));
+    } else {
+      card.append(inline(el('p'), line));
+    }
+  }
+};
+
 const load = async () => {
   try {
     const s = await invoke('settings_get');
     applyTheme(s.theme);
+    renderChangelog(s.changelog, s.updated_from);
     renderPlugins(s.plugins);
     renderLastFm(s.lastfm);
     renderDesktopLyrics(s.desktop_lyrics);

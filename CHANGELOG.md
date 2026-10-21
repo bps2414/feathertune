@@ -2,6 +2,31 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.0 — 2026-10-21
+
+**Experimental release.** The new audio features (crossfade, mixes, skip silence, track analysis) are still rough and may misbehave, so they start off, in the new Experimental tab of the settings. Everything else is on as usual.
+
+### Lyrics
+- **Word by word more often.** Two more open sources timed word by word, all sources asked at once: the first answer shows right away and a word-timed one replaces it when it comes.
+- **Estimated word timing** for lyrics timed only by line, from syllables and the song's own pace (it can be turned off), plus a timing offset.
+- **A Lyrics tab** in the settings to pick and order the sources.
+
+### Audio
+- **Equalizer** (10 bands, presets) and **compressor** (soft, night, strong), on this PC only. Every effect is bypassed while an ad plays.
+- **Visualizer:** bars or a wave under the artwork on the expanded player.
+- **Experimental:** crossfade with curves, fade-in and echo out; skip silence at the start and end of a track; local track analysis (tempo, key, loudness); mixes per playlist and per pair of tracks, with overlapping transitions when the account allows it.
+
+### Player
+- **Back and forward** buttons on the title bar.
+- **Song mode:** picks the song version of a track over the video, so no video is decoded.
+- **Precise volume:** the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global keys.
+- **Skip disliked tracks** that start already marked with a dislike.
+
+### Window and settings
+- **Fullscreen** from the player fills the window and leaves cleanly; the page lays out again after a display or DPI change. "Reload page" in the tray.
+- **The settings tabs are a sidebar**, so every tab is in sight, plus a search over all of them.
+- **What's new:** after an update the settings open on this list.
+
 ## 0.1.7 — 2026-10-20
 
 - **Long playlists no longer fade out.** With ambient mode on, the track list of a long playlist or album faded to nothing a few rows down the page. It scrolls normally again.

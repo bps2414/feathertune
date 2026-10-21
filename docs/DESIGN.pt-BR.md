@@ -57,8 +57,8 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (o Chromium do sis
 
 Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor em `[plugins]` no `config.toml` e na janela de configurações. Todo plugin vem ligado; o interruptor é o controle. Nada é carregado de DLL nem baixado.
 
-| Plugin | Padrão | Custo |
-|---|---|---|
+A exceção é a aba **Experimental** das configurações: `crossfade` (com os mixes e a voz de transição, que seguem o interruptor dele), `track_analysis` e `skip_silence` vêm desligados desde a 0.2.0. São novos e ainda falham às vezes (seeks, transições), e uma transição quebrada atrapalha a reprodução, então uma atualização não deve ligá-los para todo mundo; cada um volta a vir ligado, e sai dessa aba, quando estiver confiável. Um `config.toml` que já os cita mantém o valor.
+
 Custo = o plugin ligado contra desligado (`measure-plugins.ps1`, janela aberta, 3 rodadas cada, 21/10/2026, uma faixa fixa); "dentro do ruído" = abaixo de uns 3 pontos de CPU ou 5 MB privados (veja Medições). Todos os plugins juntos: +9,6 pontos de CPU, +70 MB privados, +19 MB de WS.
 
 | Plugin | Padrão | Custo |
@@ -82,7 +82,7 @@ Custo = o plugin ligado contra desligado (`measure-plugins.ps1`, janela aberta, 
 | `song_mode` | ligado | dentro do ruído nesta faixa (+1,6 pontos, +1 MB) |
 | `precise_volume` | ligado | dentro do ruído (−0,4 pontos, −2 MB) |
 | `skip_disliked` | ligado | dentro do ruído (+1,1 pontos, −4 MB) |
-| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (grafo de áudio) | ligado; neutro (flat, none), crossfade 6 s | cada um dentro do ruído com os outros ligados (+3,9, +1,2, −1,3, +2,9, +0,9, −1,1 pontos; −3, −5, −1, −2, −3, −6 MB privados); o grafo não foi medido inteiro, e um visualizador com a página do player aberta e um crossfade em andamento não foram exercitados |
+| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (grafo de áudio) | ligado, neutro (flat, none); crossfade (6 s), análise de faixa e pular silêncio desligados (Experimental) | cada um dentro do ruído com os outros ligados (+3,9, +1,2, −1,3, +2,9, +0,9, −1,1 pontos; −3, −5, −1, −2, −3, −6 MB privados); o grafo não foi medido inteiro, e um visualizador com a página do player aberta e um crossfade em andamento não foram exercitados |
 
 As rodadas com a letra flutuante ou a janela de compartilhar abertas marcam 5–6% de CPU contra 12,9% do `base`, perto da linha da bandeja, então a CPU delas não se compara com o `base`; o motivo não foi apurado. A memória delas se compara: +10 MB (letra flutuante) e +26 MB (janela de compartilhar) privados contra o `base`.
 
@@ -128,6 +128,8 @@ Linhas com tempo por palavra próprio (Better Lyrics, Unison, lrcmux, entradas E
 **Pular não gostei:** uma faixa que começa já marcada com "não gostei" (`like-status="DISLIKE"` no renderer de curtir, lido cerca de 1 s depois de o video id mudar) é pulada com o botão de próxima do player. Um "não gostei" apertado durante a faixa não gera ação (o site já trata). Nunca durante um anúncio, um pulo por video id e no máximo cinco seguidos até uma faixa tocar por 10 s, para uma fila de faixas marcadas não entrar em laço.
 
 **Launcher:** numa abertura interativa (sem `--hidden`, `--mini-player` ou `--measure`) uma tela de abertura nativa pequena (Direct2D) aparece primeiro e diz o que o app está fazendo. A janela principal é criada escondida, então o site carrega enquanto isso; ela é mostrada quando a checagem de atualização termina e o site desenhou o primeiro conteúdo (uma sonda na página, no máximo 8 s depois do `load`, 20 s no total), nunca numa página em branco. A checagem é um `GET` do último release do repositório na API do GitHub. O instalador de um release mais novo é baixado, o SHA-256 dele é comparado com o que o GitHub lista para o arquivo (o instalador não é assinado, então hash ausente ou diferente interrompe a atualização) e executado em silêncio (`/S /R /UPDATE`: ele fecha o app, substitui e abre de novo). Só uma cópia instalada se atualiza (o exe está na pasta do perfil, onde o instalador o coloca); um build de `target/` nunca. Qualquer falha, inclusive sem internet, só abre a versão atual.
+
+**Novidades:** a cópia instalada grava sua versão em `last-version.txt` no perfil a cada abertura. Quando a versão subiu (ou o arquivo falta mas o `config.toml` já existia: uma atualização de antes da 0.2.0), na primeira vez que a janela aparece naquela execução ela abre a janela de configurações na aba What's new: o `CHANGELOG.md`, compilado no exe, um cartão por versão, com as posteriores à versão antiga marcadas. Nada é baixado para isso. Uma primeira instalação e um build de `target/` não mostram nada. Um release não pode ser pre-release no GitHub: a checagem de atualização lê `releases/latest`, que deixa pre-releases de fora.
 
 ## Áudio
 
@@ -227,6 +229,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 
 ## Ainda não conferido
 
+- A aba What's new abrindo depois de uma atualização real a partir da 0.1.7 (cópia instalada), e a barra lateral das configurações em 150% de escala e numa janela estreita.
 - Com mouse de verdade: snap layouts, arrastar, redimensionar e maximizar/restaurar, em 150% de escala e num segundo monitor; digitar no site depois de trocar de janela.
 - Discord Rich Presence e um login e scrobble reais no Last.fm, inclusive num build da CI com a chave embutida.
 - "Start with Windows" gravando a entrada Run; o aviso de faixa sendo visto.

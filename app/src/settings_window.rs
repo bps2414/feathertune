@@ -16,6 +16,9 @@
 //! - It can only navigate within the scheme; its CSP allows our own files and IPC only.
 
 use std::borrow::Cow;
+use std::path::Path;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -63,8 +66,54 @@ pub fn protocol(ctx: UriSchemeContext<'_, Wry>, request: Request<Vec<u8>>) -> Re
     .expect("static response")
 }
 
+/// The What's new tab.
+const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
+const LAST_VERSION: &str = "last-version.txt";
+/// After an update, the version that ran before ("": one older than the record, which came in 0.2.0).
+static UPDATED_FROM: OnceLock<String> = OnceLock::new();
+/// What's new is still to be shown this run.
+static WHATS_NEW: AtomicBool = AtomicBool::new(false);
+
+/// Records this version in the profile and notes an update. Only the installed copy (a build run
+/// from `target/` never shows it); `existed`: the profile had a `config.toml` before this start, so
+/// a first install, which has none, shows nothing.
+pub fn note_version(profile: &Path, existed: bool) {
+    if !crate::updater::installed(profile) {
+        return;
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let path = profile.join(LAST_VERSION);
+    let before = std::fs::read_to_string(&path).ok().map(|s| s.trim().to_owned());
+    if before.as_deref() == Some(current) {
+        return;
+    }
+    if let Err(e) = std::fs::write(&path, current) {
+        eprintln!("{LAST_VERSION}: {e}");
+    }
+    let updated = match &before {
+        Some(b) => crate::updater::version(current) > crate::updater::version(b),
+        None => existed,
+    };
+    if updated {
+        let _ = UPDATED_FROM.set(before.unwrap_or_default());
+        WHATS_NEW.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Opens the window on What's new the first time the app shows after an update.
+pub fn show_whats_new(app: &AppHandle) {
+    if WHATS_NEW.swap(false, Ordering::Relaxed) {
+        open_tab(app, "whats-new");
+    }
+}
+
 /// Opens the window, or brings it to the front.
 pub fn open(app: &AppHandle) {
+    open_tab(app, "");
+}
+
+/// `tab`: the one to start on (a `data-tab` of index.html), only when the window is not open yet.
+fn open_tab(app: &AppHandle, tab: &str) {
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -72,12 +121,12 @@ pub fn open(app: &AppHandle) {
     }
     // Built off the main thread: creating a webview from inside an event handler can deadlock on Windows.
     let app = app.clone();
+    let url: Url = format!("{ORIGIN}/#{tab}").parse().expect("static URL");
     std::thread::spawn(move || {
         let live = app.state::<Live>();
-        let url: Url = format!("{ORIGIN}/").parse().expect("static URL");
         let result = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::CustomProtocol(url))
             .title("feathertune settings")
-            .inner_size(560.0, 720.0)
+            .inner_size(740.0, 720.0)
             .min_inner_size(420.0, 400.0)
             .theme(Some(tauri::Theme::Dark))
             .data_directory(live.profile.clone())
@@ -173,6 +222,9 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         // false: the plugin was off at startup, so nothing is recorded.
         "stats_running": app.try_state::<Stats>().is_some(),
         "restart_needed": live.restart_needed(),
+        "changelog": CHANGELOG,
+        // null: this start was not an update.
+        "updated_from": UPDATED_FROM.get(),
     }))
 }
 

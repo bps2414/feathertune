@@ -2,6 +2,31 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.0 — 2026-10-21
+
+**Versão experimental.** Os recursos de áudio novos (crossfade, mixes, pular silêncio, análise de faixa) ainda estão crus e podem falhar, então vêm desligados, na nova aba Experimental das configurações. O resto vem ligado como sempre.
+
+### Letras
+- **Palavra por palavra com mais frequência.** Mais duas fontes abertas com tempo por palavra, todas consultadas ao mesmo tempo: a primeira resposta aparece na hora e uma com tempo por palavra a substitui quando chega.
+- **Tempo estimado por palavra** para letras sincronizadas só por linha, a partir das sílabas e do ritmo da própria música (dá para desligar), mais um ajuste de atraso.
+- **Uma aba Lyrics** nas configurações para escolher e ordenar as fontes.
+
+### Áudio
+- **Equalizador** (10 bandas, presets) e **compressor** (suave, noturno, forte), só neste PC. Todo efeito fica de fora enquanto toca um anúncio.
+- **Visualizador:** barras ou uma onda embaixo da capa no player expandido.
+- **Experimental:** crossfade com curvas, fade de entrada e eco de saída; pular silêncio no começo e no fim da faixa; análise local da faixa (tempo, tom, volume); mixes por playlist e por par de faixas, com transições sobrepostas quando a conta deixa.
+
+### Player
+- Botões de **voltar e avançar** na barra de título.
+- **Modo música:** escolhe a versão música de uma faixa em vez do vídeo, então nenhum vídeo é decodificado.
+- **Volume preciso:** a roda do mouse sobre o player muda o volume de 2% em 2% (10% com Shift), com teclas globais opcionais.
+- **Pular faixas com dislike** que já começam marcadas.
+
+### Janela e configurações
+- **Tela cheia** pelo player ocupa a janela e sai sem travar; a página se reajusta depois de mudar de monitor ou de DPI. "Reload page" na bandeja.
+- **As abas das configurações viraram uma barra lateral**, então todas ficam à vista, mais uma busca em todas elas.
+- **What's new:** depois de uma atualização as configurações abrem nesta lista.
+
 ## 0.1.7 — 2026-10-20
 
 - **Playlists longas não somem mais.** Com o modo ambiente ligado, a lista de faixas de uma playlist ou álbum longo desaparecia poucas linhas abaixo. Agora rola normalmente.

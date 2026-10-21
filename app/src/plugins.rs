@@ -274,12 +274,13 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "crossfade",
         name: "Crossfade",
-        description: "Fades each track out into the next (6 s, equal power by default; Audio tab). The site still \
-                      picks the next track, so repeat, shuffle and autoplay work as usual. Never over or into an \
-                      ad, never on repeat-one.",
+        description: "Fades each track out into the next (6 s, equal power by default; Experimental tab, with the \
+                      mixes). The site still picks the next track, so repeat, shuffle and autoplay work as usual. \
+                      Never over or into an ad, never on repeat-one.",
         cost: "Inside the noise: -1.3 points of CPU and -1 MB private against off (3 runs); the transition itself is \
                not measured.",
-        default_on: true,
+        // Experimental: off until it is reliable (see docs/DESIGN.md, Plugins).
+        default_on: false,
         live: true,
         legacy: None,
     },
@@ -288,10 +289,11 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Track analysis",
         description: "The first time a track plays from its start, measures its tempo, key (an estimate), where \
                       its sound starts and ends, and a loudness outline, on this PC only. Only those numbers are \
-                      kept (in the profile), never audio. The crossfade, skip silence and the Mix tab use them.",
+                      kept (in the profile), never audio. The crossfade, skip silence and the mixes use them.",
         cost: "Inside the noise: +2.9 points of CPU and -2 MB private against off (3 runs); the first minute of a \
                track not measured yet is not isolated.",
-        default_on: true,
+        // Experimental, like the crossfade.
+        default_on: false,
         live: true,
         legacy: None,
     },
@@ -301,7 +303,8 @@ pub const PLUGINS: &[Plugin] = &[
         description: "Skips silence at the start and the end of a track (never in the middle), using the track \
                       analysis when there is one. Never during an ad or after you seek in the track.",
         cost: "Inside the noise: +0.9 points of CPU and -3 MB private against off (3 runs).",
-        default_on: true,
+        // Experimental, like the crossfade.
+        default_on: false,
         live: true,
         legacy: None,
     },

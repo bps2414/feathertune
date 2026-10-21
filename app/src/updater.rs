@@ -92,7 +92,7 @@ fn pick(json: &serde_json::Value, current: &str) -> Result<Option<Update>, Strin
 }
 
 /// `1.2.3` or `v1.2.3` (a pre-release or build suffix is ignored).
-fn version(text: &str) -> Option<(u64, u64, u64)> {
+pub fn version(text: &str) -> Option<(u64, u64, u64)> {
     let core = text.trim_start_matches('v').split(['-', '+']).next()?;
     let mut parts = core.split('.');
     let v = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);

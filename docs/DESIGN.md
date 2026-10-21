@@ -57,8 +57,8 @@ feathertune.exe (Rust, Tauri 2)                      WebView2 (the system Chromi
 
 Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under `[plugins]` in `config.toml` and in the settings window. Every plugin is on by default; the switch is the control. Nothing is loaded from a DLL or downloaded.
 
-| Plugin | Default | Cost |
-|---|---|---|
+The exception is the **Experimental** tab of the settings: `crossfade` (with the mixes and the transition voice, which follow its switch), `track_analysis` and `skip_silence` are off by default since 0.2.0. They are new and still misbehave at times (seeks, transitions), and a broken transition costs playback, so an update must not turn them on for everyone; each goes back to on, and out of that tab, once it is reliable. A `config.toml` that names them keeps its value.
+
 Cost = the plugin on against off (`measure-plugins.ps1`, window open, 3 runs each, 2026-10-21, one fixed track); "inside the noise" = under about 3 points of CPU or 5 MB private (see Measurements). Every plugin together: +9.6 points of CPU, +70 MB private, +19 MB WS.
 
 | Plugin | Default | Cost |
@@ -82,7 +82,7 @@ Cost = the plugin on against off (`measure-plugins.ps1`, window open, 3 runs eac
 | `song_mode` | on | inside the noise on this track (+1.6 points, +1 MB) |
 | `precise_volume` | on | inside the noise (−0.4 points, −2 MB) |
 | `skip_disliked` | on | inside the noise (+1.1 points, −4 MB) |
-| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (audio graph) | on; neutral (flat, none), crossfade 6 s | each inside the noise with the others on (+3.9, +1.2, −1.3, +2.9, +0.9, −1.1 points; −3, −5, −1, −2, −3, −6 MB private); the graph is not measured as a whole, and a visualizer with the player page open and a crossfade in progress were not exercised |
+| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (audio graph) | on, neutral (flat, none); crossfade (6 s), track analysis and skip silence off (Experimental) | each inside the noise with the others on (+3.9, +1.2, −1.3, +2.9, +0.9, −1.1 points; −3, −5, −1, −2, −3, −6 MB private); the graph is not measured as a whole, and a visualizer with the player page open and a crossfade in progress were not exercised |
 
 The runs with the floating lyrics or the share window open read 5–6% CPU against 12.9% for `base`, close to the tray row, so their CPU cannot be compared with `base`; why was not found out. Their memory can: +10 MB (floating lyrics) and +26 MB (share window) private against `base`.
 
@@ -128,6 +128,8 @@ Lines with word times of their own (Better Lyrics, Unison, lrcmux, Enhanced LRC 
 **Skip disliked:** a track that starts already marked "dislike" (`like-status="DISLIKE"` on the like renderer, read about 1 s after the video id changes) is skipped with the player's next button. A dislike pressed during a track is not acted on (the site handles it). Never during an ad, one skip per video id, and at most five in a row until a track has played for 10 s, so a queue of disliked tracks does not loop.
 
 **Launcher:** on an interactive start (not `--hidden`, `--mini-player` or `--measure`) a small native start screen (Direct2D) opens first and says what the app is doing. The main window is created hidden, so the site loads meanwhile; the window is shown when the update check is done and the site has drawn its first content (a probe on the page, at most 8 s after `load`, 20 s overall), never on a blank page. The update check is one `GET` of the repository's latest release on the GitHub API. A newer release's installer is downloaded, its SHA-256 compared with the one GitHub lists for the asset (the installer is not signed, so a missing or different hash stops the update), and run silently (`/S /R /UPDATE`: it closes the app, replaces it and starts it again). Only an installed copy updates itself (the exe is in the profile folder, where the installer puts it); a build from `target/` never does. Any failure, offline included, just starts the current version.
+
+**What's new:** the installed copy writes its version to `last-version.txt` in the profile at each start. When the version went up (or the file is missing but `config.toml` was already there: an update from before 0.2.0), the first time the window shows that run it opens the settings window on its What's new tab: `CHANGELOG.md`, compiled into the exe, one card per release, those since the old version marked. Nothing is fetched for it. A first install and a build from `target/` show nothing. Pushing a release must not be a GitHub pre-release: the update check reads `releases/latest`, which leaves pre-releases out.
 
 ## Audio
 
@@ -227,6 +229,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 
 ## Not verified yet
 
+- The What's new tab opening after a real update from 0.1.7 (installed copy), and the settings sidebar at 150% scaling and in a narrow window.
 - With a real mouse: snap layouts, dragging, resizing and maximize/restore, at 150% scaling and on a second monitor; typing in the site after switching windows.
 - Discord Rich Presence and a real Last.fm sign-in and scrobble, including on a CI build with the embedded key.
 - "Start with Windows" writing its Run entry; the track toast being seen.

@@ -35,8 +35,8 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - A privacy filter for third-party analytics (never ads).
 - Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
 - Track analysis: the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
-- Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) in the settings window's Mix tab. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
-- Every feature is on out of the box and is a plugin you can switch off in the settings window. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
+- Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) in the Mix section of the settings window's Experimental tab. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
+- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis), which start off in its Experimental tab. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-verified-yet).
 
@@ -87,9 +87,9 @@ precise_volume = true         # mouse wheel over the player: volume by 2% (Shift
 skip_disliked = true          # skips a track that starts marked "dislike"
 equalizer = true              # audio plugins: one Web Audio graph on the page, bypassed during ads
 compressor = true
-crossfade = true              # also the Mix tab and the transition voice
-track_analysis = true         # tempo, key and loudness outline in audio-facts/ in the profile
-skip_silence = true
+crossfade = false             # experimental (off by default); also the mixes and the transition voice
+track_analysis = false        # experimental; tempo, key and loudness outline in audio-facts/ in the profile
+skip_silence = false          # experimental
 visualizer = true
 
 [shortcuts]                  # global; "" turns one off
@@ -112,7 +112,7 @@ providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # synced lyrics sour
 estimate_words = true        # guess word times when a source times whole lines only
 offset_ms = 0                # moves the lyrics in time; positive: later
 
-[audio]                      # the Audio tab; mixes are in mixes/<playlist>.json in the profile (Mix tab)
+[audio]                      # the Audio tab; mixes are in mixes/<playlist>.json in the profile (Experimental tab)
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (out of the sound path), soft, night, strong

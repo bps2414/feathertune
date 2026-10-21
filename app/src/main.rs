@@ -108,9 +108,12 @@ fn main() {
     }
     smtc::set_app_id();
     let profile = profile_dir();
+    let existed = profile.join("config.toml").exists();
     let mut settings = settings::Settings::load(&profile);
     if measure {
         settings.force_off(&plugins_off);
+    } else {
+        settings_window::note_version(&profile, existed);
     }
     let args = browser_args(&settings.browser);
     let script = injections::script(&settings);
@@ -236,6 +239,11 @@ fn main() {
             }
             if mini {
                 miniplayer::open(app.handle());
+            }
+            // Shown with the window: here when it opens at once, else by show_main (after the start
+            // screen, or when a hidden start is brought up).
+            if !launcher && !hidden && !mini {
+                settings_window::show_whats_new(app.handle());
             }
             if measure {
                 log_player(app.handle(), start);
@@ -438,6 +446,7 @@ fn toggle(app: &AppHandle) {
 
 pub(crate) fn show_main(app: &AppHandle) {
     set_hidden(app, false);
+    settings_window::show_whats_new(app);
 }
 
 /// Runs a command of the `controls` injection (it clicks the player buttons).

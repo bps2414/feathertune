@@ -20,11 +20,12 @@
       <button role="tab" type="button" data-tab="look">Look</button>
       <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
       <button role="tab" type="button" data-tab="audio">Audio</button>
-      <button role="tab" type="button" data-tab="mix">Mix</button>
+      <button role="tab" type="button" data-tab="experimental">Experimental</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
       <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
       <button role="tab" type="button" data-tab="advanced">Advanced</button>
+      <button role="tab" type="button" data-tab="whats-new">What's new</button>
     </nav>
   </header>
 
@@ -93,6 +94,28 @@
         <div class="eq" id="eq-bands"></div>
         <p class="hint">Moving a band switches to Custom. A band at 0 dB is left out of the sound path, and the level is lowered by the largest boost so the sound never clips.</p>
       </div>
+      <div class="card" data-plugin="visualizer">
+        <label>Style
+          <select data-key="audio.visualizer">
+            <option value="bars">Bars</option>
+            <option value="wave">Wave</option>
+          </select>
+        </label>
+      </div>
+      <div class="card" data-plugin="compressor">
+        <label>Preset
+          <select data-key="audio.compressor">
+            <option value="none">None</option>
+            <option value="soft">Soft</option>
+            <option value="night">Night (quiet listening)</option>
+            <option value="strong">Strong</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="experimental" hidden>
+      <p class="notice">New and still rough: these may misbehave or break playback, so they start off. Every effect is bypassed while an ad plays.</p>
       <div class="card" data-plugin="crossfade">
         <label>Length <span class="value" data-seconds></span>
           <input type="range" data-key="audio.crossfade_ms" min="0" max="12000" step="500">
@@ -119,27 +142,7 @@
       </div>
       <div class="card" data-plugin="track_analysis"></div>
       <div class="card" data-plugin="skip_silence"></div>
-      <div class="card" data-plugin="visualizer">
-        <label>Style
-          <select data-key="audio.visualizer">
-            <option value="bars">Bars</option>
-            <option value="wave">Wave</option>
-          </select>
-        </label>
-      </div>
-      <div class="card" data-plugin="compressor">
-        <label>Preset
-          <select data-key="audio.compressor">
-            <option value="none">None</option>
-            <option value="soft">Soft</option>
-            <option value="night">Night (quiet listening)</option>
-            <option value="strong">Strong</option>
-          </select>
-        </label>
-      </div>
-    </section>
-
-    <section role="tabpanel" data-panel="mix" hidden>
+      <h2>Mix</h2>
       <p class="hint">Transitions for a playlist and for each pair of its tracks, kept on this PC. They use the Crossfade switch; ads are never mixed.</p>
       <p id="mix-none" class="notice" hidden>Play a playlist once to list its tracks here.</p>
       <div id="mix-body">
@@ -148,7 +151,7 @@
           <div class="option">
             <div class="body">
               <div class="name small">Mix this playlist</div>
-              <div class="hint">Off: the Crossfade settings of the Audio tab.</div>
+              <div class="hint">Off: the Crossfade settings above.</div>
             </div>
             <input type="checkbox" class="switch" id="mix-enabled" aria-label="Mix this playlist">
           </div>
@@ -267,6 +270,10 @@
         <p class="hint">Experiments only (see docs/DESIGN.md). Restart to apply.</p>
       </div>
       <div id="other-plugins"></div>
+    </section>
+
+    <section role="tabpanel" data-panel="whats-new" hidden>
+      <div id="changelog"></div>
     </section>
   </main>
 

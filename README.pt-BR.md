@@ -35,8 +35,8 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
 - Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
-- Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na aba Mix da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+- Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na seção Mix da aba Experimental da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md#ainda-não-conferido).
 
@@ -87,9 +87,9 @@ precise_volume = true         # roda do mouse sobre o player: volume em 2% (Shif
 skip_disliked = true          # pula uma faixa que começa marcada com "não gostei"
 equalizer = true              # plugins de áudio: um grafo Web Audio na página, em bypass durante anúncio
 compressor = true
-crossfade = true              # também a aba Mix e a voz de transição
-track_analysis = true         # tempo, tom e contorno de volume em audio-facts/ no perfil
-skip_silence = true
+crossfade = false             # experimental (desligado por padrão); também os mixes e a voz de transição
+track_analysis = false        # experimental; tempo, tom e contorno de volume em audio-facts/ no perfil
+skip_silence = false          # experimental
 visualizer = true
 
 [shortcuts]                  # globais; "" desliga um
@@ -112,7 +112,7 @@ providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # fontes de letras; 
 estimate_words = true        # estima o tempo das palavras quando a fonte só marca linhas inteiras
 offset_ms = 0                # move a letra no tempo; positivo: mais tarde
 
-[audio]                      # a aba Áudio; os mixes ficam em mixes/<playlist>.json no perfil (aba Mix)
+[audio]                      # a aba Áudio; os mixes ficam em mixes/<playlist>.json no perfil (aba Experimental)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB de -12 a 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (fora do caminho do som), soft, night, strong

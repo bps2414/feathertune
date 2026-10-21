@@ -164,6 +164,14 @@ pub fn plan(mix: Option<&Mix>, from: &str, to: &str, a: Option<&Facts>, b: Optio
         }));
     }
     let d = &mix.defaults;
+    let mut effects = d.effects.clone();
+    // Auto: the bass swap and the tempo only between keys that mix well (they need the voice).
+    if d.auto {
+        let key = |f: Option<&Facts>| f.and_then(|f| f.camelot.clone());
+        let matched = matches!((key(a), key(b)), (Some(x), Some(y)) if keys_match(&x, &y));
+        effects.bass_swap = matched;
+        effects.tempo = matched;
+    }
     let (out_ms, in_ms, duration_ms, curve) = if d.auto {
         let (out, duration) = auto(a);
         (out, b.map_or(0, |b| b.lead_in_ms.round() as u32), duration, "equal_power")
@@ -172,8 +180,19 @@ pub fn plan(mix: Option<&Mix>, from: &str, to: &str, a: Option<&Facts>, b: Optio
     };
     Some(json!({
         "mode": if d.auto { "auto" } else { "playlist" }, "from": from, "to": to, "out_ms": out_ms,
-        "in_ms": in_ms, "duration_ms": duration_ms, "curve": curve, "effects": d.effects,
+        "in_ms": in_ms, "duration_ms": duration_ms, "curve": curve, "effects": effects,
     }))
+}
+
+/// Camelot codes that mix well: the same, one step round the wheel, or the same number.
+pub fn keys_match(a: &str, b: &str) -> bool {
+    let split = |c: &str| {
+        let (n, l) = c.split_at(c.len().saturating_sub(1));
+        n.parse::<i32>().ok().map(|n| (n, l.to_owned()))
+    };
+    let (Some((na, la)), Some((nb, lb))) = (split(a), split(b)) else { return false };
+    let step = (na - nb).rem_euclid(12).min((nb - na).rem_euclid(12));
+    (la == lb && step <= 1) || (na == nb && la != lb)
 }
 
 /// The auto mode: 16 beats of A (4 to 12 s), ending before A's final silence and starting on a beat.
@@ -514,6 +533,16 @@ mod tests {
         let p = plan(Some(&mix), A, B, None, None).unwrap();
         assert_eq!((p["mode"].as_str(), p["out_ms"].as_u64(), p["in_ms"].as_u64()), (Some("pair"), Some(5), Some(7)));
         assert_eq!(plan(Some(&mix), B, A, None, None).unwrap()["mode"], "auto");
+    }
+
+    #[test]
+    fn camelot_neighbours_match() {
+        for (a, b) in [("8A", "8A"), ("8A", "9A"), ("12B", "1B"), ("8A", "8B")] {
+            assert!(keys_match(a, b), "{a} {b}");
+        }
+        for (a, b) in [("8A", "10A"), ("8A", "9B"), ("x", "8A")] {
+            assert!(!keys_match(a, b), "{a} {b}");
+        }
     }
 
     #[test]

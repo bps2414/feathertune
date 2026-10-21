@@ -15,6 +15,7 @@ mod album_color;
 mod artwork;
 mod audio;
 mod audio_facts;
+mod deck;
 mod desktop_lyrics;
 mod discord;
 mod gfx;
@@ -212,6 +213,7 @@ fn main() {
             }
             desktop_lyrics::start(app.handle());
             audio::start(app.handle());
+            deck::start(app.handle());
             if live.plugin("listening_stats") {
                 stats::start(app.handle(), &profile);
             }
@@ -471,17 +473,18 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
 }
 
 /// Evaluates a script on the main thread and hands its JSON result to `done`.
-fn eval_with(webview: &Webview, js: &'static str, done: impl FnOnce(String) + Send + 'static) {
+pub(crate) fn eval_with(webview: &Webview, js: &str, done: impl FnOnce(String) + Send + 'static) {
     use webview2_com::ExecuteScriptCompletedHandler;
     use windows_core::HSTRING;
 
+    let js = HSTRING::from(js);
     let _ = webview.with_webview(move |wv| unsafe {
         if let Ok(core) = wv.controller().CoreWebView2() {
             let handler = ExecuteScriptCompletedHandler::create(Box::new(move |_, result| {
                 done(result);
                 Ok(())
             }));
-            let _ = core.ExecuteScript(&HSTRING::from(js), &handler);
+            let _ = core.ExecuteScript(&js, &handler);
         }
     });
 }

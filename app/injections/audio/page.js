@@ -146,11 +146,12 @@ const wanted = () => {
   const list = [];
   eqGains().forEach((g, i) => g && list.push(nodes.eq[i]));
   if (compressor()) list.push(nodes.compressor);
+  if (bassCut.on) list.push(nodes.bass);
   if (sweep.on) list.push(nodes.sweep);
   return list;
 };
 // The fixed order of every effect node.
-const order = () => [...nodes.eq, nodes.compressor, nodes.sweep];
+const order = () => [...nodes.eq, nodes.compressor, nodes.bass, nodes.sweep];
 
 const neutralize = (node) => {
   if (node === nodes.sweep) {
@@ -163,8 +164,8 @@ const neutralize = (node) => {
   }
 };
 const target = (node) => {
-  // The sweep's frequency is scheduled by the fade (armSweep).
-  if (node === nodes.sweep) return;
+  // The sweep's frequency and the bass cut are scheduled by the transition (armSweep, startOverlap).
+  if (node === nodes.sweep || node === nodes.bass) return;
   if (node === nodes.compressor) {
     const c = compressor();
     for (const k of ['threshold', 'knee', 'ratio', 'attack', 'release']) ramp(node[k], c[k]);
@@ -247,6 +248,8 @@ const createGraph = (element) => {
       compressor: ctx.createDynamicsCompressor(),
       // A mix's filter effect: a high-pass rising on the outgoing track.
       sweep: ctx.createBiquadFilter(),
+      // The bass swap of an overlapping transition: the outgoing track's lows go down halfway.
+      bass: ctx.createBiquadFilter(),
       // The echo on a fading tail: trim → send → delay ⇄ feedback, delay → wet → destination.
       echoSend: ctx.createGain(),
       delay: ctx.createDelay(2),
@@ -262,6 +265,9 @@ const createGraph = (element) => {
     nodes.sweep.type = 'highpass';
     nodes.sweep.frequency.value = SWEEP_FROM_HZ;
     nodes.sweep.Q.value = 0.7;
+    nodes.bass.type = 'lowshelf';
+    nodes.bass.frequency.value = BASS_HZ;
+    nodes.bass.gain.value = 0;
     testWorklet();
   }
   if (!sources.has(element)) {
@@ -350,8 +356,18 @@ const ECHO_DEFAULT_S = 0.375;
 // How long the echo keeps ringing after the fade.
 const ECHO_RING_S = 5;
 // The filter effect: the high-pass rises from (neutral) to this over the fade.
-const SWEEP_FROM_HZ = 10;
-const SWEEP_TO_HZ = 2500;
+const SWEEP_FROM_HZ = 20;
+const SWEEP_TO_HZ = 1000;
+// The bass swap (with the transition voice): a low shelf at 200 Hz, -24 dB.
+const BASS_HZ = 200;
+const BASS_CUT_DB = -24;
+// The transition voice: how long the next track may take to start before it fades in by itself,
+// how far ahead the take-over is scheduled and how long it crosses.
+const HANDOFF_WAIT_MS = 5000;
+const HANDOFF_AHEAD_MS = 300;
+const HANDOFF_S = 0.15;
+// The tempo effect goes back to 1.0 over 8 bars once this page plays the track.
+const RATE_BACK_BEATS = 32;
 // A command from Rust older than this is dropped (the page reloaded meanwhile, say).
 const COMMAND_TTL_MS = 5000;
 // A preview starts this long before the transition.
@@ -391,6 +407,12 @@ let faded = false;
 let ownSeek = false;
 const echo = { on: false, until: 0 };
 const sweep = { on: false };
+const bassCut = { on: false };
+// An overlapping transition through the transition voice (deck.rs), from its `overlap` command
+// until this page plays the next track: { to, at_ms, waiting, since, done_at }.
+let overlap = null;
+// The tempo effect after a take-over: { from, start, len } in video seconds.
+let rateBack = null;
 // A mix's transition being previewed from the Mix tab (a pair, while its `from` track plays).
 let preview = null;
 // After a mix's fade: where its incoming track starts, { from, id, at }.
@@ -538,8 +560,26 @@ const startTrack = (v, id) => {
   faded = false;
   preview = null;
   stopSweep();
+  stopBassCut();
+  if (rateBack) {
+    rateBack = null;
+    v.playbackRate = 1;
+  }
   resetQuiet();
   fade = planFade(v);
+  if (overlap && !ad) {
+    if (id === overlap.to && !overlap.waiting) {
+      // The transition voice plays this track's start: silent here until the take-over (handoff).
+      const g = nodes.master.gain;
+      g.cancelAndHoldAtTime(ctx.currentTime);
+      g.setValueAtTime(0, ctx.currentTime);
+      overlap.waiting = true;
+      overlap.since = Date.now();
+      quiet.startDone = true;
+      return;
+    }
+    if (id !== overlap.to) overlap = null;
+  }
   if (ad || !on('crossfade') || prev > 0.98) return;
   const curveName = data?.crossfade?.curve;
   const dur = cut ? SKIP_FADE_IN_S : (data?.crossfade?.fade_in_ms ?? 0) / 1000;
@@ -569,6 +609,8 @@ const onTime = (v) => {
   const id = currentId();
   if (id && id !== trackId) startTrack(v, id);
   if (pendingIn && id) enterAt(v, id);
+  if (overlap) overlapStep(v);
+  if (rateBack) rateStep(v);
   if (!fade && on('crossfade')) fade = planFade(v);
   const t = v.currentTime;
   if (analysis && Math.abs(analysis.t - t) > 0.5) {
@@ -576,7 +618,8 @@ const onTime = (v) => {
     if (inBeatWindow(analysis)) analysis.beatOk = false;
     analysis.t = t;
   }
-  if (id) startAnalysis(v, id);
+  // A track that starts under the transition voice is entered late: not measured.
+  if (id && !overlap) startAnalysis(v, id);
   skipSilence(v, t);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
   if (faded && t < 2) startTrack(v, id);
@@ -585,7 +628,7 @@ const onTime = (v) => {
   // The fade is over: let the track end by itself (unless the fade already ends with it).
   if (armed && !faded && t >= fade.out + fade.dur - 0.05) {
     faded = true;
-    if (fade.to && fade.in > 0) pendingIn = { from: trackId, id: fade.to, at: fade.in };
+    if (!overlap && fade.to && fade.in > 0) pendingIn = { from: trackId, id: fade.to, at: fade.in };
     if (fade.out + fade.dur < v.duration - 0.1) seekTo(v, v.duration - 0.05);
   }
 };
@@ -607,6 +650,110 @@ const runCommand = (c) => {
   lastSeq = c.seq;
   if (!(Date.now() - c.issued_ms < COMMAND_TTL_MS)) return;
   if (c.preview) previewMix(c.preview);
+  if (c.overlap) startOverlap(c.overlap);
+  if (c.overlap_off) overlapOff();
+  if (c.handoff) handoff(c.handoff);
+};
+
+// --- the transition voice (deck.rs) ---
+//
+// Rust plays the start of the next track in a hidden second webview during the fade (an overlap
+// instead of a fade-out then a fade-in). This page only: fades out as usual; keeps the next track
+// silent when the site starts it (`waiting`); on `handoff`, seeks it to where the voice is and
+// crosses over in 150 ms at a time Rust then gives the voice (`done_at`). Anything late or wrong
+// falls back to the one-player fade by itself.
+
+const wall = () => performance.timeOrigin + performance.now();
+// A wall-clock time on the audio clock.
+const ctxAt = (wallMs) => {
+  const ts = ctx.getOutputTimestamp?.();
+  if (ts && ts.performanceTime > 0) return ts.contextTime + (wallMs - performance.timeOrigin - ts.performanceTime) / 1000;
+  return ctx.currentTime + (wallMs - wall()) / 1000;
+};
+
+// `overlap` { to, at_ms, dur_ms, bass_swap, beat_ms }: the voice starts `to` at `at_ms` (this
+// fade's start). With the bass swap, this track's lows go down halfway, over one beat.
+const startOverlap = (o) => {
+  if (!nodes || ad || !fade || fade.to !== o.to) return;
+  overlap = { to: o.to, waiting: false, since: 0, done_at: null, sync: null, tries: 0 };
+  pendingIn = null;
+  if (!o.bass_swap) return;
+  bassCut.on = true;
+  apply();
+  const now = ctx.currentTime;
+  const half = Math.max(now, ctxAt(o.at_ms + o.dur_ms / 2));
+  const g = nodes.bass.gain;
+  g.cancelAndHoldAtTime(now);
+  g.setValueAtTime(0, half);
+  g.linearRampToValueAtTime(BASS_CUT_DB, half + Math.max(0.05, o.beat_ms / 1000));
+};
+const stopBassCut = () => {
+  if (!bassCut.on) return;
+  bassCut.on = false;
+  apply();
+};
+// The voice failed or was cut: back to the one-player fade (in 300 ms if the next track was held).
+const overlapOff = () => {
+  if (!overlap) return;
+  const held = overlap.waiting && !overlap.done_at;
+  overlap = null;
+  stopBassCut();
+  if (held && nodes && !ad) {
+    const g = nodes.master.gain;
+    g.cancelAndHoldAtTime(ctx.currentTime);
+    g.setTargetAtTime(1, ctx.currentTime, SKIP_FADE_IN_S / 3);
+  }
+};
+// `handoff` { t, wall_ms, rate }: where the voice was at `wall_ms`. This page plays at its rate
+// (the tempo effect) and seeks to where the voice will be.
+const handoff = (h) => {
+  const v = video;
+  if (!v || !overlap?.waiting || overlap.done_at || ad || currentId() !== overlap.to) return;
+  overlap.sync = { t: h.t, wall: h.wall_ms, rate: h.rate > 0.9 && h.rate < 1.1 ? h.rate : 1 };
+  if (overlap.sync.rate !== 1) {
+    v.preservesPitch = true;
+    v.playbackRate = overlap.sync.rate;
+  }
+  syncTo(v);
+};
+const voiceAt = (wallMs) => overlap.sync.t + ((wallMs - overlap.sync.wall) / 1000) * overlap.sync.rate;
+// A seek lands a little later than asked: aim 250 ms ahead, then check (at most three tries).
+const syncTo = (v) => {
+  overlap.tries++;
+  seekTo(v, voiceAt(wall() + 250));
+};
+// On every timeupdate while an overlap is on: the take-over once in step, or the fallback.
+const overlapStep = (v) => {
+  const o = overlap;
+  if (o.done_at) {
+    if (wall() > o.done_at + 2000) overlap = null;
+    return;
+  }
+  if (o.waiting && Date.now() - o.since > HANDOFF_WAIT_MS) return overlapOff();
+  if (!o.sync || ownSeek || v.readyState < 3) return;
+  const drift = v.currentTime - voiceAt(wall());
+  if (Math.abs(drift) > 0.08 && o.tries < 3) return syncTo(v);
+  takeOver(v);
+};
+const takeOver = (v) => {
+  const at = wall() + HANDOFF_AHEAD_MS;
+  const c = Math.max(ctx.currentTime, ctxAt(at));
+  const g = nodes.master.gain;
+  g.cancelAndHoldAtTime(ctx.currentTime);
+  g.setValueAtTime(0, c);
+  g.linearRampToValueAtTime(1, c + HANDOFF_S);
+  overlap.done_at = at;
+  if (v.playbackRate !== 1) {
+    const bpm = facts()?.bpm;
+    rateBack = { from: v.playbackRate, start: v.currentTime, len: bpm ? (RATE_BACK_BEATS * 60) / bpm : 16 };
+  }
+};
+// The tempo effect back to 1.0, in steps on timeupdate (a rate is not an AudioParam).
+const rateStep = (v) => {
+  const p = Math.min(1, (v.currentTime - rateBack.start) / rateBack.len);
+  const rate = p >= 1 ? 1 : rateBack.from + (1 - rateBack.from) * p;
+  if (Math.abs(v.playbackRate - rate) > 0.002 || rate === 1) v.playbackRate = rate;
+  if (rate === 1) rateBack = null;
 };
 // The Mix tab's preview: the pair's transition, from a few seconds before it (only on its `from` track).
 const previewMix = (pair) => {
@@ -1094,7 +1241,14 @@ const onAd = (now) => {
   fade = null;
   preview = null;
   pendingIn = null;
+  overlap = null;
   sweep.on = false;
+  bassCut.on = false;
+  // The tempo effect never touches an ad.
+  if (rateBack) {
+    rateBack = null;
+    if (video) video.playbackRate = 1;
+  }
   nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
   nodes.sweep.frequency.cancelAndHoldAtTime(ctx.currentTime);
   stopEcho(true);
@@ -1243,6 +1397,24 @@ feathertune.audio = Object.freeze({
     apply();
     runCommand(d?.command);
     renderButtons();
+  },
+  // The transition voice (deck.rs) reads this through ExecuteScript.
+  deck: () => {
+    const v = video;
+    return {
+      id: currentId() ?? null,
+      t: v ? v.currentTime : 0,
+      rate: v ? v.playbackRate : 1,
+      paused: v ? v.paused : true,
+      ad,
+      out: fade && !ad && nodes ? fade.out : null,
+      dur: fade ? fade.dur : null,
+      to: fade?.to ?? null,
+      wall: wall(),
+      waiting: !!overlap?.waiting,
+      done_at: overlap?.done_at ?? null,
+      error: !!v?.error,
+    };
   },
   // --measure: one line of state.
   probe: () => {

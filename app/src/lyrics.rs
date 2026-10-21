@@ -3,18 +3,27 @@
 //! tab following the <video> time. When no source has any the page is told nothing, so the site's own
 //! lyrics stay as they are.
 //!
-//! - Sources, tried in the order of `[lyrics] providers` (read at each track, so a change applies at
-//!   the next one):
-//!   - `lrclib`: LRCLIB (https://lrclib.net), open and community-made. `GET /api/get` (title, artist,
-//!     album when known, duration); when it has no synced lyrics, `GET /api/search` with the title
-//!     cleaned of "(Official Video)", "feat. ..." and the like, and the best entry whose artist and title
-//!     match and whose length is within `MAX_DURATION_GAP` s. A User-Agent names the app, as LRCLIB asks.
+//! - Sources (`[lyrics] providers`, read at each track, so a change applies at the next one), asked all
+//!   at once, each on its own short-lived thread. The first answer with lines is shown at once, and a
+//!   better one replaces it when it comes: lines with word times beat lines timed as a whole, then the
+//!   order of the list decides. Every request names the app in its User-Agent.
 //!   - `betterlyrics`: the public Better Lyrics API (https://docs.betterlyrics.org), timed word by word
 //!     (TTML). Without an API key it answers only for tracks it already has cached; a 401 is a miss.
+//!   - `unison`: Unison (https://docs.betterlyrics.org/unison), Better Lyrics' open database of
+//!     community-synced lyrics, mostly word by word (TTML, or LRC). By the video id, else by title,
+//!     artist and duration. Entries hidden by the community are skipped.
+//!   - `lrcmux`: the public lrcmux API (https://lrcmux.dev), asked for word times only (`level=word`,
+//!     `strict`), and never from the service's own lyrics (`sources=!ytmusic`) or Genius. An answer
+//!     with garbled text (U+FFFD) is a miss.
+//!   - `lrclib`: LRCLIB (https://lrclib.net), open and community-made, mostly timed by line. `GET
+//!     /api/get` (title, artist, album when known, duration); when it has no synced lyrics, `GET
+//!     /api/search` with the title cleaned of "(Official Video)", "feat. ..." and the like, and the best
+//!     entry whose artist and title match and whose length is within `MAX_DURATION_GAP` s.
 //! - It waits for the duration, which arrives a moment after the title.
 //! - Answers are cached in `lyrics-cache/` in the profile, one small JSON file per track, so a track
-//!   already seen costs no request. "Not found" is cached too, for a week, and only for the same list
-//!   of sources. Failures (network, server busy) are not cached and not retried before the track changes.
+//!   already seen costs no request. Lines with word times are kept while their source is on; lines timed
+//!   as a whole and "not found" for a week, and only for the same list of sources (a source may get
+//!   word times later). Failures (network, server busy) are not retried before the track changes.
 //! - Lines timed only as a whole get estimated word times (`estimate`, `[lyrics] estimate_words`), and
 //!   every time is moved by `[lyrics] offset_ms`. Both are applied to the lines kept from the source,
 //!   so a change in the settings window shows at once (`republish`).
@@ -42,8 +51,12 @@ use crate::settings::Live;
 
 const LRCLIB: &str = "https://lrclib.net/api";
 const BETTER_LYRICS: &str = "https://api.betterlyrics.org/getLyrics";
-/// The sources, by id (`[lyrics] providers`) and name (shown in the page's credit and the settings).
-pub const PROVIDERS: &[(&str, &str)] = &[("lrclib", "LRCLIB"), ("betterlyrics", "Better Lyrics")];
+const UNISON: &str = "https://unison.boidu.dev/lyrics";
+const LRCMUX: &str = "https://api.lrcmux.dev/get";
+/// The sources, by id (`[lyrics] providers`) and name (shown in the page's credit and the settings),
+/// in the default order: word by word first.
+pub const PROVIDERS: &[(&str, &str)] =
+    &[("betterlyrics", "Better Lyrics"), ("unison", "Unison"), ("lrcmux", "lrcmux"), ("lrclib", "LRCLIB")];
 const USER_AGENT: &str =
     concat!("feathertune/", env!("CARGO_PKG_VERSION"), " (https://github.com/bps2414/feathertune)");
 const MAX_BODY: u64 = 512 * 1024;
@@ -174,14 +187,14 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
             }
             asked = true;
             let providers = enabled(&app.state::<Live>().get().lyrics.providers);
-            let found = lookup(&agent, &dir, &state.track, &providers);
-            // The track may have changed during the request.
-            let still = app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current);
-            if let (Some((lines, source)), true) = (found, still) {
-                *app.state::<Lyrics>().found.lock().unwrap() =
-                    Some(Found { key: current.clone(), id: state.track.id.clone(), lines, source });
-                publish(&app);
-            }
+            lookup(&agent, &dir, &state.track, &providers, |lines, source| {
+                // The track may have changed during the requests.
+                if app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current) {
+                    *app.state::<Lyrics>().found.lock().unwrap() =
+                        Some(Found { key: current.clone(), id: state.track.id.clone(), lines, source });
+                    publish(&app);
+                }
+            });
         }
     });
 }
@@ -238,43 +251,84 @@ pub fn track_key(t: &Track) -> String {
     t.id.clone().unwrap_or_else(|| format!("{}\n{}", t.title, t.artist))
 }
 
-/// The synced lines of a track and their source's name: from the cache, else from the sources (and
-/// cached). `None`: none to show.
-fn lookup(agent: &ureq::Agent, dir: &Path, track: &Track, providers: &[&str]) -> Option<(Lines, &'static str)> {
+/// Finds the synced lines of a track and hands them to `show` with their source's name, from the cache
+/// or from the sources. Nothing is shown when none has any.
+fn lookup(
+    agent: &ureq::Agent,
+    dir: &Path,
+    track: &Track,
+    providers: &[&'static str],
+    show: impl Fn(Lines, &'static str),
+) {
     let duration = track.duration.round() as u32;
     let file = cache_file(dir, track, duration);
     if let Some(entry) = read_entry(&file) {
         let source = if entry.source.is_empty() { "lrclib" } else { entry.source.as_str() };
+        let fresh = now().saturating_sub(entry.at) < NOT_FOUND_TTL && entry.tried == providers;
         match entry.lines {
-            Some(lines) if providers.contains(&source) => return Some((lines, name(source))),
-            None if now().saturating_sub(entry.at) < NOT_FOUND_TTL && entry.tried == providers => return None,
+            Some(lines) if providers.contains(&source) && (fresh || has_words(&lines)) => {
+                return show(lines, name(source));
+            }
+            None if fresh => return,
             _ => {}
         }
     }
-    let mut failed = false;
-    for &provider in providers {
-        let result = match provider {
-            "lrclib" => lrclib(agent, track, duration),
-            _ => better_lyrics(agent, track, duration),
-        };
-        match result {
-            Ok(Some(lines)) => {
-                let entry = Entry { at: now(), lines: Some(lines), source: provider.into(), tried: Vec::new() };
-                write_entry(&file, &entry);
-                return entry.lines.map(|l| (l, name(provider)));
-            }
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("lyrics: {provider}: {e}");
-                failed = true;
-            }
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (rank, &provider) in providers.iter().enumerate() {
+        let (tx, agent, track) = (tx.clone(), agent.clone(), track.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send((rank, ask(&agent, provider, &track, duration)));
+        });
+    }
+    drop(tx);
+    // Each source's answer, once it comes.
+    let mut answers: Vec<Option<Result<Option<Lines>, String>>> = vec![None; providers.len()];
+    let mut shown = None;
+    while let Ok((rank, answer)) = rx.recv() {
+        if let Err(e) = &answer {
+            eprintln!("lyrics: {}: {e}", providers[rank]);
+        }
+        answers[rank] = Some(answer);
+        let Some(best) = best(&answers) else { continue };
+        if shown != Some(best) {
+            shown = Some(best);
+            show(lines_of(&answers, best).expect("best has lines").clone(), name(providers[best]));
+        }
+        // Final once no source before it could still answer with word times.
+        if answers[..best].iter().all(Option::is_some) && has_words(lines_of(&answers, best).expect("best")) {
+            break;
         }
     }
-    if !failed {
-        let tried = providers.iter().map(|p| p.to_string()).collect();
-        write_entry(&file, &Entry { at: now(), lines: None, source: String::new(), tried });
+    let tried = providers.iter().zip(&answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
+    let lines = shown.and_then(|b| lines_of(&answers, b).cloned());
+    let source = shown.map_or(String::new(), |b| providers[b].to_string());
+    write_entry(&file, &Entry { at: now(), lines, source, tried: tried.collect() });
+}
+
+/// The source that wins among the answers so far: the first with word times, else the first with lines.
+fn best(answers: &[Option<Result<Option<Lines>, String>>]) -> Option<usize> {
+    let with_lines = || (0..answers.len()).filter(|&i| lines_of(answers, i).is_some());
+    with_lines().find(|&i| lines_of(answers, i).is_some_and(|l| has_words(l))).or_else(|| with_lines().next())
+}
+
+fn lines_of(answers: &[Option<Result<Option<Lines>, String>>], i: usize) -> Option<&Lines> {
+    match &answers[i] {
+        Some(Ok(Some(lines))) => Some(lines),
+        _ => None,
     }
-    None
+}
+
+fn has_words(lines: &[Line]) -> bool {
+    lines.iter().any(|l| !l.words.is_empty())
+}
+
+fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
+    match provider {
+        "lrclib" => lrclib(agent, track, duration),
+        "betterlyrics" => better_lyrics(agent, track, duration),
+        "unison" => unison(agent, track, duration),
+        _ => lrcmux(agent, track, duration),
+    }
 }
 
 /// The answer's JSON; `None` for a 404 (or a 401, Better Lyrics' "not cached").
@@ -422,6 +476,78 @@ fn better_lyrics(agent: &ureq::Agent, track: &Track, duration: u32) -> Result<Op
         return Ok(None);
     }
     let lines = parse_ttml(&ttml);
+    Ok((!lines.is_empty()).then_some(lines))
+}
+
+fn unison(agent: &ureq::Agent, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
+    let mut body = None;
+    if let Some(id) = &track.id {
+        body = get_json(agent.get(UNISON).query("v", id))?;
+    }
+    if body.is_none() {
+        let request = agent
+            .get(UNISON)
+            .query("song", &track.title)
+            .query("artist", &track.artist)
+            .query("duration", duration.to_string());
+        body = get_json(request)?;
+    }
+    let Some(data) = body.as_ref().and_then(|b| b.get("data")) else { return Ok(None) };
+    if data.get("hidden").and_then(Value::as_bool) == Some(true)
+        || data.get("duration").and_then(Value::as_f64).is_some_and(|d| (d - track.duration).abs() > MAX_DURATION_GAP)
+    {
+        return Ok(None);
+    }
+    let text = data.get("lyrics").and_then(Value::as_str).unwrap_or_default();
+    let lines = match data.get("format").and_then(Value::as_str) {
+        Some("ttml") => parse_ttml(text),
+        Some("lrc") => parse_lrc(text),
+        _ => Vec::new(),
+    };
+    Ok((!lines.is_empty()).then_some(lines))
+}
+
+fn lrcmux(agent: &ureq::Agent, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
+    let mut request = agent
+        .get(LRCMUX)
+        .query("artist", &track.artist)
+        .query("title", &track.title)
+        .query("duration", duration.to_string())
+        .query("level", "word")
+        .query("strict", "true")
+        .query("sources", "!ytmusic,!genius");
+    if !track.album.is_empty() {
+        request = request.query("album", &track.album);
+    }
+    let Some(body) = get_json(request)? else { return Ok(None) };
+    if body
+        .pointer("/track/duration")
+        .and_then(Value::as_f64)
+        .is_some_and(|d| (d - track.duration).abs() > MAX_DURATION_GAP)
+    {
+        return Ok(None);
+    }
+    let start = |v: &Value| v.get("start").and_then(Value::as_u64).map(|ms| ms.min(u64::from(u32::MAX)) as u32);
+    let mut lines: Lines = Vec::new();
+    for line in body.get("lines").and_then(Value::as_array).into_iter().flatten().take(MAX_LINES) {
+        let (Some(at), Some(text)) = (start(line), line.get("text").and_then(Value::as_str)) else { continue };
+        if text.contains('\u{FFFD}') {
+            return Ok(None);
+        }
+        let words: Vec<(u32, String)> = line
+            .get("words")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|w| Some((start(w)?, w.get("text")?.as_str()?.to_owned())))
+            .collect();
+        let (text, words) =
+            if words.is_empty() { make_words(vec![(at, text.to_owned())], false) } else { make_words(words, true) };
+        if !text.is_empty() {
+            lines.push(Line { ms: at, text, words });
+        }
+    }
+    lines.sort_by_key(|l| l.ms);
     Ok((!lines.is_empty()).then_some(lines))
 }
 
@@ -696,10 +822,12 @@ fn shift(lines: &mut [Line], offset: i32) {
 }
 
 // Estimated word times, for lines timed only as a whole. Each word weighs its syllables (groups of
-// vowels; +0.5 after a comma, +1 for the last word, which is usually held), and a line is sung at the
-// song's own pace: the first quartile of time per syllable over its lines (lines sung back to back), so
-// the words do not stretch over an instrumental gap before the next line. Measured against real word
-// times (7 songs, 2411 words): half the error of spreading the words over the whole line.
+// vowels; +0.5 after a comma), and a line is sung at the song's own pace: the first quartile of time per
+// syllable over its lines (lines sung back to back), so the words do not stretch over an instrumental
+// gap before the next line; a line with time to spare takes `SLACK` of it, as slow lines do. Measured
+// against real word times (7 songs, 2411 words): half the error of spreading the words over the whole
+// line, and early as often as late (a weight for a held last word made one line in three light a word
+// 0.4 s early; now one in five).
 const RATE_DEFAULT_MS: f64 = 300.0;
 const RATE_MIN_MS: f64 = 120.0;
 const RATE_MAX_MS: f64 = 600.0;
@@ -707,7 +835,8 @@ const RATE_MAX_MS: f64 = 600.0;
 const SUNG_SHARE: f64 = 0.92;
 /// The time after the last line.
 const LAST_LINE_MS: f64 = 4000.0;
-const HOLD: f64 = 1.0;
+/// The share of a line's spare time (beyond its pace) that it takes.
+const SLACK: f64 = 0.15;
 const PAUSE: f64 = 0.5;
 
 /// Adds estimated word times to every line, when no line has word times of its own. Returns whether
@@ -735,7 +864,9 @@ pub fn estimate(lines: &mut [Line]) -> bool {
             continue;
         }
         let total: f64 = weights.iter().sum();
-        let sung = (gap(i) * SUNG_SHARE).min(total * rate);
+        let room = gap(i) * SUNG_SHARE;
+        let paced = total * rate;
+        let sung = if room > paced { paced + (room - paced) * SLACK } else { room };
         let start = f64::from(lines[i].ms);
         let mut before = 0.0;
         lines[i].words = words
@@ -777,17 +908,7 @@ fn cjk(c: char) -> bool {
 }
 
 fn weigh(words: &[String]) -> Vec<f64> {
-    if words.len() < 2 {
-        return words.iter().map(|w| syllables(w)).collect();
-    }
-    let mut weights: Vec<f64> = words
-        .iter()
-        .map(|w| syllables(w) + if w.trim_end().ends_with([',', ';', ':']) { PAUSE } else { 0.0 })
-        .collect();
-    if let Some(last) = weights.last_mut() {
-        *last += HOLD;
-    }
-    weights
+    words.iter().map(|w| syllables(w) + if w.trim_end().ends_with([',', ';', ':']) { PAUSE } else { 0.0 }).collect()
 }
 
 /// Syllables of a word: groups of vowels (Latin with accents, Cyrillic), Hangul blocks, else a guess

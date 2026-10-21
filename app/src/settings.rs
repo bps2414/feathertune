@@ -21,7 +21,7 @@
 //! api_secret = ""
 //!
 //! [lyrics]
-//! providers = ["lrclib", "betterlyrics"]  # synced lyrics sources, tried in this order
+//! providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # word-timed ones win, then this order
 //! estimate_words = true            # word times for lines timed only as a whole
 //! offset_ms = 0                    # moves the lyrics in time; positive: later
 //!

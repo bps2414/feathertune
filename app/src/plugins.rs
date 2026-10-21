@@ -178,11 +178,11 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "synced_lyrics",
         name: "Synced lyrics",
-        description: "Shows time-synced lyrics in the site's Lyrics tab, from LRCLIB and Better Lyrics (below), \
-                      with the current line and word highlighted (word times are estimated when the source has \
-                      none). Lines cross-fade and the list scrolls slowly in time with the song while it plays \
-                      and the window is in front. One to three requests per track, cached on disk; when no \
-                      source has any, the site's own lyrics stay.",
+        description: "Shows time-synced lyrics in the site's Lyrics tab, from four open sources (below), with \
+                      the current line and word highlighted; sources timed word by word win, and word times are \
+                      estimated when none has them. Lines cross-fade and the list scrolls slowly in time with \
+                      the song while it plays and the window is in front. A few requests per new track, at \
+                      once, cached on disk; when no source has any, the site's own lyrics stay.",
         cost: "About +5 MB private and WS and +0.2 points of CPU against off (one run), inside the measurement spread. \
                The cross-fade, the scroll and the extra sources are not measured yet.",
         default_on: true,

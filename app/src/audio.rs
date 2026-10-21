@@ -16,6 +16,20 @@ use crate::settings::{Live, Settings};
 /// The plugins of the `audio` page module.
 pub const PLUGINS: &[&str] = &["equalizer", "compressor"];
 
+/// Equalizer presets: gains in dB for 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz ("custom" is
+/// `[audio] eq_bands`).
+pub const EQ_PRESETS: &[(&str, [f64; 10])] = &[
+    ("flat", [0.0; 10]),
+    ("bass", [6.0, 5.0, 4.0, 2.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("vocal", [-2.0, -2.0, -1.0, 0.0, 1.5, 3.0, 3.0, 2.0, 0.0, -1.0]),
+    ("treble", [0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 1.5, 3.5, 5.0, 6.0]),
+    ("loudness", [5.0, 4.0, 2.0, 0.0, -1.0, 0.0, 0.0, 1.0, 3.0, 4.0]),
+];
+pub const EQ_MAX_DB: f64 = 12.0;
+
+/// Compressor presets (their settings are in the page module); "none" leaves it out of the path.
+pub const COMPRESSORS: &[&str] = &["none", "soft", "night", "strong"];
+
 /// `--measure`: the graph's state, printed every 10 s.
 pub const PROBE: &str = "(() => window.__feathertune?.audio?.probe?.() ?? 'audio=none')()";
 
@@ -44,7 +58,21 @@ pub fn push(app: &AppHandle) {
     crate::injections::send(app, "audio", &data);
 }
 
+/// The equalizer gains the settings ask for (flat for anything unknown).
+pub fn eq_gains(s: &Settings) -> [f64; 10] {
+    if s.audio.eq_preset == "custom" {
+        let mut gains = [0.0; 10];
+        for (g, v) in gains.iter_mut().zip(&s.audio.eq_bands) {
+            *g = if v.is_finite() { v.clamp(-EQ_MAX_DB, EQ_MAX_DB) } else { 0.0 };
+        }
+        return gains;
+    }
+    EQ_PRESETS.iter().find(|(name, _)| *name == s.audio.eq_preset).map_or([0.0; 10], |(_, g)| *g)
+}
+
 fn payload(s: &Settings) -> Value {
     let plugins: Map<String, Value> = PLUGINS.iter().map(|p| (p.to_string(), json!(s.plugin(p)))).collect();
-    json!({ "plugins": plugins })
+    let compressor =
+        if COMPRESSORS.contains(&s.audio.compressor.as_str()) { s.audio.compressor.as_str() } else { "none" };
+    json!({ "plugins": plugins, "eq": eq_gains(s), "compressor": compressor })
 }

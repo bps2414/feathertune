@@ -27,6 +27,11 @@
 //! estimate_words = true            # word times for lines timed only as a whole
 //! offset_ms = 0                    # moves the lyrics in time; positive: later
 //!
+//! [audio]                          # the audio plugins (Audio tab); every effect is bypassed during ads
+//! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
+//! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
+//! compressor = "none"              # none (out of the sound path), soft, night, strong
+//!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
 //! ```
@@ -47,6 +52,7 @@ pub struct Settings {
     pub lastfm: LastFm,
     pub browser: Browser,
     pub lyrics: LyricsSettings,
+    pub audio: AudioSettings,
     /// The whole file, for the plugin switches (`plugin`).
     #[serde(skip)]
     raw: toml::Table,
@@ -105,6 +111,23 @@ impl Default for LyricsSettings {
             estimate_words: true,
             offset_ms: 0,
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct AudioSettings {
+    /// `audio::EQ_PRESETS` or "custom" (then `eq_bands`).
+    pub eq_preset: String,
+    /// The 10 custom gains in dB, 31 Hz to 16 kHz.
+    pub eq_bands: Vec<f64>,
+    /// `audio::COMPRESSORS`.
+    pub compressor: String,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        AudioSettings { eq_preset: "flat".into(), eq_bands: vec![0.0; 10], compressor: "none".into() }
     }
 }
 

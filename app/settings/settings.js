@@ -293,6 +293,54 @@ for (const b of document.querySelectorAll('#stats-range button')) {
   });
 }
 
+// Audio: the equalizer's presets and its 10 bands (a band moved by hand switches to Custom).
+const EQ_LABELS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+const PRESET_NAMES = { flat: 'Flat', bass: 'Bass', vocal: 'Vocal', treble: 'Treble', loudness: 'Loudness', custom: 'Custom' };
+const bands = [];
+const dbText = (v) => `${v > 0 ? '+' : ''}${v}`;
+const saveBands = async () => {
+  const values = bands.map((b) => Number(b.input.value));
+  if (!(await set('audio.eq_bands', values, null))) return;
+  if ($('eq-preset').value !== 'custom') {
+    $('eq-preset').value = 'custom';
+    await set('audio.eq_preset', 'custom', null);
+  }
+};
+const renderAudio = (a) => {
+  const select = $('eq-preset');
+  if (!select.options.length) {
+    for (const id of [...a.eq_presets, 'custom']) {
+      const o = el('option', '', PRESET_NAMES[id] || id);
+      o.value = id;
+      select.append(o);
+    }
+  }
+  if (!bands.length) {
+    EQ_LABELS.forEach((label, i) => {
+      const input = el('input');
+      input.type = 'range';
+      input.min = '-12';
+      input.max = '12';
+      input.step = '0.5';
+      input.setAttribute('aria-label', `${label} Hz`);
+      const db = el('span', 'db');
+      input.addEventListener('input', () => (db.textContent = dbText(Number(input.value))));
+      input.addEventListener('change', saveBands);
+      const band = el('div', 'band');
+      band.append(db, input, el('span', '', label));
+      $('eq-bands').append(band);
+      bands[i] = { input, db };
+    });
+  }
+  a.eq_bands.forEach((v, i) => {
+    if (bands[i].input === document.activeElement) return;
+    bands[i].input.value = String(v);
+    bands[i].db.textContent = dbText(v);
+  });
+};
+// A preset chosen from the list moves the bands to it.
+$('eq-preset').addEventListener('change', () => setTimeout(load, 100));
+
 const load = async () => {
   try {
     const s = await invoke('settings_get');
@@ -300,6 +348,7 @@ const load = async () => {
     renderPlugins(s.plugins);
     renderLastFm(s.lastfm);
     renderDesktopLyrics(s.desktop_lyrics);
+    renderAudio(s.audio);
     if (!$('lyrics-providers').contains(document.activeElement)) renderSources(s.lyrics);
     statsRunning = s.stats_running;
     if (!document.querySelector('[data-panel="stats"]').hidden) loadStats();

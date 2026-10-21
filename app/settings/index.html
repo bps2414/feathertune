@@ -87,8 +87,21 @@
 
     <section role="tabpanel" data-panel="audio" hidden>
       <p class="hint">Effects on the page's own sound, on this PC only. Every effect is bypassed while an ad plays.</p>
-      <div class="card" data-plugin="equalizer"></div>
-      <div class="card" data-plugin="compressor"></div>
+      <div class="card" data-plugin="equalizer">
+        <label>Preset <select data-key="audio.eq_preset" id="eq-preset"></select></label>
+        <div class="eq" id="eq-bands"></div>
+        <p class="hint">Moving a band switches to Custom. A band at 0 dB is left out of the sound path, and the level is lowered by the largest boost so the sound never clips.</p>
+      </div>
+      <div class="card" data-plugin="compressor">
+        <label>Preset
+          <select data-key="audio.compressor">
+            <option value="none">None</option>
+            <option value="soft">Soft</option>
+            <option value="night">Night (quiet listening)</option>
+            <option value="strong">Strong</option>
+          </select>
+        </label>
+      </div>
     </section>
 
     <section role="tabpanel" data-panel="integrations" hidden>

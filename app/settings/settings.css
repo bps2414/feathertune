@@ -250,3 +250,25 @@ footer span { flex: 1; }
 @media (prefers-reduced-motion: reduce) {
   .switch, .switch::after { transition: none; }
 }
+
+select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+select option { background: var(--ink); }
+select:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
+input[type="range"] { accent-color: var(--accent); padding: 0; background: none; border: 0; }
+
+.eq { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-top: 12px; text-align: center; }
+.eq .band { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.eq input[type="range"] { writing-mode: vertical-lr; direction: rtl; width: 22px; height: 120px; margin: 0; }
+.eq .db { color: var(--text); font-variant-numeric: tabular-nums; }

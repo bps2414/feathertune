@@ -156,6 +156,13 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "estimate_words": s.lyrics.estimate_words,
             "offset_ms": s.lyrics.offset_ms,
         },
+        "audio": {
+            "eq_preset": s.audio.eq_preset,
+            // What the sliders show: the preset's gains, or the custom ones.
+            "eq_bands": crate::audio::eq_gains(&s),
+            "eq_presets": crate::audio::EQ_PRESETS.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            "compressor": s.audio.compressor,
+        },
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
         "desktop_lyrics": { "open": crate::desktop_lyrics::is_open(), "locked": crate::desktop_lyrics::is_locked() },
         // false: the plugin was off at startup, so nothing is recorded.
@@ -166,8 +173,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
-/// `lyrics.estimate_words`, `lyrics.offset_ms` or `autostart`. Returns whether a
-/// restart is needed for it to apply.
+/// `lyrics.estimate_words`, `lyrics.offset_ms`, `audio.eq_preset`, `audio.eq_bands`,
+/// `audio.compressor` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
     guard(&webview)?;
@@ -265,6 +272,32 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 .ok_or("a whole number of ms, from -5000 to 5000")?;
             live.write("lyrics", name, toml_edit::value(ms), None, false)?;
             crate::lyrics::republish(&app);
+            Ok(false)
+        }
+        ("audio", "eq_preset") => {
+            let preset = value.as_str().ok_or("expected a preset")?;
+            if preset != "custom" && !crate::audio::EQ_PRESETS.iter().any(|(name, _)| *name == preset) {
+                return Err("unknown preset".into());
+            }
+            live.write("audio", name, toml_edit::value(preset), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "eq_bands") => {
+            let list = value.as_array().filter(|l| l.len() == 10).ok_or("expected 10 gains")?;
+            let mut gains = toml_edit::Array::new();
+            for g in list {
+                let g = g.as_f64().filter(|g| g.abs() <= crate::audio::EQ_MAX_DB).ok_or("a gain from -12 to 12 dB")?;
+                gains.push((g * 2.0).round() / 2.0);
+            }
+            live.write("audio", name, toml_edit::value(gains), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "compressor") => {
+            let preset = value.as_str().filter(|p| crate::audio::COMPRESSORS.contains(p)).ok_or("unknown preset")?;
+            live.write("audio", name, toml_edit::value(preset), None, false)?;
+            crate::audio::push(&app);
             Ok(false)
         }
         _ => Err("unknown setting".into()),

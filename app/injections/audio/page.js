@@ -82,15 +82,12 @@ const dbToGain = (db) => Math.pow(10, db / 20);
 
 // --- the graph ---
 
-// The chain from `input` to `destination` for the current settings and ad state.
-const chain = () => {
-  const list = [nodes.input];
-  if (!ad) list.push(...effects());
-  list.push(nodes.trim, nodes.master, ctx.destination);
-  return list;
-};
-// The effect nodes in use, in order (filled in by the effects below).
-const effects = () => [];
+// The chain from `input` to `destination`: the effect nodes in use, in their fixed order.
+const chain = () => [nodes.input, ...inChain, nodes.trim, nodes.master, ctx.destination];
+// Effect nodes in the chain now, and the ones on their way out (ramping to neutral first).
+let inChain = [];
+const leaving = new Set();
+let settleTimer = 0;
 // Side branches (taps) that must be connected now: [from, to] pairs.
 const taps = () => {
   const list = [];
@@ -116,15 +113,86 @@ const wire = () => {
   edges = want;
 };
 
-// Every parameter to what the settings ask (or neutral during an ad), in 30 ms.
+// --- equalizer and compressor ---
+
+// 10 bands, 31 Hz to 16 kHz: shelves at the ends, peaking filters between.
+const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const EQ_Q = 1.4;
+// The compressor presets. Neutral (out of the chain) is threshold 0 dB, ratio 1.
+const COMPRESSORS = {
+  // Gentle glue: only the loudest peaks are pulled down a little.
+  soft: { threshold: -18, knee: 12, ratio: 2, attack: 0.01, release: 0.25, makeup: 2 },
+  // Quiet listening: loud passages come down a lot, so quiet ones can be turned up.
+  night: { threshold: -30, knee: 10, ratio: 5, attack: 0.003, release: 0.3, makeup: 6 },
+  // Strong levelling, close to a limiter.
+  strong: { threshold: -24, knee: 4, ratio: 10, attack: 0.001, release: 0.12, makeup: 5 },
+};
+
+const eqGains = () => (on('equalizer') && Array.isArray(data?.eq) ? data.eq : []);
+const compressor = () => (on('compressor') ? COMPRESSORS[data?.compressor] : null);
+
+// The effect nodes the settings want now, in chain order (none during an ad).
+const wanted = () => {
+  if (ad) return [];
+  const list = [];
+  eqGains().forEach((g, i) => g && list.push(nodes.eq[i]));
+  if (compressor()) list.push(nodes.compressor);
+  return list;
+};
+// The fixed order of every effect node.
+const order = () => [...nodes.eq, nodes.compressor];
+
+const neutralize = (node) => {
+  if (node === nodes.compressor) {
+    ramp(node.threshold, 0);
+    ramp(node.ratio, 1);
+  } else {
+    ramp(node.gain, 0);
+  }
+};
+const target = (node) => {
+  if (node === nodes.compressor) {
+    const c = compressor();
+    for (const k of ['threshold', 'knee', 'ratio', 'attack', 'release']) ramp(node[k], c[k]);
+  } else {
+    ramp(node.gain, eqGains()[nodes.eq.indexOf(node)]);
+  }
+};
+
+// The trim's gain: the equalizer's pre-gain (minus its largest boost, so it never clips) plus the
+// compressor's make-up.
+const trimGain = () => {
+  if (ad) return 1;
+  const boost = Math.max(0, ...eqGains());
+  return dbToGain(-boost + (compressor()?.makeup ?? 0));
+};
+
+// Every parameter to what the settings ask (or neutral during an ad), in 30 ms. A node that is no
+// longer wanted ramps to neutral first and leaves the chain 100 ms later.
 const apply = () => {
   if (!nodes) return;
+  const want = new Set(wanted());
+  for (const n of inChain) {
+    if (!want.has(n)) {
+      neutralize(n);
+      leaving.add(n);
+    }
+  }
+  for (const n of want) leaving.delete(n);
+  inChain = order().filter((n) => want.has(n) || leaving.has(n));
   wire();
-  ramp(nodes.trim.gain, ad ? 1 : trimGain());
+  for (const n of want) target(n);
+  ramp(nodes.trim.gain, trimGain());
   if (ad) ramp(nodes.master.gain, 1);
+  if (leaving.size) {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      inChain = inChain.filter((n) => !leaving.has(n));
+      leaving.clear();
+      wire();
+    }, 100);
+  }
 };
-// The trim's gain: make-up and pre-gain of the effects (filled in below).
-const trimGain = () => 1;
 
 // The analyser is connected only while something reads from it.
 const analyserUsers = new Set();
@@ -154,8 +222,19 @@ const createGraph = (element) => {
       trim: ctx.createGain(),
       master: ctx.createGain(),
       analyser: ctx.createAnalyser(),
+      eq: EQ_FREQUENCIES.map((f, i) => {
+        const band = ctx.createBiquadFilter();
+        band.type = i === 0 ? 'lowshelf' : i === EQ_FREQUENCIES.length - 1 ? 'highshelf' : 'peaking';
+        band.frequency.value = f;
+        band.Q.value = EQ_Q;
+        band.gain.value = 0;
+        return band;
+      }),
+      compressor: ctx.createDynamicsCompressor(),
     };
     nodes.analyser.fftSize = 2048;
+    nodes.compressor.threshold.value = 0;
+    nodes.compressor.ratio.value = 1;
     testWorklet();
   }
   if (!sources.has(element)) {

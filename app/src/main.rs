@@ -5,13 +5,14 @@
 // The main window has no system frame: titlebar.rs draws the title bar and the site is a child
 // webview (label `site`) below it.
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
-// login state, so measure.ps1 can record them. The page can call a single Tauri command,
-// `player_state` (see player.rs and capabilities/), which only reports data.
+// login state, and the audio graph's state, so measure.ps1 can record them. The page can call a single
+// Tauri command, `player_state` (see player.rs and capabilities/), which only reports data.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod album_color;
 mod artwork;
+mod audio;
 mod desktop_lyrics;
 mod discord;
 mod gfx;
@@ -202,6 +203,7 @@ fn main() {
                 lyrics::start(app.handle(), &profile, page_lyrics);
             }
             desktop_lyrics::start(app.handle());
+            audio::start(app.handle());
             if live.plugin("listening_stats") {
                 stats::start(app.handle(), &profile);
             }
@@ -507,6 +509,7 @@ fn measure_probes(site: Webview, start: Instant) {
             std::thread::sleep(Duration::from_secs(10));
             let t = start.elapsed().as_secs();
             eval_with(&site, STATUS_PROBE, move |r| println!("{t:>5}s {r}"));
+            eval_with(&site, audio::PROBE, move |r| println!("{t:>5}s {}", r.trim_matches('"')));
         }
     });
 }

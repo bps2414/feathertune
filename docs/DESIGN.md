@@ -77,6 +77,7 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 | `song_mode` | on | not measured yet: one attribute observer, one click per track; saves video decoding on tracks that have a video |
 | `precise_volume` | on | not measured yet: one wheel listener, nothing runs otherwise |
 | `skip_disliked` | on | not measured yet: one check per track |
+| `equalizer`, `compressor` (audio graph) | on, neutral (flat, none) | not measured yet: one Web Audio graph once anything plays; nothing in the chain while neutral |
 
 **Tracker filter:** WebView2 `WebResourceRequested` and the `adblock` crate with cosmetic rules dropped, so it can only block requests. It only sees scripts, images, XHR/fetch, pings and "other" (never documents, frames, media, fonts or stylesheets), and skips the player's domains, every Google domain and Google's ad-delivery domains before the list is asked, so even an ad list dropped in by mistake changes nothing there. The bundled list (`app/filters/privacy.txt`) has only third-party analytics; on this site it blocks one host.
 
@@ -118,6 +119,10 @@ The page's own `<video>` may be processed with Web Audio, locally and for the li
 
 - **One graph, created once:** on the first `play`, `createMediaElementSource(video)` takes the element's sound into one `AudioContext`. That capture cannot be undone: from then on the element sounds only through the graph, and the site reuses the same element for every track. So the graph is made once per element, the path to `destination` is never disconnected, and every bypass happens inside the graph.
 - **Ads:** while one plays (`#movie_player` has `ad-showing` or `ad-interrupting`, or the site's state says so; no player at all counts as an ad), every parameter goes back to neutral in a 30 ms ramp, nothing is scheduled, measured or skipped, and no other sound plays over it.
+
+- **Failure guard:** if the video plays (time moving, volume up, not muted, no ad) and the context is not `running` after a `resume()`, or the graph passes only digital silence for 4 s after the first 5 s of a track, the module writes `sessionStorage['feathertune-audio-off'] = '1'`, says so in the console and reloads the page once; with that mark it creates no graph until the tab session ends. The guard stops looking once it has heard sound through the graph. Losing the effects is better than losing the sound.
+- **Cost:** the context uses `latencyHint: 'playback'` and is suspended after 10 s of pause (resumed on `play`). The analyser is connected only while something reads from it. `--measure` prints `audio=<running|suspended|off|none> ctx_ms=<t> worklet=<ok|blocked|missing> ad=<bool>` every 10 s (`worklet`: whether an AudioWorklet module from a Blob loads under the site's CSP).
+- **Settings:** `[audio]` in `config.toml`, edited live in the Audio tab of the settings window; Rust gives the page its data with `injections::send("audio", …)`.
 
 ## UI performance rules
 
@@ -182,6 +187,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 - The player's fullscreen button (the window goes fullscreen with the site covering it, Esc and the page's exit button restore it, hiding to the tray while fullscreen), the site's bounds after restoring from the tray or moving between monitors of different DPI, and the tray's "Reload page".
 - The cost of the five new plugins.
 - Back and forward, song mode, precise volume and skip disliked in the running app: the page selectors (`ytmusic-av-toggle .song-button` / `.video-button`, its `aria-pressed`, `has-av-switcher` and `playback-mode`; `#movie_player` `.ad-showing` and its `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` taking a value; `#main-panel` for the wheel; `#like-button-renderer[like-status]`); the Song / Video switch pressing itself once per track (and not again after a Video click); the volume HUD placement and theme; the wheel step on a mouse and a touchpad; the global volume keys; a disliked track being skipped once (and a queue of them stopping at five); the back and forward buttons dimming and moving the history (and Alt+Left / Alt+Right); the costs of the four plugins.
+- Audio graph (in the running app): sound with the graph over 20 track changes in Song and Video mode, after "Reload page" and after a new sign-in; the failure guard never tripping without reason (`feathertune-audio-off` in the console); a pause over 10 s (context suspended) and play: sound back at once, at the right position; changing the default output device mid-track (headphones ↔ speakers); the graph's cost with `measure.ps1` (any audio plugin on against all off, and `latencyHint: 'interactive'` against `'playback'`); the probe's `worklet=` under the site's CSP; the `ytmusic-player-bar` `getState()` read (`player.adPlaying`).
 
 ## Ideas
 

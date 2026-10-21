@@ -19,6 +19,7 @@
       <button role="tab" type="button" data-tab="general" aria-selected="true">General</button>
       <button role="tab" type="button" data-tab="look">Look</button>
       <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
+      <button role="tab" type="button" data-tab="audio">Audio</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
       <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
@@ -82,6 +83,12 @@
           <button id="share-lyrics" type="button" class="secondary">Make a lyrics card</button>
         </div>
       </div>
+    </section>
+
+    <section role="tabpanel" data-panel="audio" hidden>
+      <p class="hint">Effects on the page's own sound, on this PC only. Every effect is bypassed while an ad plays.</p>
+      <div class="card" data-plugin="equalizer"></div>
+      <div class="card" data-plugin="compressor"></div>
     </section>
 
     <section role="tabpanel" data-panel="integrations" hidden>

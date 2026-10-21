@@ -1,8 +1,9 @@
 //! Page injections: every piece of JS and CSS that enters the page lives in `injections/<id>/`
 //! (`page.js` and/or `style.css`) and is compiled into the binary.
 //!
-//! Each module except `core` (the player state bridge, always on) belongs to a plugin (plugins.rs)
-//! and follows its switch in `config.toml`. Every plugin is on by default; the switch is the control.
+//! Each module except `core` (the player state bridge, always on) belongs to one or more plugins
+//! (plugins.rs) and is loaded when any of their switches in `config.toml` is on. Every plugin is on by
+//! default; the switch is the control.
 //! On startup the enabled modules are assembled into a single initialization script that only
 //! runs on the main frame of https://music.youtube.com. CSS enters as a `<style>` element and each
 //! module runs inside its own `try/catch`, so a module that throws does not take the others down.
@@ -13,7 +14,7 @@
 //! strings, and the page asks for nothing. The last data of each module is kept and sent again when the
 //! page finishes loading (a sign-in or a reload loses the page's copy).
 //!
-//! To add a module: create its folder, add one entry to `INJECTIONS` and its plugin to `PLUGINS`.
+//! To add a module: create its folder, add one entry to `INJECTIONS` and its plugins to `PLUGINS`.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -27,53 +28,59 @@ struct Injection {
     id: &'static str,
     js: Option<&'static str>,
     css: Option<&'static str>,
-    /// The plugin whose switch turns the module on; `None`: always on.
-    plugin: Option<&'static str>,
+    /// The plugins whose switches turn the module on (any of them); empty: always on.
+    plugins: &'static [&'static str],
 }
 
 const INJECTIONS: &[Injection] = &[
-    Injection { id: "core", js: Some(include_str!("../injections/core/page.js")), css: None, plugin: None },
+    Injection { id: "core", js: Some(include_str!("../injections/core/page.js")), css: None, plugins: &[] },
     Injection {
         id: "controls",
         js: Some(include_str!("../injections/controls/page.js")),
         css: None,
-        plugin: Some("controls"),
+        plugins: &["controls"],
     },
     Injection {
         id: "theme",
         js: Some(include_str!("../injections/theme/page.js")),
         css: Some(include_str!("../injections/theme/style.css")),
-        plugin: Some("album_color"),
+        plugins: &["album_color"],
     },
     Injection {
         id: "lyrics",
         js: Some(include_str!("../injections/lyrics/page.js")),
         css: Some(include_str!("../injections/lyrics/style.css")),
-        plugin: Some("synced_lyrics"),
+        plugins: &["synced_lyrics"],
     },
     Injection {
         id: "ambient",
         js: Some(include_str!("../injections/ambient/page.js")),
         css: Some(include_str!("../injections/ambient/style.css")),
-        plugin: Some("ambient_mode"),
+        plugins: &["ambient_mode"],
     },
     Injection {
         id: "song_mode",
         js: Some(include_str!("../injections/song_mode/page.js")),
         css: None,
-        plugin: Some("song_mode"),
+        plugins: &["song_mode"],
     },
     Injection {
         id: "precise_volume",
         js: Some(include_str!("../injections/precise_volume/page.js")),
         css: Some(include_str!("../injections/precise_volume/style.css")),
-        plugin: Some("precise_volume"),
+        plugins: &["precise_volume"],
     },
     Injection {
         id: "skip_disliked",
         js: Some(include_str!("../injections/skip_disliked/page.js")),
         css: None,
-        plugin: Some("skip_disliked"),
+        plugins: &["skip_disliked"],
+    },
+    Injection {
+        id: "audio",
+        js: Some(include_str!("../injections/audio/page.js")),
+        css: None,
+        plugins: crate::audio::PLUGINS,
     },
 ];
 
@@ -120,7 +127,7 @@ pub fn script(settings: &Settings) -> String {
          \x20 document.documentElement ? add() : document.addEventListener('readystatechange', add, { once: true });\n\
          };\n",
     );
-    for inj in INJECTIONS.iter().filter(|i| i.plugin.is_none_or(|p| settings.plugin(p))) {
+    for inj in INJECTIONS.iter().filter(|i| i.plugins.is_empty() || i.plugins.iter().any(|p| settings.plugin(p))) {
         let id = serde_json::to_string(inj.id).unwrap();
         out.push_str("try {\n");
         if let Some(css) = inj.css {
@@ -151,7 +158,9 @@ mod tests {
     #[test]
     fn every_module_plugin_exists() {
         for inj in INJECTIONS {
-            assert!(inj.plugin.is_none_or(|p| crate::plugins::get(p).is_some()), "{}", inj.id);
+            for p in inj.plugins {
+                assert!(crate::plugins::get(p).is_some(), "{} {p}", inj.id);
+            }
         }
     }
 }

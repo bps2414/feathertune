@@ -241,6 +241,28 @@ pub const PLUGINS: &[Plugin] = &[
         live: false,
         legacy: None,
     },
+    Plugin {
+        id: "equalizer",
+        name: "Equalizer",
+        description: "A 10-band equalizer with presets (Audio tab), on the page's own audio and only on this PC. \
+                      Flat (the default) leaves it out of the sound path. Every audio effect is bypassed while an \
+                      ad plays.",
+        cost: "Not measured yet: one Web Audio graph on the page once anything plays (shared by every audio \
+               plugin); the bands that are not flat.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "compressor",
+        name: "Compressor",
+        description: "Evens out loud and quiet parts (soft, night or strong; Audio tab). \"None\" (the default) \
+                      leaves it out of the sound path. Bypassed while an ad plays.",
+        cost: "Not measured yet: nothing while set to none; one compressor node otherwise.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

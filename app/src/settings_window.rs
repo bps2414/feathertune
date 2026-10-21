@@ -184,16 +184,19 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("plugins", id) => {
             let plugin = plugins::get(id).ok_or("unknown plugin")?;
             let on = value.as_bool().ok_or("expected true or false")?;
-            live.write("plugins", id, toml_edit::value(on), plugin.legacy, !plugin.live)?;
+            // An audio plugin is live while the page has the audio module (some audio plugin was on at startup).
+            let restart = !plugin.live || (crate::audio::PLUGINS.contains(&id) && on && !crate::audio::loaded());
+            live.write("plugins", id, toml_edit::value(on), plugin.legacy, restart)?;
             match id {
                 "global_shortcuts" => crate::shortcuts::register(&app),
                 "mini_player" if !on => crate::miniplayer::close(&app),
                 "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 "navigation" => crate::titlebar::set_navigation(&app, on),
+                id if crate::audio::PLUGINS.contains(&id) => crate::audio::push(&app),
                 _ => {}
             }
-            Ok(!plugin.live)
+            Ok(restart)
         }
         ("shortcuts", "play_pause" | "next" | "previous" | "mini_player" | "volume_up" | "volume_down") => {
             let keys = text(&value, 64)?;

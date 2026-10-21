@@ -77,6 +77,7 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 | `song_mode` | ligado | ainda não medido: um observer de atributos, um clique por faixa; poupa a decodificação de vídeo nas faixas que têm vídeo |
 | `precise_volume` | ligado | ainda não medido: um listener de roda, nada roda fora disso |
 | `skip_disliked` | ligado | ainda não medido: uma checagem por faixa |
+| `equalizer`, `compressor` (grafo de áudio) | ligado, neutro (flat, none) | ainda não medido: um grafo Web Audio depois que algo toca; nada na cadeia enquanto neutro |
 
 **Filtro de rastreadores:** `WebResourceRequested` do WebView2 e o crate `adblock` sem regras cosméticas, então ele só consegue bloquear requisições. Só vê scripts, imagens, XHR/fetch, pings e "outros" (nunca documentos, frames, mídia, fontes ou folhas de estilo), e pula os domínios do player, todo domínio do Google e os domínios de entrega de anúncios do Google antes de consultar a lista, então nem uma lista de anúncios colocada por engano muda algo ali. A lista embutida (`app/filters/privacy.txt`) tem só analytics de terceiros; neste site ela bloqueia um host.
 
@@ -118,6 +119,10 @@ O próprio `<video>` da página pode ser processado com Web Audio, localmente e 
 
 - **Um grafo, criado uma vez:** no primeiro `play`, `createMediaElementSource(video)` leva o som do elemento para um `AudioContext`. Essa captura não tem volta: dali em diante o elemento só soa pelo grafo, e o site reaproveita o mesmo elemento em todas as faixas. Por isso o grafo é criado uma vez por elemento, o caminho até `destination` nunca é desconectado e todo bypass acontece dentro do grafo.
 - **Anúncios:** enquanto um toca (`#movie_player` tem `ad-showing` ou `ad-interrupting`, ou o estado do site diz isso; sem player conta como anúncio), todo parâmetro volta ao neutro numa rampa de 30 ms, nada é agendado, medido nem pulado, e nenhum outro som toca por cima.
+
+- **Guarda de falha:** se o vídeo toca (tempo andando, volume acima de zero, sem mudo, sem anúncio) e o contexto não fica `running` depois de um `resume()`, ou o grafo só passa silêncio digital por 4 s depois dos primeiros 5 s de uma faixa, o módulo grava `sessionStorage['feathertune-audio-off'] = '1'`, avisa no console e recarrega a página uma vez; com essa marca ele não cria grafo até a sessão da aba acabar. A guarda para de olhar quando ouviu som pelo grafo uma vez. Melhor perder os efeitos do que o som.
+- **Custo:** o contexto usa `latencyHint: 'playback'` e é suspenso depois de 10 s de pausa (retomado no `play`). O analyser só fica ligado enquanto alguém lê dele. `--measure` imprime `audio=<running|suspended|off|none> ctx_ms=<t> worklet=<ok|blocked|missing> ad=<bool>` a cada 10 s (`worklet`: se um módulo de AudioWorklet vindo de um Blob carrega sob a CSP do site).
+- **Configurações:** `[audio]` no `config.toml`, editado ao vivo na aba Áudio da janela de configurações; o Rust passa os dados à página com `injections::send("audio", …)`.
 
 ## Regras de desempenho da UI
 
@@ -182,6 +187,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 - O botão de tela cheia do player (a janela entra em tela cheia com o site cobrindo tudo, Esc e o botão de sair da página restauram, esconder na bandeja em tela cheia), a posição do site depois de restaurar da bandeja ou mover entre monitores de DPI diferentes, e o "Reload page" da bandeja.
 - O custo dos cinco plugins novos.
 - Voltar e avançar, modo música, volume preciso e pular não gostei no app rodando: os seletores da página (`ytmusic-av-toggle .song-button` / `.video-button`, o `aria-pressed` dele, `has-av-switcher` e `playback-mode`; `#movie_player` `.ad-showing` e seu `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` aceitando um valor; `#main-panel` para a roda; `#like-button-renderer[like-status]`); a chave Música / Vídeo se apertando uma vez por faixa (e não de novo depois de um clique em Vídeo); a posição e o tema do HUD de volume; o passo da roda num mouse e num touchpad; as teclas globais de volume; uma faixa marcada sendo pulada uma vez (e uma fila delas parando em cinco); os botões de voltar e avançar apagando e mexendo no histórico (e Alt+← / Alt+→); o custo dos quatro plugins.
+- Grafo de áudio (no app rodando): som com o grafo em 20 trocas de faixa nos modos Música e Vídeo, depois de "Recarregar página" e de um novo login; a guarda de falha nunca disparando sem motivo (`feathertune-audio-off` no console); uma pausa de mais de 10 s (contexto suspenso) e play: o som volta na hora, na posição certa; trocar o dispositivo de saída padrão no meio da faixa (fone ↔ caixa); o custo do grafo com `measure.ps1` (qualquer plugin de áudio ligado contra todos desligados, e `latencyHint: 'interactive'` contra `'playback'`); o `worklet=` da sonda sob a CSP do site; a leitura de `getState()` do `ytmusic-player-bar` (`player.adPlaying`).
 
 ## Ideias
 

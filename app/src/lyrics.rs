@@ -34,6 +34,13 @@
 //! - The lines of the current track are also kept in Rust (`Lyrics`, managed state) for the floating
 //!   lyrics (desktop_lyrics.rs). The lookup runs when either plugin is on; the page gets the lines only
 //!   with `synced_lyrics` on.
+//! - Translation (plugin `lyrics_translation`, `[lyrics] translate_to`: "auto" is the language of
+//!   Windows' regional format, "off", or a code of `TRANSLATION_LANGUAGES`): once the lines are final,
+//!   a translation line by line into that language: the source's own (translations in its TTML, by
+//!   people) when it covers half the lines, else Unison's `POST /translate` (machine, made for lyrics;
+//!   only the lines' text and the language are sent). Cached with the lines, per language. Lines already
+//!   in that language get none. The page gets `translation: [text | null, ...]` (one per line) and
+//!   `translationSource`; a new language applies from the next track, "off" at once.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,13 +53,33 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::error::RecvError;
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
+use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
+use windows::core::w;
+
 use crate::player::{Player, Track};
-use crate::settings::Live;
+use crate::settings::{Live, Settings};
 
 const LRCLIB: &str = "https://lrclib.net/api";
 const BETTER_LYRICS: &str = "https://api.betterlyrics.org/getLyrics";
 const UNISON: &str = "https://unison.boidu.dev/lyrics";
+const UNISON_TRANSLATE: &str = "https://unison.boidu.dev/translate";
 const LRCMUX: &str = "https://api.lrcmux.dev/get";
+/// Unison translates at most this many lines a request.
+const TRANSLATE_CHUNK: usize = 200;
+/// Translations kept per line from a TTML source.
+const MAX_TRANSLATIONS: usize = 4;
+/// The languages lyrics can be translated to (`[lyrics] translate_to`), by ISO 639-1 code, with their
+/// own name (shown in the settings).
+pub const TRANSLATION_LANGUAGES: &[(&str, &str)] = &[
+    ("pt", "Português"),
+    ("en", "English"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+    ("it", "Italiano"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+];
 /// The sources, by id (`[lyrics] providers`) and name (shown in the page's credit and the settings),
 /// in the default order: word by word first.
 pub const PROVIDERS: &[(&str, &str)] =
@@ -75,13 +102,19 @@ const KEEP_FILES: usize = 300;
 pub type Words = Vec<(u32, String)>;
 type Lines = Vec<Line>;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Line {
     pub ms: u32,
     pub text: String,
     /// Each word with its own time and the spaces after it; empty when the line is timed as a whole.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Words,
+    /// Translations that came with the lyrics (TTML), as (language tag, text).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub translations: Vec<(String, String)>,
+    /// The translation shown with the line (set when shown, never cached with the lines).
+    #[serde(skip)]
+    pub translation: Option<String>,
 }
 
 /// The synced lines of the track `key` (`track_key`), as shown: offset, and with estimated word times
@@ -92,6 +125,8 @@ pub struct Synced {
     /// The source's name.
     pub source: &'static str,
     pub estimated: bool,
+    /// The translation's source, when the lines carry one (`Line::translation`).
+    pub translated: Option<&'static str>,
 }
 
 /// The lines of the current track as the source gave them.
@@ -99,6 +134,14 @@ struct Found {
     key: String,
     id: Option<String>,
     lines: Lines,
+    source: &'static str,
+    translation: Option<Translated>,
+}
+
+/// A translation of the found lines, one entry per line.
+struct Translated {
+    lang: String,
+    lines: Vec<Option<String>>,
     source: &'static str,
 }
 
@@ -143,6 +186,16 @@ struct Entry {
     /// The sources asked, for a "not found".
     #[serde(default)]
     tried: Vec<String>,
+    /// Translations of `lines` from Unison, one per language.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    translations: Vec<CachedTranslation>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedTranslation {
+    lang: String,
+    /// One per line; `None`: the line needs none.
+    lines: Vec<Option<String>>,
 }
 
 /// `page`: the `synced_lyrics` plugin is on, so the page gets the lines too.
@@ -178,13 +231,160 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
             lookup(&agent, &dir, &state.track, &providers, |lines, source| {
                 // The track may have changed during the requests.
                 if app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current) {
-                    *app.state::<Lyrics>().found.lock().unwrap() =
-                        Some(Found { key: current.clone(), id: state.track.id.clone(), lines, source });
+                    *app.state::<Lyrics>().found.lock().unwrap() = Some(Found {
+                        key: current.clone(),
+                        id: state.track.id.clone(),
+                        lines,
+                        source,
+                        translation: None,
+                    });
                     publish(&app);
                 }
             });
+            let target = translation_target(&app.state::<Live>().get());
+            if let Some(lang) = target {
+                translate(&app, &agent, &dir, &state.track, &current, &lang);
+            }
         }
     });
+}
+
+/// The language to translate lyrics to, when they are translated (`[lyrics] translate_to`).
+pub fn translation_target(s: &Settings) -> Option<String> {
+    if !s.plugin("lyrics_translation") {
+        return None;
+    }
+    match s.lyrics.translate_to.as_str() {
+        "off" => None,
+        "auto" => windows_language(),
+        code => TRANSLATION_LANGUAGES.iter().any(|(c, _)| *c == code).then(|| code.to_owned()),
+    }
+}
+
+/// The language of Windows' regional format (Settings > Time & language), as an ISO 639 code.
+fn windows_language() -> Option<String> {
+    let mut buf = [0u16; 85];
+    let mut size = (buf.len() * 2) as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Control Panel\International"),
+            w!("LocaleName"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if result.is_err() {
+        return None;
+    }
+    let name = String::from_utf16_lossy(&buf[..(size as usize / 2).min(buf.len())]);
+    let lang = name.trim_end_matches('\0').split(['-', '_']).next()?.to_ascii_lowercase();
+    ((2..=3).contains(&lang.len()) && lang.bytes().all(|b| b.is_ascii_lowercase())).then_some(lang)
+}
+
+/// Finds a translation into `lang` of the current lines (track `key`) and shows it: the source's own
+/// when it covers half the lines, else the cached one, else Unison's.
+fn translate(app: &AppHandle, agent: &ureq::Agent, dir: &Path, track: &Track, key: &str, lang: &str) {
+    let found = app.state::<Lyrics>().found.lock().unwrap().as_ref().filter(|f| f.key == key).map(|f| {
+        let own = own_translation(&f.lines, lang);
+        (f.lines.clone(), f.source, own)
+    });
+    let Some((lines, source, own)) = found else { return };
+    let translated = match own {
+        Some(own) => Translated { lang: lang.to_owned(), lines: own, source },
+        None => {
+            let file = cache_file(dir, track, track.duration.round() as u32);
+            let Some(machine) = machine_translation(agent, &file, &lines, lang) else { return };
+            Translated { lang: lang.to_owned(), lines: machine, source: "Unison" }
+        }
+    };
+    let lyrics = app.state::<Lyrics>();
+    if let Some(f) = lyrics.found.lock().unwrap().as_mut().filter(|f| f.key == key && f.lines.len() == lines.len()) {
+        f.translation = Some(translated);
+    } else {
+        return;
+    }
+    publish(app);
+}
+
+fn same_language(tag: &str, lang: &str) -> bool {
+    tag.split(['-', '_']).next().is_some_and(|t| t.eq_ignore_ascii_case(lang))
+}
+
+/// The translation into `lang` that came with the lines, when it covers at least half the sung ones.
+fn own_translation(lines: &[Line], lang: &str) -> Option<Vec<Option<String>>> {
+    let out: Vec<Option<String>> = lines
+        .iter()
+        .map(|l| l.translations.iter().find(|(tag, _)| same_language(tag, lang)).map(|(_, t)| t.clone()))
+        .collect();
+    let sung = lines.iter().filter(|l| !l.text.trim().is_empty()).count();
+    let covered = out.iter().filter(|t| t.is_some()).count();
+    (covered > 0 && covered * 2 >= sung).then_some(out)
+}
+
+/// Unison's translation of the lines, from the cache entry `file` when it has one for `lang`.
+fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &str) -> Option<Vec<Option<String>>> {
+    let mut entry = read_entry(file);
+    if let Some(t) =
+        entry.as_ref().and_then(|e| e.translations.iter().find(|t| t.lang == lang && t.lines.len() == lines.len()))
+    {
+        return Some(t.lines.clone());
+    }
+    let out = match unison_translate(agent, lines, lang) {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!("lyrics: translation: {e}");
+            return None;
+        }
+    };
+    // Kept only with the very lines it translates.
+    if let Some(entry) = entry.as_mut().filter(|e| e.lines.as_ref().is_some_and(|l| l.len() == lines.len())) {
+        entry.translations.retain(|t| t.lang != lang);
+        entry.translations.push(CachedTranslation { lang: lang.to_owned(), lines: out.clone() });
+        write_entry(file, entry);
+    }
+    Some(out)
+}
+
+/// `POST /translate` on Unison, `TRANSLATE_CHUNK` lines at a time: one entry per line, `None` where the
+/// line needs no translation (blank, or already in `lang`). A 400 (nothing to translate, or the language
+/// not found) is no translation.
+fn unison_translate(agent: &ureq::Agent, lines: &[Line], lang: &str) -> Result<Vec<Option<String>>, String> {
+    let mut out = Vec::with_capacity(lines.len());
+    for chunk in lines.chunks(TRANSLATE_CHUNK) {
+        let texts: Vec<&str> = chunk.iter().map(|l| l.text.as_str()).collect();
+        let body = json!({ "lines": texts, "to": lang }).to_string();
+        let answer: Value = match agent.post(UNISON_TRANSLATE).header("content-type", "application/json").send(body) {
+            Ok(mut response) => {
+                let bytes =
+                    response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(|e| e.to_string())?;
+                serde_json::from_slice(&bytes).map_err(|e| format!("unreadable answer: {e}"))?
+            }
+            Err(ureq::Error::StatusCode(400)) => {
+                out.extend(chunk.iter().map(|_| None));
+                continue;
+            }
+            Err(e) => return Err(format!("request failed: {e}")),
+        };
+        let items = answer
+            .get("lines")
+            .and_then(Value::as_array)
+            .filter(|a| a.len() == chunk.len())
+            .ok_or("lines do not match")?;
+        for (item, line) in items.iter().zip(chunk) {
+            let wanted = item.get("needsTranslation").and_then(Value::as_bool) == Some(true);
+            let text = item.get("translation").and_then(Value::as_str).filter(|_| wanted).map(clean_text);
+            out.push(text.filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case(&line.text)));
+        }
+    }
+    Ok(out)
+}
+
+/// A line of text from a source: no control characters, trimmed and capped.
+fn clean_text(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(MAX_LINE_CHARS).collect()
 }
 
 /// The HTTP client of the sources: the platform's TLS and roots, our User-Agent, no redirects, 10 s.
@@ -210,22 +410,38 @@ pub fn republish(app: &AppHandle) {
 
 /// Applies the settings to the lines found and hands them to the page and the native views.
 fn publish(app: &AppHandle) {
-    let (estimate_words, offset) = {
+    let (estimate_words, offset, target) = {
         let s = app.state::<Live>();
         let s = s.get();
-        (s.lyrics.estimate_words, s.lyrics.offset_ms)
+        (s.lyrics.estimate_words, s.lyrics.offset_ms, translation_target(&s))
     };
     let lyrics = app.state::<Lyrics>();
     let synced = lyrics.found.lock().unwrap().as_ref().map(|f| {
         let mut lines = f.lines.clone();
         let estimated = estimate_words && estimate(&mut lines);
         shift(&mut lines, offset);
-        (f.id.clone(), Synced { key: f.key.clone(), lines, source: f.source, estimated })
+        let translation = f
+            .translation
+            .as_ref()
+            .filter(|t| target.as_deref() == Some(t.lang.as_str()) && t.lines.iter().any(Option::is_some));
+        if let Some(t) = translation {
+            for (line, text) in lines.iter_mut().zip(&t.lines) {
+                line.translation = text.clone();
+            }
+        }
+        let translated = translation.map(|t| t.source);
+        (f.id.clone(), Synced { key: f.key.clone(), lines, source: f.source, estimated, translated })
     });
     if lyrics.page.load(Ordering::Relaxed) {
         let payload = synced.as_ref().map_or(Value::Null, |(id, s)| {
             let lines: Vec<Value> = s.lines.iter().map(Line::to_json).collect();
-            json!({ "id": id, "lines": lines, "source": s.source, "estimated": s.estimated })
+            let mut payload = json!({ "id": id, "lines": lines, "source": s.source, "estimated": s.estimated });
+            if let Some(source) = s.translated {
+                let translation: Vec<Option<&str>> = s.lines.iter().map(|l| l.translation.as_deref()).collect();
+                payload["translation"] = json!(translation);
+                payload["translationSource"] = json!(source);
+            }
+            payload
         });
         crate::injections::send(app, "lyrics", &payload);
     }
@@ -304,7 +520,7 @@ fn lookup(
     let tried = providers.iter().zip(&answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
     let lines = shown.and_then(|b| lines_of(&answers, b).cloned());
     let source = shown.map_or(String::new(), |b| providers[b].to_string());
-    write_entry(&file, &Entry { at: now(), lines, source, tried: tried.collect() });
+    write_entry(&file, &Entry { at: now(), lines, source, tried: tried.collect(), translations: Vec::new() });
 }
 
 /// The source that wins among the answers so far: the first with word times, else the first with lines.
@@ -546,7 +762,7 @@ fn lrcmux(agent: &ureq::Agent, track: &Track, duration: u32) -> Result<Option<Li
         let (text, words) =
             if words.is_empty() { make_words(vec![(at, text.to_owned())], false) } else { make_words(words, true) };
         if !text.is_empty() {
-            lines.push(Line { ms: at, text, words });
+            lines.push(Line { ms: at, text, words, ..Default::default() });
         }
     }
     lines.sort_by_key(|l| l.ms);
@@ -609,7 +825,7 @@ fn parse_lrc(text: &str) -> Lines {
         }
         let (text, words) = parse_words(rest);
         for ms in times {
-            lines.push(Line { ms, text: text.clone(), words: words.clone() });
+            lines.push(Line { ms, text: text.clone(), words: words.clone(), ..Default::default() });
         }
     }
     lines.sort_by_key(|l| l.ms);
@@ -749,15 +965,19 @@ fn unescape(s: &str) -> String {
 
 /// TTML lyrics into lines: each `<p begin>` is a line, each timed `<span begin>` in it a word (the text
 /// between spans, usually a space, goes with the word before). Background vocals
-/// (`<span ttm:role="x-bg">`) are left out.
+/// (`<span ttm:role="x-bg">`) are left out. Translations in its head (`<translation xml:lang>` with a
+/// `<text for="L1">` per line `<p itunes:key="L1">`) go to the lines' `translations`.
 fn parse_ttml(xml: &str) -> Lines {
     let mut lines: Lines = Vec::new();
+    // The key of each line, for its translations.
+    let mut keys: Vec<Option<&str>> = Vec::new();
     let mut rest = xml;
     while let Some(i) = rest.find("<p ").or_else(|| rest.find("<p>")) {
         rest = &rest[i..];
         let Some(open_end) = rest.find('>') else { break };
         let Some(close) = rest.find("</p>") else { break };
         let begin = attr(rest, "begin").and_then(parse_clock);
+        let key = attr(rest, "itunes:key").or_else(|| attr(rest, "lrc:key"));
         let inner = &rest[open_end + 1..close.max(open_end + 1)];
         rest = &rest[close + 4..];
         let Some(begin) = begin else { continue };
@@ -799,14 +1019,69 @@ fn parse_ttml(xml: &str) -> Lines {
         }
         let (text, words) = make_words(segments, timed);
         if !text.is_empty() {
-            lines.push(Line { ms: begin, text, words });
+            lines.push(Line { ms: begin, text, words, ..Default::default() });
+            keys.push(key);
         }
         if lines.len() >= MAX_LINES {
             break;
         }
     }
+    let mut languages = 0;
+    let mut rest = xml;
+    while let Some(i) = rest.find("<translation ") {
+        rest = &rest[i..];
+        let end = rest.find("</translation>").unwrap_or(rest.len());
+        let block = &rest[..end];
+        rest = &rest[end..];
+        let Some(lang) = attr(block, "xml:lang").filter(|l| !l.is_empty() && l.len() <= 35) else { continue };
+        let mut texts = block;
+        while let Some(j) = texts.find("<text ") {
+            texts = &texts[j..];
+            let Some(open_end) = texts.find('>') else { break };
+            let close = texts.find("</text>").unwrap_or(texts.len()).max(open_end + 1);
+            let key = attr(texts, "for");
+            let text = clean_text(&plain_text(&texts[open_end + 1..close]));
+            texts = &texts[close..];
+            if let Some(i) = key.and_then(|k| keys.iter().position(|l| *l == Some(k)))
+                && !text.is_empty()
+                && !text.eq_ignore_ascii_case(&lines[i].text)
+            {
+                lines[i].translations.push((lang.to_owned(), text));
+            }
+        }
+        languages += 1;
+        if languages >= MAX_TRANSLATIONS {
+            break;
+        }
+    }
     lines.sort_by_key(|l| l.ms);
     lines
+}
+
+/// The text of TTML markup without its tags and without background vocals.
+fn plain_text(markup: &str) -> String {
+    let mut out = String::new();
+    let mut spans: Vec<bool> = Vec::new();
+    let mut s = markup;
+    while !s.is_empty() {
+        if let Some(tag) = s.strip_prefix('<') {
+            let Some(end) = tag.find('>') else { break };
+            let body = &tag[..end];
+            if body.starts_with("/span") {
+                spans.pop();
+            } else if body.starts_with("span") && !body.ends_with('/') {
+                spans.push(spans.last().copied().unwrap_or(false) || body.contains("x-bg"));
+            }
+            s = &tag[end + 1..];
+        } else {
+            let end = s.find('<').unwrap_or(s.len());
+            if !spans.last().copied().unwrap_or(false) {
+                out.push_str(&unescape(&s[..end]));
+            }
+            s = &s[end..];
+        }
+    }
+    out
 }
 
 /// Moves every time by `offset` ms (positive: later), never before 0.
@@ -965,9 +1240,9 @@ mod tests {
     #[test]
     fn estimated_words_add_up_to_the_line_and_stay_in_it() {
         let mut lines = vec![
-            Line { ms: 1000, text: "Hello there, my old friend".into(), words: Vec::new() },
-            Line { ms: 4000, text: "你好世界".into(), words: Vec::new() },
-            Line { ms: 30_000, text: "Solo".into(), words: Vec::new() },
+            Line { ms: 1000, text: "Hello there, my old friend".into(), ..Default::default() },
+            Line { ms: 4000, text: "你好世界".into(), ..Default::default() },
+            Line { ms: 30_000, text: "Solo".into(), ..Default::default() },
         ];
         assert!(estimate(&mut lines));
         let joined: String = lines[0].words.iter().map(|w| w.1.as_str()).collect();

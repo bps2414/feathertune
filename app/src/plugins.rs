@@ -198,6 +198,19 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
+        id: "lyrics_translation",
+        name: "Lyrics translation",
+        description: "A translation under each synced line (the line itself still lights word by word), in the \
+                      language chosen below: the source's own when it has one, else Unison's machine translation \
+                      made for lyrics (the lines' text is sent, nothing else). Lines already in that language get \
+                      none. Also on the floating lyrics and the mini player. One request per new track, cached \
+                      on disk.",
+        cost: "Not measured yet.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
         id: "ambient_mode",
         name: "Ambient mode",
         description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \

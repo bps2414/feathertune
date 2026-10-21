@@ -204,6 +204,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "all_providers": crate::lyrics::PROVIDERS.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect::<Vec<_>>(),
             "estimate_words": s.lyrics.estimate_words,
             "offset_ms": s.lyrics.offset_ms,
+            "translate_to": s.lyrics.translate_to,
         },
         "audio": {
             "eq_preset": s.audio.eq_preset,
@@ -230,7 +231,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
-/// `lyrics.estimate_words`, `lyrics.offset_ms`, `audio.eq_preset`, `audio.eq_bands`,
+/// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `audio.eq_preset`, `audio.eq_bands`,
 /// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer` or
 /// `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
@@ -258,6 +259,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 "navigation" => crate::titlebar::set_navigation(&app, on),
+                "lyrics_translation" => crate::lyrics::republish(&app),
                 id if crate::audio::PLUGINS.contains(&id) => crate::audio::push(&app),
                 _ => {}
             }
@@ -329,6 +331,16 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 .filter(|ms| (-5000..=5000).contains(ms))
                 .ok_or("a whole number of ms, from -5000 to 5000")?;
             live.write("lyrics", name, toml_edit::value(ms), None, false)?;
+            crate::lyrics::republish(&app);
+            Ok(false)
+        }
+        ("lyrics", "translate_to") => {
+            let lang = value.as_str().ok_or("expected a language")?;
+            if !["auto", "off"].contains(&lang) && !crate::lyrics::TRANSLATION_LANGUAGES.iter().any(|(c, _)| *c == lang)
+            {
+                return Err("unknown language".into());
+            }
+            live.write("lyrics", name, toml_edit::value(lang), None, false)?;
             crate::lyrics::republish(&app);
             Ok(false)
         }

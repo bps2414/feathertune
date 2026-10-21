@@ -1,5 +1,7 @@
-// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...], source, estimated } for the current
-// track, or null (the track changed, or no source has any). `estimated`: the word times are a guess. In the site's Lyrics tab the timed lines replace the site's own text
+// Synced lyrics. Rust sends { id, lines: [[ms, text, words?], ...], source, estimated, translation?,
+// translationSource? } for the current track, or null (the track changed, or no source has any).
+// `estimated`: the word times are a guess. `translation` has one text (or null) per line, shown under
+// it in a smaller type; it lights with its line as a whole, never word by word. In the site's Lyrics tab the timed lines replace the site's own text
 // and the current line follows the <video> time; when a line has words ([[ms, text], ...]), they light up
 // one by one in the current line. Lines fade with their distance from the current one (`data-d`), and a
 // click on a line seeks the <video> to it. While the song plays and the window is in front, the list scrolls
@@ -15,6 +17,7 @@ const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const MAX_LINES = 2000;
 const MAX_WORDS = 100;
+const MAX_TRANSLATION_CHARS = 600;
 const MANUAL_SCROLL_MS = 4000;
 // How fast the scroll catches up with where it should be (seconds to cover about two thirds of the way).
 const FOLLOW_S = 0.25;
@@ -26,8 +29,8 @@ const MOVE_BEFORE_MAX_MS = 1600;
 const MOVE_AFTER = 0.45;
 const MOVE_AFTER_MAX_MS = 1800;
 
-let lines = null; // [{ ms, text }], sorted by ms
-let meta = { source: '', estimated: false };
+let lines = null; // [{ ms, text, words?, translation? }], sorted by ms
+let meta = { source: '', estimated: false, translationSource: '' };
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let current = -1;
@@ -54,7 +57,11 @@ const valid = (data) =>
   data.lines.every(
     (l) =>
       timed(l) && (l[2] === undefined || (Array.isArray(l[2]) && l[2].length <= MAX_WORDS && l[2].every(timed))),
-  );
+  ) &&
+  (data.translation === undefined ||
+    (Array.isArray(data.translation) &&
+      data.translation.length === data.lines.length &&
+      data.translation.every((t) => t === null || (typeof t === 'string' && t.length <= MAX_TRANSLATION_CHARS))));
 
 const clear = () => {
   lines = null;
@@ -97,12 +104,21 @@ const build = () => {
     } else {
       el.textContent = l.text;
     }
+    // After the words, so a word's index is still its child's.
+    if (l.translation) {
+      const tr = document.createElement('span');
+      tr.className = 'ft-tr';
+      tr.textContent = l.translation;
+      el.append(tr);
+    }
     box.append(el);
     return el;
   });
   const credit = document.createElement('p');
   credit.className = 'ft-credit';
-  credit.textContent = `Synced lyrics: ${meta.source}${meta.estimated ? ' · word timing estimated' : ''}`;
+  credit.textContent =
+    `Synced lyrics: ${meta.source}${meta.estimated ? ' · word timing estimated' : ''}` +
+    (meta.translationSource ? ` · Translation: ${meta.translationSource}` : '');
   box.append(credit);
   current = -1;
   sung = -1;
@@ -297,8 +313,15 @@ feathertune.lyrics = Object.freeze({
     meta = {
       source: typeof data.source === 'string' ? data.source.slice(0, 40) : '',
       estimated: data.estimated === true,
+      translationSource:
+        data.translation && typeof data.translationSource === 'string' ? data.translationSource.slice(0, 40) : '',
     };
-    lines = data.lines.map(([ms, text, words]) => ({ ms, text, words: words?.map(([ms, text]) => ({ ms, text })) }));
+    lines = data.lines.map(([ms, text, words], i) => ({
+      ms,
+      text,
+      words: words?.map(([ms, text]) => ({ ms, text })),
+      translation: data.translation?.[i] ?? null,
+    }));
     refresh();
   },
 });

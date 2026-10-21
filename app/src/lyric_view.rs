@@ -1,5 +1,7 @@
 //! The current line of the synced lyrics, lit word by word when the entry has word times, and the next
-//! one dimmer: shared by the floating lyrics (desktop_lyrics.rs) and the mini player's lyrics.
+//! one dimmer: shared by the floating lyrics (desktop_lyrics.rs) and the mini player's lyrics. When the
+//! lyrics are translated (`Synced::translated`) the current line's translation takes the next line's
+//! place, and a line change fades and slides instead of rolling the next line up.
 //!
 //! - Fed by the `Player` state and the lines of `lyrics::Lyrics`. The time is `State::position_now()`
 //!   with the page's 250 ms lead, so it changes lines with the site's Lyrics tab.
@@ -53,7 +55,9 @@ struct Shown {
     index: isize,
     word: isize,
     current: Option<Text>,
+    /// The next line, or the current one's translation when `translated`.
     next: Option<IDWriteTextLayout>,
+    translated: bool,
 }
 
 pub struct View {
@@ -138,9 +142,9 @@ impl View {
         })
     }
 
-    fn next_layout(&self, line: Option<&Line>) -> Option<IDWriteTextLayout> {
-        let line = line.filter(|l| !l.text.is_empty())?;
-        gfx::text_layout(&line.text, &self.next_format, self.width, self.next_height).ok()
+    fn next_layout(&self, text: Option<&str>) -> Option<IDWriteTextLayout> {
+        let text = text.filter(|t| !t.is_empty())?;
+        gfx::text_layout(text, &self.next_format, self.width, self.next_height).ok()
     }
 
     /// Brings the content up to date with the player and the lyrics. While paused the content is
@@ -159,12 +163,19 @@ impl View {
             let same_line = self.shown.as_ref().is_some_and(|s| s.key == synced.key && s.index == index);
             if !same_line {
                 let line = usize::try_from(index).ok().map(|i| &lines[i]);
+                let translated = synced.translated.is_some();
+                let next = if translated {
+                    line.and_then(|l| l.translation.as_deref())
+                } else {
+                    lines.get((index + 1) as usize).map(|l| l.text.as_str())
+                };
                 let shown = Shown {
                     key: synced.key.clone(),
                     index,
                     word,
                     current: line.and_then(|l| self.text(l, word)),
-                    next: self.next_layout(lines.get((index + 1) as usize)),
+                    next: self.next_layout(next),
+                    translated,
                 };
                 // Only a line change within the track rolls; a new track just appears.
                 let old = self.shown.replace(shown).filter(|s| s.key == synced.key);
@@ -223,8 +234,12 @@ impl View {
             paint(c, shown, &style, Motion::still());
             return;
         };
-        // How far the new line rises: from where the old next line sat to its own place.
-        let rise = shown.current.as_ref().map_or(SLIDE, |text| style.next_top - style.top - text.offset).max(0.0);
+        // How far the new line rises: from where the old next line sat to its own place (a translation
+        // below is not the line that comes, so then it only slides).
+        let rise = match shown.current.as_ref() {
+            Some(text) if !shown.translated => (style.next_top - style.top - text.offset).max(0.0),
+            _ => SLIDE,
+        };
         let fade_out = (1.0 - t).powi(3);
         let old_motion = Motion { current: (fade_out, -SLIDE * t), next: (1.0 - t, -rise * t) };
         paint(c, old, &style, old_motion);

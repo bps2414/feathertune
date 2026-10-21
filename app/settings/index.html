@@ -74,6 +74,23 @@
         </div>
         <label>Timing offset, ms (positive: later) <input data-key="lyrics.offset_ms" type="number" step="50" min="-5000" max="5000"></label>
       </div>
+      <div class="card" data-plugin="lyrics_translation">
+        <label>Translate to
+          <select data-key="lyrics.translate_to">
+            <option value="auto">Windows language</option>
+            <option value="off">Off</option>
+            <option value="pt">Português</option>
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="it">Italiano</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+          </select>
+        </label>
+        <p class="hint">A new language applies from the next track. Off hides the translation at once.</p>
+      </div>
       <div class="card" data-plugin="desktop_lyrics">
         <div class="actions">
           <button id="desktop-lyrics" type="button" class="secondary">Show floating lyrics</button>

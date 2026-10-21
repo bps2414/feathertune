@@ -55,6 +55,21 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   text-shadow: 0 0 22px color-mix(in srgb, var(--feathertune-accent, #fff) 70%, transparent);
 }
 
+/* A translation under its line: smaller and lighter, lit with the line as a whole (not word by word). */
+#feathertune-lyrics .ft-line .ft-tr {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.6em;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-tr {
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: none;
+}
+
 #feathertune-lyrics .ft-credit {
   margin: 32px 0 0;
   font-size: 14px;

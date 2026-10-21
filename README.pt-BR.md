@@ -21,6 +21,7 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
 - Letras sincronizadas na aba Letra do site, de quatro fontes abertas (Better Lyrics, Unison, lrcmux, LRCLIB), preferindo as sincronizadas palavra por palavra: linhas e palavras acendem conforme são cantadas (o tempo das palavras é estimado pelo ritmo da música quando nenhuma fonte o tem), uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
+- Tradução da letra: uma tradução linha a linha embaixo de cada linha (no idioma do Windows por padrão), a da própria fonte quando ela tem, senão uma tradução automática feita para letras; também na letra flutuante e no mini player.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
@@ -75,6 +76,7 @@ mini_player = true
 animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
 album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
 synced_lyrics = true          # letras sincronizadas na aba Letra, rolando no ritmo; algumas requisições por faixa nova, com cache
+lyrics_translation = true     # uma tradução embaixo de cada linha da letra; uma requisição por faixa nova, com cache
 ambient_mode = true           # capa desfocada e brilhante atrás do site
 taskbar_controls = true       # botões na miniatura da barra de tarefas, progresso no botão da barra
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
@@ -111,6 +113,7 @@ api_secret = ""
 providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # fontes de letras; as palavra por palavra vencem, depois esta ordem
 estimate_words = true        # estima o tempo das palavras quando a fonte só marca linhas inteiras
 offset_ms = 0                # move a letra no tempo; positivo: mais tarde
+translate_to = "auto"        # idioma da tradução: auto (idioma do Windows), off, pt, en, es, fr, de, it, ja, ko
 
 [audio]                      # a aba Áudio; os mixes ficam em mixes/<playlist>.json no perfil (aba Experimental)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom

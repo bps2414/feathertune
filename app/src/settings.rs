@@ -26,6 +26,7 @@
 //! providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # word-timed ones win, then this order
 //! estimate_words = true            # word times for lines timed only as a whole
 //! offset_ms = 0                    # moves the lyrics in time; positive: later
+//! translate_to = "auto"            # a line-by-line translation: auto (Windows' language), off, pt, en, es...
 //!
 //! [audio]                          # the audio plugins (Audio tab); every effect is bypassed during ads
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
@@ -110,6 +111,8 @@ pub struct LyricsSettings {
     pub providers: Vec<String>,
     pub estimate_words: bool,
     pub offset_ms: i32,
+    /// "auto" (Windows' language), "off" or a code of `lyrics::TRANSLATION_LANGUAGES`.
+    pub translate_to: String,
 }
 
 impl Default for LyricsSettings {
@@ -118,6 +121,7 @@ impl Default for LyricsSettings {
             providers: crate::lyrics::PROVIDERS.iter().map(|(id, _)| id.to_string()).collect(),
             estimate_words: true,
             offset_ms: 0,
+            translate_to: "auto".into(),
         }
     }
 }

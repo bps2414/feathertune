@@ -21,6 +21,7 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
 - Time-synced lyrics in the site's Lyrics tab from four open sources (Better Lyrics, Unison, lrcmux, LRCLIB), preferring lyrics timed word by word: lines and words light up as they are sung (word times are estimated from the song's pace when no source has them), cross-fade into each other, and the list scrolls slowly in time with the song.
+- Lyrics translation: a line-by-line translation under each lyric line (into Windows' language by default), the source's own when it has one, else a machine translation made for lyrics; also on the floating lyrics and the mini player.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
@@ -75,6 +76,7 @@ mini_player = true
 animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
 album_color = true            # title bar, mini player and site take the cover's colors (once per track)
 synced_lyrics = true          # time-synced lyrics in the Lyrics tab, scrolling in time; a few requests per new track, cached
+lyrics_translation = true     # a translation under each lyric line; one request per new track, cached
 ambient_mode = true           # blurred, glowing cover behind the site
 taskbar_controls = true       # buttons on the taskbar thumbnail, progress on the taskbar button
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
@@ -111,6 +113,7 @@ api_secret = ""
 providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # synced lyrics sources; word-timed ones win, then this order
 estimate_words = true        # guess word times when a source times whole lines only
 offset_ms = 0                # moves the lyrics in time; positive: later
+translate_to = "auto"        # translation language: auto (Windows' language), off, pt, en, es, fr, de, it, ja, ko
 
 [audio]                      # the Audio tab; mixes are in mixes/<playlist>.json in the profile (Experimental tab)
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom

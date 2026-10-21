@@ -231,7 +231,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 
 - The What's new tab opening after a real update from 0.1.7 (installed copy), and the settings sidebar at 150% scaling and in a narrow window.
 - With a real mouse: snap layouts, dragging, resizing and maximize/restore, at 150% scaling and on a second monitor; typing in the site after switching windows.
-- Discord Rich Presence and a real Last.fm sign-in and scrobble, including on a CI build with the embedded key.
+- Discord Rich Presence and a real Last.fm sign-in and scrobble, including on a CI build with the embedded key and application id (`FEATHERTUNE_DISCORD_CLIENT_ID`, a repository secret like the Last.fm keys).
 - "Start with Windows" writing its Run entry; the track toast being seen.
 - The "delete data" uninstall path.
 - The 0.7 s color flow between covers, light-mode Windows, an LRCLIB miss, and a reload keeping the theme and lyrics.

@@ -69,7 +69,7 @@ controls = true              # módulo da página que aperta os botões do playe
 tracker_filter = true        # bloqueia requisições de analytics de terceiros; nunca anúncios (docs/DESIGN.pt-BR.md)
 track_notifications = true   # aviso na troca de faixa, só com a janela escondida
 global_shortcuts = true
-discord = true               # também precisa do client_id abaixo
+discord = true               # um release já traz um id; senão precisa do client_id abaixo
 lastfm = true                # também precisa conectar a conta
 mini_player = true
 animated_title_bar = true     # cores derivando devagar; pausa escondida, minimizada ou em segundo plano
@@ -101,7 +101,7 @@ volume_up = ""               # volume +2% (5% sem precise_volume)
 volume_down = ""
 
 [discord]
-client_id = ""               # o id do seu próprio aplicativo do Discord
+client_id = ""               # um release já traz o seu; ponha o seu para usá-lo (ou num build local)
 
 [lastfm]
 api_key = ""                 # opcional: os builds de release trazem uma chave própria; estes valores têm prioridade

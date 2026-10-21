@@ -1,6 +1,7 @@
 //! Discord Rich Presence: "Listening to YouTube Music" with the title, the artist, the album on the
 //! artwork, the site's icon, a time bar, links on the title, the artist and the artwork, and a button
-//! to open the track; cleared on pause. Off while `[discord] client_id` is empty. Discord shows the
+//! to open the track; cleared on pause. The application id is `[discord] client_id`, else the one a CI
+//! release is built with (`FEATHERTUNE_DISCORD_CLIENT_ID`, a repository secret); off with neither. Discord shows the
 //! activity name only where it honors `name`; elsewhere it is the name of the Discord application.
 //!
 //! Failures are silent: if Discord is not running the connection is simply tried again at the next
@@ -22,9 +23,15 @@ const SITE: &str = "https://music.youtube.com";
 const ICON: &str = "https://music.youtube.com/img/favicon_144.png";
 /// Discord rejects longer URLs.
 const MAX_URL: usize = 256;
+const BUILT_IN_ID: Option<&str> = option_env!("FEATHERTUNE_DISCORD_CLIENT_ID");
+/// This build carries an application id of its own.
+pub const BUILT_IN: bool = matches!(BUILT_IN_ID, Some(id) if !id.is_empty());
 
 pub fn start(app: &AppHandle, client_id: &str) {
-    let client_id = client_id.trim();
+    let client_id = match client_id.trim() {
+        "" => BUILT_IN_ID.unwrap_or_default().trim(),
+        id => id,
+    };
     if client_id.is_empty() {
         return;
     }

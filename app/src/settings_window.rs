@@ -190,7 +190,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "volume_up": s.shortcuts.volume_up,
             "volume_down": s.shortcuts.volume_down,
         },
-        "discord": { "client_id": s.discord.client_id },
+        "discord": { "client_id": s.discord.client_id, "built_in": crate::discord::BUILT_IN },
         "lastfm": {
             "api_key": s.lastfm.api_key,
             "api_secret": s.lastfm.api_secret,

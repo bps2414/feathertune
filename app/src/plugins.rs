@@ -74,7 +74,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "discord",
         name: "Discord Rich Presence",
-        description: "Shows the track on Discord with its artwork, links and a time bar. Needs your Discord application id below.",
+        description: "Shows the track on Discord with its artwork, links and a time bar. Release builds carry an application id; others need yours below.",
         cost: "Inside the noise (3 runs), but the profile had no application id, so nothing ran: one idle thread, a \
                local message to Discord per track (not measured with an id).",
         default_on: true,

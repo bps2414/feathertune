@@ -711,6 +711,9 @@ const load = async () => {
     renderChangelog(s.changelog, s.updated_from);
     renderPlugins(s.plugins);
     renderLastFm(s.lastfm);
+    $('discord-id').textContent = s.discord.built_in
+      ? 'Optional: this build has its own; an id typed here takes its place.'
+      : 'Rich Presence is off while this is empty.';
     renderDesktopLyrics(s.desktop_lyrics);
     renderAudio(s.audio);
     // The Mix tab, and a pair the site asked to open (mix_open).

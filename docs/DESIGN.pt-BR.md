@@ -231,7 +231,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 
 - A aba What's new abrindo depois de uma atualização real a partir da 0.1.7 (cópia instalada), e a barra lateral das configurações em 150% de escala e numa janela estreita.
 - Com mouse de verdade: snap layouts, arrastar, redimensionar e maximizar/restaurar, em 150% de escala e num segundo monitor; digitar no site depois de trocar de janela.
-- Discord Rich Presence e um login e scrobble reais no Last.fm, inclusive num build da CI com a chave embutida.
+- Discord Rich Presence e um login e scrobble reais no Last.fm, inclusive num build da CI com a chave e o id de aplicativo embutidos (`FEATHERTUNE_DISCORD_CLIENT_ID`, um secret do repositório como as chaves do Last.fm).
 - "Start with Windows" gravando a entrada Run; o aviso de faixa sendo visto.
 - O caminho "apagar dados" do desinstalador.
 - A transição de 0,7 s entre capas, o Windows em modo claro, uma falta no LRCLIB, e um recarregamento mantendo tema e letras.

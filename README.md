@@ -69,7 +69,7 @@ controls = true              # page module that presses the player's buttons
 tracker_filter = true        # blocks third-party analytics requests; never ads (docs/DESIGN.md)
 track_notifications = true   # toast on track change, only while the window is hidden
 global_shortcuts = true
-discord = true               # also needs client_id below
+discord = true               # a release has an id; otherwise needs client_id below
 lastfm = true                # also needs your account connected
 mini_player = true
 animated_title_bar = true     # slow color drift; pauses when hidden, minimized or in the background
@@ -101,7 +101,7 @@ volume_up = ""               # volume up by 2% (5% without precise_volume)
 volume_down = ""
 
 [discord]
-client_id = ""               # your own Discord application id
+client_id = ""               # a release has its own; set yours to use it instead (or in a local build)
 
 [lastfm]
 api_key = ""                 # optional: release builds carry their own key; these values take priority

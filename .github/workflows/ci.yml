@@ -55,12 +55,13 @@ jobs:
         with:
           workspaces: app
           key: dist
-      # The release's own Last.fm API keys (lastfm.rs reads them with option_env!). Empty in forks,
-      # where the build works as before: keys go in config.toml.
+      # The release's own Last.fm API keys and Discord application id (lastfm.rs, discord.rs read them
+      # with option_env!). Empty in forks, where the build works as before: they go in config.toml.
       - run: npx --yes @tauri-apps/cli@2.12.3 build -- --profile dist --locked
         env:
           FEATHERTUNE_LASTFM_API_KEY: ${{ secrets.FEATHERTUNE_LASTFM_API_KEY }}
           FEATHERTUNE_LASTFM_API_SECRET: ${{ secrets.FEATHERTUNE_LASTFM_API_SECRET }}
+          FEATHERTUNE_DISCORD_CLIENT_ID: ${{ secrets.FEATHERTUNE_DISCORD_CLIENT_ID }}
       - uses: actions/upload-artifact@v7
         with:
           name: feathertune-${{ github.sha }}

@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.2 — 2026-10-21
+
+- **Discord Rich Presence funciona sem configurar nada.** O release traz o próprio id de aplicativo do Discord; um id digitado nas configurações continua tendo prioridade.
+
 ## 0.2.1 — 2026-10-21
 
 - **A janela abre depois da tela de abertura, maximizada.** Ela podia ficar na bandeja, ou aparecer no tamanho normal quando estava maximizada.

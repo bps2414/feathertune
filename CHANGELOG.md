@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.2 — 2026-10-21
+
+- **Discord Rich Presence works out of the box.** The release carries its own Discord application id, so there is nothing to set up; an id typed in the settings still takes its place.
+
 ## 0.2.1 — 2026-10-21
 
 - **The window opens after the start screen, maximized.** It could stay in the tray, or come up at its normal size when it had been maximized.

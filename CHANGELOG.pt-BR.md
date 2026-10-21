@@ -2,6 +2,14 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.6 — 2026-10-21
+
+- **A letra sincronizada não some mais depois de trocar de faixa.** Numa troca automática de faixa ou depois de um anúncio a letra era buscada com a duração errada, então nenhuma fonte batia e a faixa ficava sem letra sincronizada até ser tocada de novo. Agora a busca espera os dados da faixa assentarem, busca de novo se a duração mudar, e uma busca lenta não segura mais a próxima faixa.
+- **Traduções chegam antes.** Não esperam mais a fonte de letra mais lenta.
+- **Aba Letra mais suave.** Acabou o engasgo quando a próxima linha acende e o scroll estaciona, e o scroll desliza sem degraus de 1 pixel.
+- **Modo jogo.** Um botão de controle na barra de título desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar); um segundo clique traz tudo de volta.
+- **Exportar diagnóstico** (Configurações > Advanced): um arquivo de texto com o que o app fez, para mandar quando algo der errado.
+
 ## 0.2.5 — 2026-10-21
 
 - **Letra palavra por palavra em músicas rápidas.** As palavras acendem na hora em que são cantadas, também com a janela fora de foco, e palavras rápidas acendem de uma vez em vez de surgirem atrás da voz. A aba Letra rola num ritmo constante pelas linhas rápidas em vez de parar a cada uma, e não fica mais atrás da linha atual.

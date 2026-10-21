@@ -859,6 +859,7 @@ for (const [id, name] of [
   });
 }
 $('stats-export').addEventListener('click', () => action('stats_export'));
+$('diagnostics-export').addEventListener('click', () => action('diagnostics_export'));
 $('stats-clear').addEventListener('click', async () => {
   if (!confirm(t('Delete the whole listening history? This cannot be undone.'))) return;
   await action('stats_clear');

@@ -2,6 +2,14 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.6 — 2026-10-21
+
+- **Synced lyrics no longer go missing after a track change.** At an automatic track change or after an ad the lyrics were looked up with the wrong song length, so no source matched and the track stayed without synced lyrics until it was played again. The lookup now waits until the track's details settle, asks again if the length changes, and a slow lookup no longer holds up the next track.
+- **Translations come sooner.** They no longer wait for the slowest lyrics source.
+- **Smoother Lyrics tab.** The stutter when the next line lights up and the scroll comes to rest is gone, and the scroll glides without 1-pixel steps.
+- **Game mode.** A controller button on the title bar turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, the floating and share lyrics windows); a second click brings them back.
+- **Export diagnostics** (Settings > Advanced): a text file with what the app did, to send when something goes wrong.
+
 ## 0.2.5 — 2026-10-21
 
 - **Word-by-word lyrics on fast songs.** Words light right when they are sung, also with the window not in front, and fast words light at once instead of fading in behind the voice. The Lyrics tab scrolls at a steady pace through fast lines instead of stopping at each one, and no longer trails the current line.

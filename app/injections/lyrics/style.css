@@ -7,8 +7,23 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   display: none;
 }
 
+/* Scrolling moves layers instead of painting the blurred text again each frame (on a 100% scale
+   display Chromium would otherwise scroll by repainting). The box is its own layer so the scroll loop
+   can add the part of a pixel that scrollTop cannot hold (page.js), and the lines near the current
+   one (`data-d`) are layers before they light up, so the cross-fade and the scale run on the
+   compositor without making and dropping a layer at each line switch. */
+ytmusic-tab-renderer[data-feathertune-lyrics] {
+  will-change: scroll-position;
+}
+
 #feathertune-lyrics {
   padding: 32px 24px 50vh;
+  will-change: transform;
+}
+
+#feathertune-lyrics .ft-line[data-d],
+#feathertune-lyrics .ft-line.ft-current {
+  will-change: transform;
 }
 
 #feathertune-lyrics .ft-line {
@@ -50,9 +65,10 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   color: rgba(255, 255, 255, 0.5);
 }
 
+/* Sung words keep the line's glow (inherited): a blur of their own per word repainted the whole line
+   at every word. */
 #feathertune-lyrics .ft-line.ft-current .ft-sung {
   color: #fff;
-  text-shadow: 0 0 22px color-mix(in srgb, var(--feathertune-accent, #fff) 70%, transparent);
 }
 
 /* A translation under its line: smaller and lighter, lit with the line as a whole (not word by word). */
@@ -78,12 +94,16 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
 
 /* A line leaves slowly (it and its sung words dim together) and the next one comes in a little faster:
    the transition is the one of the state a line goes to. */
-#feathertune-lyrics .ft-line,
-#feathertune-lyrics .ft-line span {
+#feathertune-lyrics .ft-line {
   transition:
     color 0.9s ease,
     text-shadow 0.9s ease,
     transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Words only fade their color; their glow follows the line's (no animation of their own). */
+#feathertune-lyrics .ft-line span {
+  transition: color 0.9s ease;
 }
 
 #feathertune-lyrics .ft-line.ft-current {
@@ -96,14 +116,10 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
 /* A sung word fades in over a share of its own length (`--ft-word`, set by the page), at most these, so
    fast words light at once instead of trailing the voice. */
 #feathertune-lyrics .ft-line.ft-current .ft-sung {
-  transition:
-    color min(0.25s, var(--ft-word, 0.25s)) ease,
-    text-shadow min(0.4s, var(--ft-word, 0.4s)) ease;
+  transition: color min(0.25s, var(--ft-word, 0.25s)) ease;
 }
 
 /* Estimated word times are a guess: the words light up more softly, so an early or late one jars less. */
 #feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-sung {
-  transition:
-    color min(0.45s, var(--ft-word, 0.45s)) ease,
-    text-shadow min(0.6s, var(--ft-word, 0.6s)) ease;
+  transition: color min(0.45s, var(--ft-word, 0.45s)) ease;
 }

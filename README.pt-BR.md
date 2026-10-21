@@ -30,6 +30,8 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.
 - Modo ambiente: a capa desfocada e brilhante atrás do site.
 - Botões de voltar e avançar na barra de título.
+- Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
+- Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
 - Modo música: escolhe a versão só áudio quando a faixa também tem vídeo, para o vídeo não ser decodificado.
 - Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
 - Pula faixas que começam já marcadas com "não gostei" (nunca durante um anúncio).

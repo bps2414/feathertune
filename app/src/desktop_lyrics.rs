@@ -62,6 +62,8 @@ const FILE: &str = "desktop-lyrics.json";
 /// The open window, 0 when closed. Only the main thread creates and destroys it.
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(true);
+/// Game mode closed it while it was open (`set_suspended`).
+static SUSPENDED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Deserialize, Default)]
 struct Saved {
@@ -126,6 +128,23 @@ pub fn close(app: &AppHandle) {
         if hwnd != 0 {
             let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
             save(&handle, |s| s.open = false);
+        }
+    });
+}
+
+/// Game mode (game_mode.rs): closes the window without saving that, and opens it again afterwards if
+/// it was open.
+pub fn set_suspended(app: &AppHandle, on: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if on {
+            let hwnd = WINDOW.load(Ordering::Relaxed);
+            SUSPENDED.store(hwnd != 0, Ordering::Relaxed);
+            if hwnd != 0 {
+                let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
+            }
+        } else if SUSPENDED.swap(false, Ordering::Relaxed) {
+            open(&handle);
         }
     });
 }

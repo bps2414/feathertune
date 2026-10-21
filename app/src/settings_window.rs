@@ -425,7 +425,8 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
 }
 
 /// Buttons: `lastfm_connect`, `lastfm_disconnect`, `mini_player`, `desktop_lyrics` (open or close),
-/// `desktop_lyrics_lock` (lock or unlock), `share_lyrics` (open), `stats_export`, `stats_clear`, `restart`.
+/// `desktop_lyrics_lock` (lock or unlock), `share_lyrics` (open), `stats_export`, `stats_clear`, `diagnostics_export`,
+/// `restart`.
 #[tauri::command]
 pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Result<(), String> {
     guard(&webview)?;
@@ -444,6 +445,11 @@ pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Resu
             app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string())?;
         }
         "stats_clear" => stats()?.clear()?,
+        "diagnostics_export" => {
+            let file = downloads()?.join("feathertune-diagnostics.txt");
+            std::fs::write(&file, crate::diag::report(&app)).map_err(|e| e.to_string())?;
+            app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string())?;
+        }
         // The single-instance lock is released on exit, before the new process starts.
         "restart" => {
             crate::stats::flush(&app);

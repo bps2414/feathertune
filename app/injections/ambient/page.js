@@ -59,7 +59,12 @@ const place = () => {
   halo.el.style.cssText = `left:${r.left + r.width / 2 - w / 2}px;top:${r.top + r.height / 2 - h / 2}px;width:${w}px;height:${h}px`;
 };
 
+// Game mode (Rust: `set({ off })`) takes the layers out, so nothing is blurred or drawn, and puts them
+// back with the current cover when it ends.
+let off = false;
+
 const update = () => {
+  if (off) return;
   const href = cover();
   if (href !== shown) {
     shown = href;
@@ -99,8 +104,26 @@ for (const type of ['loadedmetadata', 'play']) {
     true,
   );
 }
-window.addEventListener('resize', place);
+window.addEventListener('resize', () => off || place());
 document.addEventListener('visibilitychange', motion);
 window.addEventListener('focus', motion);
 window.addEventListener('blur', motion);
 motion();
+
+feathertune.ambient = Object.freeze({
+  set(data) {
+    const next = data?.off === true;
+    if (next === off) return;
+    off = next;
+    if (off) {
+      resizes.disconnect();
+      watched = null;
+      wrap.remove();
+      document.documentElement.removeAttribute('data-feathertune-ambient');
+      shown = null;
+    } else {
+      watch();
+      update();
+    }
+  },
+});

@@ -6,9 +6,11 @@
 //!
 //! - WM_NCHITTEST: the top resize border comes from tao; on the strip the caption buttons answer
 //!   HTMINBUTTON/HTMAXBUTTON/HTCLOSE (HTMAXBUTTON is what shows the Windows 11 snap layouts), the
-//!   share lyrics, mini player and settings buttons are client area and the rest is HTCAPTION (drag, Aero Snap,
-//!   double click maximizes, right click opens the system menu). The share lyrics button is there only while the
-//!   track has synced lyrics (`set_lyrics`, from lyrics.rs) and the `share_lyrics` plugin is on.
+//!   share lyrics, game mode, mini player and settings buttons are client area and the rest is HTCAPTION (drag,
+//!   Aero Snap, double click maximizes, right click opens the system menu). The share lyrics button is there only
+//!   while the track has synced lyrics (`set_lyrics`, from lyrics.rs) and the `share_lyrics` plugin is on; it takes
+//!   no room while hidden, so the others never move. The game mode button (a controller, game_mode.rs) keeps a
+//!   pill behind it while game mode is on.
 //! - With the `navigation` plugin, back and forward buttons sit left of the app name. They call the
 //!   WebView2's own `GoBack`/`GoForward` (no command on the page), are dimmed and inert when there is
 //!   nowhere to go (`CanGoBack`/`CanGoForward`, updated on `HistoryChanged`, which repaints only the
@@ -241,6 +243,7 @@ enum Button {
     Back,
     Forward,
     Share,
+    Game,
     MiniPlayer,
     Settings,
     Minimize,
@@ -542,6 +545,7 @@ impl TitleBar {
             Button::Forward if CAN_FORWARD.load(Ordering::Relaxed) => history(false),
             Button::Back | Button::Forward => {}
             Button::Share => crate::share_lyrics::open(self.window.app_handle()),
+            Button::Game => crate::game_mode::toggle(self.window.app_handle()),
             Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
             Button::Settings => crate::settings_window::open(self.window.app_handle()),
             Button::Minimize => command(SC_MINIMIZE),
@@ -675,6 +679,10 @@ impl TitleBar {
                 let right = left + button_width(button);
                 let r = rect(left, 0.0, right, HEIGHT);
                 let mut glyph = if enabled(button) { text } else { gfx::with_alpha(text, 0.3) };
+                let lit = button == Button::Game && crate::game_mode::is_on();
+                if lit && hover != Some(button) && pressed != Some(button) {
+                    c.pill(rect(left + 5.0, 4.0, right - 5.0, HEIGHT - 4.0), 7.0, gfx::with_alpha(full, 0.22));
+                }
                 if hover == Some(button) || pressed == Some(button) {
                     let down = pressed == Some(button);
                     let fill = match button {
@@ -690,6 +698,7 @@ impl TitleBar {
                     Button::Back => "\u{e72b}",
                     Button::Forward => "\u{e72a}",
                     Button::Share => "\u{e72d}",
+                    Button::Game => "\u{e7fc}",
                     Button::MiniPlayer => "\u{e8a7}",
                     Button::Settings => "\u{e713}",
                     Button::Minimize => "\u{e921}",
@@ -713,10 +722,11 @@ impl TitleBar {
     }
 }
 
-const BUTTONS: [Button; 8] = [
+const BUTTONS: [Button; 9] = [
     Button::Back,
     Button::Forward,
     Button::Share,
+    Button::Game,
     Button::MiniPlayer,
     Button::Settings,
     Button::Minimize,
@@ -724,9 +734,12 @@ const BUTTONS: [Button; 8] = [
     Button::Close,
 ];
 
+/// Our buttons on the right side, left to right.
+const RIGHT: [Button; 4] = [Button::Share, Button::Game, Button::MiniPlayer, Button::Settings];
+
 /// The buttons that are client area (ours), not caption buttons.
 fn ours(b: Button) -> bool {
-    matches!(b, Button::Back | Button::Forward | Button::Share | Button::MiniPlayer | Button::Settings)
+    matches!(b, Button::Back | Button::Forward | Button::Share | Button::Game | Button::MiniPlayer | Button::Settings)
 }
 
 /// The history buttons, on the left; every other button is on the right.
@@ -775,9 +788,11 @@ fn button_left(b: Button, width: f32) -> f32 {
     match b {
         Button::Back => NAV_LEFT,
         Button::Forward => NAV_LEFT + NAV,
-        Button::Share => width - 3.0 * BUTTON - GAP - 3.0 * SMALL,
-        Button::MiniPlayer => width - 3.0 * BUTTON - GAP - 2.0 * SMALL,
-        Button::Settings => width - 3.0 * BUTTON - GAP - SMALL,
+        // Each sits left of the ones after it in `RIGHT`, which are always shown.
+        Button::Share | Button::Game | Button::MiniPlayer | Button::Settings => {
+            let slot = RIGHT.len() - RIGHT.iter().position(|r| *r == b).unwrap_or(0);
+            width - 3.0 * BUTTON - GAP - slot as f32 * SMALL
+        }
         Button::Minimize => width - 3.0 * BUTTON,
         Button::Maximize => width - 2.0 * BUTTON,
         Button::Close => width - BUTTON,

@@ -87,6 +87,8 @@
   "Exponential (drops early)": "Exponencial (cai cedo)",
   "Export": "Exportar",
   "Export CSV": "Exportar CSV",
+  "Export diagnostics": "Exportar diagnóstico",
+  "Saves a text file to Downloads for reporting a problem: versions, settings and what the app did since it started (lyrics lookups, with the tracks played). Nothing is sent; you choose whom to send it to.": "Salva um arquivo de texto em Downloads para relatar um problema: versões, configurações e o que o app fez desde que abriu (buscas de letras, com as músicas tocadas). Nada é enviado; você escolhe para quem mandar.",
   "Extra Chromium features to turn off": "Recursos extras do Chromium para desligar",
   "Fade": "Fade",
   "Fade into the next track": "Fade de entrada na próxima faixa",

@@ -30,6 +30,8 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
 - Ambient mode: the blurred, glowing cover behind the site.
 - Back and forward buttons on the title bar.
+- Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
+- Export diagnostics (Settings > Advanced): a text file to send when something goes wrong.
 - Song mode: picks the song version when a track also has a video, so the video is not decoded.
 - Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
 - Skips tracks that start already marked "dislike" (never during an ad).

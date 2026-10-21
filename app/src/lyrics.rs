@@ -19,7 +19,11 @@
 //!     /api/get` (title, artist, album when known, duration); when it has no synced lyrics, `GET
 //!     /api/search` with the title cleaned of "(Official Video)", "feat. ..." and the like, and the best
 //!     entry whose artist and title match and whose length is within `MAX_DURATION_GAP` s.
-//! - It waits for the duration, which arrives a moment after the title.
+//! - It waits for the duration, which arrives a moment after the title, and for the title, artist and
+//!   duration to stay put for `SETTLE` (at a track change they arrive one after the other, the video
+//!   id with them). A duration that moves by more than `DURATION_CHANGE` is asked again, and a newer
+//!   ask makes an older one stale. Each lookup runs on its own thread, so a slow one never holds up
+//!   the next track. Every step goes to the diagnostics log (diag.rs).
 //! - Answers are cached in `lyrics-cache/` in the profile, one small JSON file per track, so a track
 //!   already seen costs no request. Lines with word times are kept while their source is on; lines timed
 //!   as a whole and "not found" for a week, and only for the same list of sources (a source may get
@@ -35,17 +39,19 @@
 //!   lyrics (desktop_lyrics.rs). The lookup runs when either plugin is on; the page gets the lines only
 //!   with `synced_lyrics` on.
 //! - Translation (plugin `lyrics_translation`, `[lyrics] translate_to`: "auto" is the language of
-//!   Windows' regional format, "off", or a code of `TRANSLATION_LANGUAGES`): once the lines are final,
-//!   a translation line by line into that language: the source's own (translations in its TTML, by
+//!   Windows' regional format, "off", or a code of `TRANSLATION_LANGUAGES`): once the lines are final
+//!   (or a better source is `UPGRADE_WAIT` late; done again if one replaces them), a translation line
+//!   by line into that language: the source's own (translations in its TTML, by
 //!   people) when it covers half the lines, else Unison's `POST /translate` (machine, made for lyrics;
 //!   only the lines' text and the language are sent). Cached with the lines, per language. Lines already
 //!   in that language get none. The page gets `translation: [text | null, ...]` (one per line), and
 //!   its source in `credit`; a new language applies from the next track, "off" at once.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -95,6 +101,13 @@ const NOT_FOUND_TTL: u64 = 7 * 24 * 3600;
 /// The cache holds at most this many files; over it, the oldest are removed down to `KEEP_FILES`.
 const MAX_FILES: usize = 400;
 const KEEP_FILES: usize = 300;
+/// A lookup starts once the track's title, artist and duration stayed put this long (they change one
+/// after the other at a track change).
+const SETTLE: Duration = Duration::from_millis(500);
+/// A duration that moves by more than this (seconds) for the same track is asked again.
+const DURATION_CHANGE: f64 = 2.0;
+/// Once lines are shown, the translation waits at most this long for a better source.
+const UPGRADE_WAIT: Duration = Duration::from_millis(2500);
 
 pub type Words = Vec<(u32, String)>;
 type Lines = Vec<Line>;
@@ -149,6 +162,8 @@ pub struct Lyrics {
     found: Mutex<Option<Found>>,
     /// The `synced_lyrics` plugin is on, so the page gets the lines too.
     page: AtomicBool,
+    /// Game mode holds the page's lines back.
+    paused: AtomicBool,
 }
 
 impl Lyrics {
@@ -203,45 +218,82 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
     let mut rx = app.state::<Player>().subscribe();
     std::thread::spawn(move || {
         let agent = agent();
-        // The track being shown, and whether it was already asked for.
-        let mut current = String::new();
-        let mut asked = false;
+        // Every ask takes the next number; an ask whose number is no longer the last is stale.
+        let generation = Arc::new(AtomicU64::new(0));
+        // The track shown (key, title, artist) and the duration it was asked with.
+        let mut current = (String::new(), String::new(), String::new());
+        let mut asked: Option<f64> = None;
         loop {
             let state = match rx.blocking_recv() {
                 Ok(event) => event.state().clone(),
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             };
-            let key = track_key(&state.track);
-            if key != current {
-                current = key;
-                asked = false;
+            let track = &state.track;
+            // At a track change the title, the video id and the duration arrive one after the other.
+            let ident = (track_key(track), track.title.clone(), track.artist.clone());
+            if ident != current {
+                crate::diag::log(
+                    "lyrics",
+                    format_args!(
+                        "track {:?} by {:?} (id {:?}, {:.1} s)",
+                        track.title, track.artist, track.id, track.duration
+                    ),
+                );
+                current = ident;
+                asked = None;
+                generation.fetch_add(1, Ordering::SeqCst);
                 *app.state::<Lyrics>().found.lock().unwrap() = None;
                 publish(&app);
             }
-            // The duration arrives after the title, in a later event.
-            if asked || state.track.duration <= 0.0 {
+            // The duration arrives after the title; one that moves (an ad's or the previous track's
+            // came first) is asked again.
+            if track.duration <= 0.0 || asked.is_some_and(|d| (d - track.duration).abs() <= DURATION_CHANGE) {
                 continue;
             }
-            asked = true;
-            let providers = enabled(&app.state::<Live>().get().lyrics.providers);
-            lookup(&agent, &dir, &state.track, &providers, |lines, source| {
-                // The track may have changed during the requests.
-                if app.state::<Player>().current().is_some_and(|s| track_key(&s.track) == current) {
-                    *app.state::<Lyrics>().found.lock().unwrap() = Some(Found {
-                        key: current.clone(),
-                        id: state.track.id.clone(),
-                        lines,
-                        source,
-                        translation: None,
-                    });
-                    publish(&app);
-                }
-            });
-            let target = translation_target(&app.state::<Live>().get());
-            if let Some(lang) = target {
-                translate(&app, &agent, &dir, &state.track, &current, &lang);
+            if let Some(d) = asked {
+                crate::diag::log("lyrics", format_args!("duration {d:.1} -> {:.1} s: asked again", track.duration));
             }
+            asked = Some(track.duration);
+            let mine = generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let (app, agent, dir, generation, track, key) =
+                (app.clone(), agent.clone(), dir.clone(), generation.clone(), track.clone(), current.0.clone());
+            std::thread::spawn(move || {
+                let live = || generation.load(Ordering::SeqCst) == mine;
+                std::thread::sleep(SETTLE);
+                if !live() {
+                    return;
+                }
+                let (providers, target) = {
+                    let s = app.state::<Live>();
+                    let s = s.get();
+                    (enabled(&s.lyrics.providers), translation_target(&s))
+                };
+                lookup(
+                    &agent,
+                    &dir,
+                    &track,
+                    &providers,
+                    |lines, source| {
+                        if live() {
+                            crate::diag::log("lyrics", format_args!("shown: {} lines from {source}", lines.len()));
+                            *app.state::<Lyrics>().found.lock().unwrap() = Some(Found {
+                                key: key.clone(),
+                                id: track.id.clone(),
+                                lines,
+                                source,
+                                translation: None,
+                            });
+                            publish(&app);
+                        }
+                    },
+                    || {
+                        if let Some(lang) = target.as_deref().filter(|_| live()) {
+                            translate(&app, &agent, &dir, &track, &key, lang);
+                        }
+                    },
+                );
+            });
         }
     });
 }
@@ -267,7 +319,10 @@ fn translate(app: &AppHandle, agent: &ureq::Agent, dir: &Path, track: &Track, ke
     });
     let Some((lines, source, own)) = found else { return };
     let translated = match own {
-        Some(own) => Translated { lang: lang.to_owned(), lines: own, source },
+        Some(own) => {
+            crate::diag::log("lyrics", format_args!("translation ({lang}): the source's own"));
+            Translated { lang: lang.to_owned(), lines: own, source }
+        }
         None => {
             let file = cache_file(dir, track, track.duration.round() as u32);
             let Some(machine) = machine_translation(agent, &file, &lines, lang) else { return };
@@ -304,15 +359,26 @@ fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &
     if let Some(t) =
         entry.as_ref().and_then(|e| e.translations.iter().find(|t| t.lang == lang && t.lines.len() == lines.len()))
     {
+        crate::diag::log("lyrics", format_args!("translation ({lang}): cached"));
         return Some(t.lines.clone());
     }
+    let at = Instant::now();
     let out = match unison_translate(agent, lines, lang) {
         Ok(out) => out,
         Err(e) => {
-            eprintln!("lyrics: translation: {e}");
+            crate::diag::log("lyrics", format_args!("translation ({lang}): {e} ({} ms)", at.elapsed().as_millis()));
             return None;
         }
     };
+    crate::diag::log(
+        "lyrics",
+        format_args!(
+            "translation ({lang}): Unison, {} of {} lines ({} ms)",
+            out.iter().filter(|t| t.is_some()).count(),
+            lines.len(),
+            at.elapsed().as_millis()
+        ),
+    );
     // Kept only with the very lines it translates.
     if let Some(entry) = entry.as_mut().filter(|e| e.lines.as_ref().is_some_and(|l| l.len() == lines.len())) {
         entry.translations.retain(|t| t.lang != lang);
@@ -382,6 +448,18 @@ pub fn republish(app: &AppHandle) {
     }
 }
 
+/// Game mode (game_mode.rs): while paused the page gets no lines (its box goes, the site's own lyrics
+/// come back); the native views keep theirs.
+pub fn set_page_paused(app: &AppHandle, paused: bool) {
+    let lyrics = app.state::<Lyrics>();
+    lyrics.paused.store(paused, Ordering::Relaxed);
+    if paused && lyrics.page.load(Ordering::Relaxed) {
+        crate::injections::send(app, "lyrics", &Value::Null);
+    } else {
+        publish(app);
+    }
+}
+
 /// Applies the settings to the lines found and hands them to the page and the native views.
 fn publish(app: &AppHandle) {
     let (estimate_words, offset, target) = {
@@ -406,7 +484,7 @@ fn publish(app: &AppHandle) {
         let translated = translation.map(|t| t.source);
         (f.id.clone(), Synced { key: f.key.clone(), lines, source: f.source, estimated, translated })
     });
-    if lyrics.page.load(Ordering::Relaxed) {
+    if lyrics.page.load(Ordering::Relaxed) && !lyrics.paused.load(Ordering::Relaxed) {
         let payload = synced.as_ref().map_or(Value::Null, |(id, s)| {
             let lines: Vec<Value> = s.lines.iter().map(Line::to_json).collect();
             let mut credit = crate::i18n::tf("Synced lyrics: {}", &[s.source]);
@@ -449,13 +527,15 @@ pub fn track_key(t: &Track) -> String {
 }
 
 /// Finds the synced lines of a track and hands them to `show` with their source's name, from the cache
-/// or from the sources. Nothing is shown when none has any.
+/// or from the sources. Nothing is shown when none has any. `settle` runs once the lines shown are
+/// final, or once a better source is `UPGRADE_WAIT` late (and again if one replaces them after that).
 fn lookup(
     agent: &ureq::Agent,
     dir: &Path,
     track: &Track,
     providers: &[&'static str],
     show: impl Fn(Lines, &'static str),
+    settle: impl Fn(),
 ) {
     let duration = track.duration.round() as u32;
     let file = cache_file(dir, track, duration);
@@ -464,42 +544,100 @@ fn lookup(
         let fresh = now().saturating_sub(entry.at) < NOT_FOUND_TTL && entry.tried == providers;
         match entry.lines {
             Some(lines) if providers.contains(&source) && (fresh || has_words(&lines)) => {
-                return show(lines, name(source));
+                crate::diag::log("lyrics", format_args!("cache: {source}"));
+                show(lines, name(source));
+                return settle();
             }
-            None if fresh => return,
+            None if fresh => return crate::diag::log("lyrics", "cache: no source has synced lyrics"),
             _ => {}
         }
     }
+    crate::diag::log(
+        "lyrics",
+        format_args!(
+            "asking {} for {:?} by {:?}, album {:?}, {duration} s",
+            providers.join(", "),
+            track.title,
+            track.artist,
+            track.album
+        ),
+    );
     let (tx, rx) = std::sync::mpsc::channel();
     for (rank, &provider) in providers.iter().enumerate() {
         let (tx, agent, track) = (tx.clone(), agent.clone(), track.clone());
         std::thread::spawn(move || {
-            let _ = tx.send((rank, ask(&agent, provider, &track, duration)));
+            let at = Instant::now();
+            let answer = ask(&agent, provider, &track, duration);
+            let _ = tx.send((rank, at.elapsed().as_millis(), answer));
         });
     }
     drop(tx);
     // Each source's answer, once it comes.
     let mut answers: Vec<Option<Result<Option<Lines>, String>>> = vec![None; providers.len()];
     let mut shown = None;
-    while let Ok((rank, answer)) = rx.recv() {
-        if let Err(e) = &answer {
-            eprintln!("lyrics: {}: {e}", providers[rank]);
+    // Set when the first lines are shown: by then `settle` runs even if a better source is still out.
+    let mut deadline: Option<Instant> = None;
+    let mut settled = false;
+    let entry = |answers: &[Option<Result<Option<Lines>, String>>], shown: Option<usize>| {
+        let tried = providers.iter().zip(answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
+        let lines = shown.and_then(|b| lines_of(answers, b).cloned());
+        let source = shown.map_or(String::new(), |b| providers[b].to_string());
+        Entry { at: now(), lines, source, tried: tried.collect(), translations: Vec::new() }
+    };
+    loop {
+        let next = match deadline.filter(|_| !settled) {
+            Some(d) => match rx.recv_timeout(d.saturating_duration_since(Instant::now())) {
+                Ok(answer) => Some(answer),
+                Err(RecvTimeoutError::Timeout) => {
+                    crate::diag::log("lyrics", "a better source is late: the lines shown are kept for now");
+                    // Written first, so a machine translation is cached with these lines.
+                    write_entry(&file, &entry(&answers, shown));
+                    settled = true;
+                    settle();
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => None,
+            },
+            None => rx.recv().ok(),
+        };
+        let Some((rank, ms, answer)) = next else { break };
+        match &answer {
+            Ok(Some(l)) => crate::diag::log(
+                "lyrics",
+                format_args!("{}: {} lines, word times: {} ({ms} ms)", providers[rank], l.len(), has_words(l)),
+            ),
+            Ok(None) => crate::diag::log("lyrics", format_args!("{}: none ({ms} ms)", providers[rank])),
+            Err(e) => crate::diag::log("lyrics", format_args!("{}: {e} ({ms} ms)", providers[rank])),
         }
         answers[rank] = Some(answer);
         let Some(best) = best(&answers) else { continue };
         if shown != Some(best) {
             shown = Some(best);
+            deadline.get_or_insert_with(|| Instant::now() + UPGRADE_WAIT);
             show(lines_of(&answers, best).expect("best has lines").clone(), name(providers[best]));
+            if settled {
+                settle();
+            }
         }
         // Final once no source before it could still answer with word times.
         if answers[..best].iter().all(Option::is_some) && has_words(lines_of(&answers, best).expect("best")) {
             break;
         }
     }
-    let tried = providers.iter().zip(&answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
-    let lines = shown.and_then(|b| lines_of(&answers, b).cloned());
-    let source = shown.map_or(String::new(), |b| providers[b].to_string());
-    write_entry(&file, &Entry { at: now(), lines, source, tried: tried.collect(), translations: Vec::new() });
+    if shown.is_none() {
+        crate::diag::log("lyrics", "no source has synced lyrics");
+    }
+    let mut last = entry(&answers, shown);
+    // A translation cached with the same lines while the slower sources answered is kept.
+    if let Some(old) = read_entry(&file)
+        .filter(|e| e.source == last.source && e.lines.as_ref().map(Vec::len) == last.lines.as_ref().map(Vec::len))
+    {
+        last.translations = old.translations;
+    }
+    write_entry(&file, &last);
+    if shown.is_some() && !settled {
+        settle();
+    }
 }
 
 /// The source that wins among the answers so far: the first with word times, else the first with lines.
@@ -767,10 +905,10 @@ fn write_entry(file: &Path, entry: &Entry) {
     match serde_json::to_vec(entry) {
         Ok(bytes) => {
             if let Err(e) = std::fs::write(file, bytes) {
-                eprintln!("lyrics: cache not written: {e}");
+                crate::diag::log("lyrics", format_args!("cache not written: {e}"));
             }
         }
-        Err(e) => eprintln!("lyrics: cache not written: {e}"),
+        Err(e) => crate::diag::log("lyrics", format_args!("cache not written: {e}")),
     }
     prune(dir);
 }

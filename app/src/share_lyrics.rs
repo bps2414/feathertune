@@ -134,6 +134,16 @@ pub fn open(app: &AppHandle) {
     });
 }
 
+/// Closes the window if it is open (game mode). Any thread.
+pub fn close(app: &AppHandle) {
+    let _ = app.run_on_main_thread(|| {
+        let hwnd = WINDOW.load(Ordering::Relaxed);
+        if hwnd != 0 {
+            let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
+        }
+    });
+}
+
 /// The lyrics changed (lyrics.rs). Any thread.
 pub fn refresh() {
     let hwnd = WINDOW.load(Ordering::Relaxed);

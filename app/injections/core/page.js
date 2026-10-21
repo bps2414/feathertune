@@ -9,6 +9,8 @@
 if (window.top !== window) return;
 
 const SELECTORS = {
+  // Its classes say when an ad plays.
+  player: '#movie_player',
   // Its getState() is the site's state: `queue.items`, `selectedItemIndex`, `automixItems`, `repeatMode`.
   playerBar: 'ytmusic-player-bar',
   queue: '#queue',
@@ -22,6 +24,12 @@ let lastQueue = '';
 let lastWhere = '';
 let video = null;
 
+const adShowing = () => {
+  const p = document.querySelector(SELECTORS.player);
+  return !!p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
+};
+
+// While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
 const read = (video) => {
   const m = navigator.mediaSession?.metadata;
   if (!m || !m.title) return null;
@@ -34,7 +42,7 @@ const read = (video) => {
     artist: m.artist || '',
     album: m.album || '',
     artwork: art,
-    duration: num(video.duration),
+    duration: adShowing() ? 0 : num(video.duration),
     position: num(video.currentTime),
     paused: video.paused,
   };

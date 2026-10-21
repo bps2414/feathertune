@@ -52,6 +52,7 @@ let last = 0; // time of the previous frame
 let pos = 0; // the scroll position the loop is at, in CSS px
 let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
 let catchUp = true; // the scroll eases to the curve instead of being on it
+let shifted = 0; // the box's translateY, the part of a device pixel the scroll cannot hold (see `shift`)
 const resizes = new ResizeObserver(() => {
   centers = null;
   catchUp = true;
@@ -91,6 +92,7 @@ const clear = () => {
   observer.disconnect();
   box?.remove();
   box = null;
+  shifted = 0;
   for (const t of document.querySelectorAll('[data-feathertune-lyrics]')) t.removeAttribute('data-feathertune-lyrics');
 };
 
@@ -265,7 +267,7 @@ const center = (i) => {
     const origin = t.getBoundingClientRect().top - t.scrollTop;
     centers = items.map((el) => {
       const r = el.getBoundingClientRect();
-      return r.top - origin + r.height / 2;
+      return r.top - origin - shifted + r.height / 2;
     });
   }
   return centers[i] ?? 0;
@@ -334,12 +336,23 @@ const media = () => document.querySelector('video');
 const canRun = (v) =>
   !!lines && !!box && box.isConnected && !box.hidden && !!v && !v.paused && !document.hidden && document.hasFocus();
 
+// scrollTop holds whole device pixels, so a slow glide into a line moved in uneven 1 px steps; the
+// rest (under a pixel) moves the box instead, a compositor layer (style.css). A larger gap is the
+// scroll held at an end, not a fraction, and is left alone.
+const shift = (px) => {
+  const v = Math.abs(px) < 0.01 || Math.abs(px) > 1 ? 0 : px;
+  if (Math.abs(v - shifted) < 0.01) return;
+  shifted = v;
+  if (box) box.style.transform = v ? `translateY(${v.toFixed(2)}px)` : '';
+};
+
 // `frame` stays set while a frame runs, so `sync` leaves the scroll to the loop.
 const step = (now) => {
   const v = media();
   const t = tab();
   if (!t || !canRun(v)) {
     frame = 0;
+    shift(0);
     return;
   }
   sync(v, false);
@@ -362,6 +375,7 @@ const step = (now) => {
     if (Math.abs(top - t.scrollTop) * dpr >= 1) t.scrollTop = top;
   }
   seen = t.scrollTop;
+  shift(seen - pos);
   frame = requestAnimationFrame(step);
 };
 

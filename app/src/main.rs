@@ -21,7 +21,9 @@ mod audio;
 mod audio_facts;
 mod deck;
 mod desktop_lyrics;
+mod diag;
 mod discord;
+mod game_mode;
 mod gfx;
 mod i18n;
 mod injections;
@@ -109,6 +111,7 @@ fn main() {
             url = u;
         }
     }
+    diag::start();
     smtc::set_app_id();
     let profile = profile_dir();
     let existed = profile.join("config.toml").exists();

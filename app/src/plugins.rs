@@ -263,6 +263,17 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "crossfade",
+        name: "Crossfade",
+        description: "Fades each track out into the next (6 s, equal power by default; Audio tab). The site still \
+                      picks the next track, so repeat, shuffle and autoplay work as usual. Never over or into an \
+                      ad, never on repeat-one.",
+        cost: "Not measured yet: a few scheduled ramps per track on the audio graph.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

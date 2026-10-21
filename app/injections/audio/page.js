@@ -92,6 +92,10 @@ let settleTimer = 0;
 const taps = () => {
   const list = [];
   if (analyserUsers.size) list.push([nodes.input, nodes.analyser]);
+  if (echo.on) {
+    list.push([nodes.trim, nodes.echoSend], [nodes.echoSend, nodes.delay], [nodes.delay, nodes.feedback]);
+    list.push([nodes.feedback, nodes.delay], [nodes.delay, nodes.echoWet], [nodes.echoWet, ctx.destination]);
+  }
   return list;
 };
 
@@ -231,7 +235,15 @@ const createGraph = (element) => {
         return band;
       }),
       compressor: ctx.createDynamicsCompressor(),
+      // The echo on a fading tail: trim → send → delay ⇄ feedback, delay → wet → destination.
+      echoSend: ctx.createGain(),
+      delay: ctx.createDelay(2),
+      feedback: ctx.createGain(),
+      echoWet: ctx.createGain(),
     };
+    nodes.echoSend.gain.value = 0;
+    nodes.feedback.gain.value = ECHO_FEEDBACK;
+    nodes.echoWet.gain.value = ECHO_WET;
     nodes.analyser.fftSize = 2048;
     nodes.compressor.threshold.value = 0;
     nodes.compressor.ratio.value = 1;
@@ -305,6 +317,196 @@ const checkGuard = (v) => {
   if (v.currentTime - guard.zeroFrom >= GUARD_ZERO_S) trip('only silence passes through the graph');
 };
 
+// --- crossfade (one player) ---
+//
+// At the `out` point (the track's end minus the fade, by default) `master` goes down along the
+// curve; when the fade is over the module seeks to `duration - 0.05` so the track ends by itself
+// and the site picks the next one (repeat, shuffle and autoplay stay the site's). The next track
+// fades in only after a fade-out (so a track started any other way never dips). The fade is armed
+// from the video's own timeupdate (about 4 a second) and scheduled on the audio clock; it is
+// rescheduled on pause, seek and rate changes. Nothing is scheduled during an ad.
+
+const CURVE_POINTS = 256;
+const ARM_BEFORE_S = 1;
+const SKIP_FADE_IN_S = 0.3;
+const ECHO_FEEDBACK = 0.45;
+const ECHO_WET = 0.5;
+const ECHO_DEFAULT_S = 0.375;
+// How long the echo keeps ringing after the fade.
+const ECHO_RING_S = 5;
+
+// Fade-out curves, from 1 to 0 (the fade-in is the same curve backwards).
+const CURVES = (() => {
+  const make = (f) => Float32Array.from({ length: CURVE_POINTS }, (_, i) => f(i / (CURVE_POINTS - 1)));
+  return {
+    linear: make((t) => 1 - t),
+    equal_power: make((t) => Math.cos((t * Math.PI) / 2)),
+    s_curve: make((t) => 0.5 * (1 + Math.cos(Math.PI * t))),
+    exponential: make((t) => (Math.pow(10, -3 * t) - 0.001) / 0.999),
+  };
+})();
+const FADE_IN = Object.fromEntries(Object.entries(CURVES).map(([k, c]) => [k, Float32Array.from(c).reverse()]));
+
+// The curve's value at p (0..1) and the part of it from p to the end.
+const valueAt = (curve, p) => curve[Math.min(curve.length - 1, Math.round(p * (curve.length - 1)))];
+const slice = (curve, p) => {
+  if (p <= 0) return curve;
+  const n = Math.max(2, Math.round((1 - p) * (curve.length - 1)) + 1);
+  return Float32Array.from({ length: n }, (_, i) => valueAt(curve, p + ((1 - p) * i) / (n - 1)));
+};
+
+let trackId = null;
+// The analysis of the current and next track (from Rust; see track_analysis).
+const facts = () => data?.facts?.current ?? null;
+// The fade of the current track: { out, dur, curve } in video seconds, or null.
+let fade = null;
+let armed = false;
+// The fade-out reached its end (or was cut short by a track change).
+let faded = false;
+let ownSeek = false;
+const echo = { on: false, until: 0 };
+
+const currentId = () => {
+  const player = document.querySelector(SELECTORS.player);
+  return player?.getVideoData?.()?.video_id || new URLSearchParams(location.search).get('v');
+};
+const repeatOne = (v) => v.loop || siteState()?.queue?.repeatMode === 'ONE';
+const seekTo = (v, t) => {
+  ownSeek = true;
+  v.currentTime = t;
+};
+
+// The fade for this track from the global settings (a mix replaces it, see below).
+const planFade = (v) => {
+  const c = data?.crossfade;
+  if (!on('crossfade') || !c?.duration_ms || ad || repeatOne(v)) return null;
+  const dur = c.duration_ms / 1000;
+  const end = v.duration;
+  if (!Number.isFinite(end) || end < 3 * dur) return null;
+  return { out: end - dur, dur, curve: CURVES[c.curve] || CURVES.equal_power, echo: !!c.echo };
+};
+
+// Schedules the fade-out (or what is left of it) from the video's time now.
+const arm = (v) => {
+  if (!fade || ad) return;
+  const g = nodes.master.gain;
+  const now = ctx.currentTime;
+  const rate = v.playbackRate || 1;
+  const begin = Math.max(now + RAMP, now + (fade.out - v.currentTime) / rate);
+  const p = Math.min(1, Math.max(0, (v.currentTime + (begin - now) * rate - fade.out) / fade.dur));
+  g.cancelAndHoldAtTime(now);
+  g.linearRampToValueAtTime(valueAt(fade.curve, p), begin);
+  const length = ((1 - p) * fade.dur) / rate;
+  try {
+    if (length > 0.02) g.setValueCurveAtTime(slice(fade.curve, p), begin + 0.001, length);
+  } catch {
+    g.linearRampToValueAtTime(0, begin + length);
+  }
+  armed = true;
+  if (fade.echo) armEcho(v, begin, p, length);
+};
+
+// The echo: the send opens for the middle of the fade, so its repeats ring on after the track.
+const armEcho = (v, begin, p, length) => {
+  const beat = facts()?.bpm ? 60 / facts().bpm : ECHO_DEFAULT_S;
+  nodes.delay.delayTime.setValueAtTime(Math.min(1.5, beat), ctx.currentTime);
+  const send = nodes.echoSend.gain;
+  send.cancelAndHoldAtTime(ctx.currentTime);
+  const at = (q) => begin + Math.max(0, ((q - p) / (1 - p || 1)) * length);
+  send.setValueAtTime(0, ctx.currentTime);
+  if (p < 0.85) {
+    send.setTargetAtTime(1, at(0.5), RAMP / 3);
+    send.setTargetAtTime(0, at(0.85), RAMP / 3);
+  }
+  ramp(nodes.echoWet.gain, ECHO_WET);
+  echo.on = true;
+  echo.until = begin + length + ECHO_RING_S;
+  wire();
+};
+const stopEcho = (now) => {
+  if (!echo.on) return;
+  ramp(nodes.echoSend.gain, 0);
+  if (now) ramp(nodes.echoWet.gain, 0);
+};
+
+// Pause, seek, rate change or ad: hold the fade where it is; it is armed again from timeupdate.
+const holdFade = () => {
+  if (!armed) return;
+  nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
+  nodes.echoSend.gain.cancelAndHoldAtTime(ctx.currentTime);
+  armed = false;
+};
+// Back to full level in 30 ms, nothing scheduled.
+const cancelFade = () => {
+  armed = false;
+  ramp(nodes.master.gain, 1);
+  stopEcho(false);
+};
+
+const inWindow = (t) => fade && t >= fade.out - ARM_BEFORE_S && t < fade.out + fade.dur;
+
+// The next track starts: it fades in if the last one faded out (a short fade if it was cut off).
+const startTrack = (v, id) => {
+  const cut = armed && !faded;
+  const prev = nodes.master.gain.value;
+  trackId = id;
+  armed = false;
+  faded = false;
+  fade = planFade(v);
+  if (ad || !on('crossfade') || prev > 0.98) return;
+  const curveName = data?.crossfade?.curve;
+  const dur = cut ? SKIP_FADE_IN_S : (data?.crossfade?.fade_in_ms ?? 0) / 1000;
+  const g = nodes.master.gain;
+  const now = ctx.currentTime;
+  g.cancelAndHoldAtTime(now);
+  if (dur < 0.05) {
+    g.setTargetAtTime(1, now, RAMP / 3);
+    return;
+  }
+  // From where it is now to 1, along the fade-in curve.
+  const curve = FADE_IN[curveName] || FADE_IN.equal_power;
+  const scaled = Float32Array.from(curve, (x) => prev + (1 - prev) * x);
+  try {
+    g.setValueCurveAtTime(scaled, now + 0.001, dur);
+  } catch {
+    g.linearRampToValueAtTime(1, now + dur);
+  }
+};
+
+const onTime = (v) => {
+  if (echo.on && ctx.currentTime > echo.until) {
+    echo.on = false;
+    wire();
+  }
+  if (ad || v.paused) return;
+  const id = currentId();
+  if (id && id !== trackId) startTrack(v, id);
+  if (!fade && on('crossfade')) fade = planFade(v);
+  const t = v.currentTime;
+  // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
+  if (faded && t < 2) startTrack(v, id);
+  if (!fade) return;
+  if (!armed && inWindow(t)) arm(v);
+  // The fade is over: let the track end by itself (unless the fade already ends with it).
+  if (armed && !faded && t >= fade.out + fade.dur - 0.05) {
+    faded = true;
+    if (fade.out + fade.dur < v.duration - 0.1) seekTo(v, v.duration - 0.05);
+  }
+};
+
+const onSeek = (v, type) => {
+  if (ownSeek) {
+    if (type === 'seeked') ownSeek = false;
+    return;
+  }
+  if (type !== 'seeking') return;
+  holdFade();
+  if (!inWindow(v.currentTime)) {
+    cancelFade();
+    faded = false;
+  }
+};
+
 // --- ads ---
 
 let observed = null;
@@ -324,8 +526,14 @@ const setAd = (now) => {
   onAd(now);
   apply();
 };
-// What each effect does when an ad starts or ends (filled in below).
-const onAd = () => {};
+// An ad: nothing stays scheduled (apply() brings every parameter back to neutral).
+const onAd = (now) => {
+  if (!now || !nodes) return;
+  armed = false;
+  fade = null;
+  nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
+  stopEcho(true);
+};
 
 // --- media events ---
 
@@ -346,15 +554,33 @@ const onMedia = (e) => {
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       break;
     case 'pause':
+      holdFade();
       clearTimeout(suspendTimer);
       suspendTimer = setTimeout(() => video?.paused && ctx.suspend().catch(() => {}), SUSPEND_MS);
       break;
+    case 'ratechange':
+      holdFade();
+      break;
+    case 'seeking':
+    case 'seeked':
+      onSeek(v, e.type);
+      break;
+    case 'loadstart':
+      ownSeek = false;
+      break;
+    case 'loadedmetadata':
+    case 'durationchange':
+      // A new duration: the fade is planned again.
+      if (!armed) fade = null;
+      break;
+    case 'playing':
     case 'timeupdate':
-      checkGuard(v);
+      if (e.type === 'timeupdate') checkGuard(v);
+      onTime(v);
       break;
   }
 };
-for (const type of ['play', 'pause', 'playing', 'timeupdate', 'loadstart', 'loadedmetadata', 'seeking', 'seeked', 'ratechange', 'ended']) {
+for (const type of ['play', 'pause', 'playing', 'timeupdate', 'loadstart', 'loadedmetadata', 'durationchange', 'seeking', 'seeked', 'ratechange']) {
   document.addEventListener(type, onMedia, true);
 }
 
@@ -362,6 +588,9 @@ feathertune.audio = Object.freeze({
   set: (d) => {
     data = d;
     if (off) return;
+    // New crossfade settings: planned again (a fade under way is cut if the plugin went off).
+    if (nodes && armed && !on('crossfade')) cancelFade();
+    if (!armed) fade = null;
     // Settings arrived after the first play: start now on the playing element.
     const playing = [...document.querySelectorAll('video')].find((v) => !v.paused);
     if (!ctx && playing && anyOn()) {

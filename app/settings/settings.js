@@ -359,6 +359,7 @@ const load = async () => {
       if (input.type === 'checkbox') input.checked = !!value;
       else input.value = Array.isArray(value) ? value.join(', ') : (value ?? '');
       if ('shortcut' in input.dataset) input.placeholder = 'Off';
+      if (input.type === 'range') showSeconds(input);
     }
   } catch (e) {
     showError(String(e));
@@ -371,6 +372,15 @@ for (const input of document.querySelectorAll('[data-key]:not([data-shortcut])')
     if ('list' in input.dataset) value = value.split(',').map((x) => x.trim()).filter(Boolean);
     if ((await set(input.dataset.key, value, input)) && input.type !== 'checkbox') flashSaved(input);
   });
+}
+
+// Range fields in ms show their value in seconds.
+function showSeconds(input) {
+  const out = input.parentElement.querySelector('[data-seconds]');
+  if (out) out.textContent = `${(Number(input.value) / 1000).toFixed(1)} s`;
+}
+for (const input of document.querySelectorAll('input[type="range"][data-key]')) {
+  input.addEventListener('input', () => showSeconds(input));
 }
 
 // Shortcut fields record the keys pressed, in the names the shortcut parser takes (Ctrl+Alt+P).

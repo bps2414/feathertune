@@ -92,6 +92,30 @@
         <div class="eq" id="eq-bands"></div>
         <p class="hint">Moving a band switches to Custom. A band at 0 dB is left out of the sound path, and the level is lowered by the largest boost so the sound never clips.</p>
       </div>
+      <div class="card" data-plugin="crossfade">
+        <label>Length <span class="value" data-seconds></span>
+          <input type="range" data-key="audio.crossfade_ms" min="0" max="12000" step="500">
+        </label>
+        <label>Curve
+          <select data-key="audio.curve">
+            <option value="equal_power">Equal power (steady loudness)</option>
+            <option value="linear">Linear</option>
+            <option value="s_curve">S-curve (holds, then drops)</option>
+            <option value="exponential">Exponential (drops early)</option>
+          </select>
+        </label>
+        <label>Fade into the next track <span class="value" data-seconds></span>
+          <input type="range" data-key="audio.fade_in_ms" min="0" max="5000" step="250">
+        </label>
+        <div class="option">
+          <div class="body">
+            <div class="name small">Echo out</div>
+            <div class="hint">An echo on the end of the track that fades out, in time with its beat when known.</div>
+          </div>
+          <input type="checkbox" class="switch" data-key="audio.echo_out" aria-label="Echo out">
+        </div>
+        <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded.</p>
+      </div>
       <div class="card" data-plugin="compressor">
         <label>Preset
           <select data-key="audio.compressor">

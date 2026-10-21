@@ -31,6 +31,10 @@
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
 //! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
 //! compressor = "none"              # none (out of the sound path), soft, night, strong
+//! crossfade_ms = 6000              # 0 to 12000; 0: off
+//! curve = "equal_power"            # linear, equal_power, s_curve, exponential
+//! fade_in_ms = 1500                # 0 to 5000, into the next track
+//! echo_out = false                 # an echo on the tail of the track that fades out
 //!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
@@ -123,11 +127,27 @@ pub struct AudioSettings {
     pub eq_bands: Vec<f64>,
     /// `audio::COMPRESSORS`.
     pub compressor: String,
+    /// Crossfade length, 0 to 12000 (0: off).
+    pub crossfade_ms: u32,
+    /// `audio::CURVES`.
+    pub curve: String,
+    /// The fade into the next track after a crossfade, 0 to 5000.
+    pub fade_in_ms: u32,
+    /// An echo on the tail of the track that fades out.
+    pub echo_out: bool,
 }
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        AudioSettings { eq_preset: "flat".into(), eq_bands: vec![0.0; 10], compressor: "none".into() }
+        AudioSettings {
+            eq_preset: "flat".into(),
+            eq_bands: vec![0.0; 10],
+            compressor: "none".into(),
+            crossfade_ms: 6000,
+            curve: "equal_power".into(),
+            fade_in_ms: 1500,
+            echo_out: false,
+        }
     }
 }
 

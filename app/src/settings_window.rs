@@ -162,6 +162,10 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "eq_bands": crate::audio::eq_gains(&s),
             "eq_presets": crate::audio::EQ_PRESETS.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
             "compressor": s.audio.compressor,
+            "crossfade_ms": s.audio.crossfade_ms,
+            "curve": s.audio.curve,
+            "fade_in_ms": s.audio.fade_in_ms,
+            "echo_out": s.audio.echo_out,
         },
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
         "desktop_lyrics": { "open": crate::desktop_lyrics::is_open(), "locked": crate::desktop_lyrics::is_locked() },
@@ -174,7 +178,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `audio.eq_preset`, `audio.eq_bands`,
-/// `audio.compressor` or `autostart`. Returns whether a restart is needed for it to apply.
+/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out` or
+/// `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
     guard(&webview)?;
@@ -291,6 +296,30 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 gains.push((g * 2.0).round() / 2.0);
             }
             live.write("audio", name, toml_edit::value(gains), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "crossfade_ms" | "fade_in_ms") => {
+            let max =
+                if name == "crossfade_ms" { crate::audio::MAX_CROSSFADE_MS } else { crate::audio::MAX_FADE_IN_MS };
+            let ms = value
+                .as_f64()
+                .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()))
+                .filter(|ms| (0.0..=f64::from(max)).contains(ms))
+                .ok_or(format!("from 0 to {max} ms"))?;
+            live.write("audio", name, toml_edit::value(ms.round() as i64), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "curve") => {
+            let curve = value.as_str().filter(|c| crate::audio::CURVES.contains(c)).ok_or("unknown curve")?;
+            live.write("audio", name, toml_edit::value(curve), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "echo_out") => {
+            let on = value.as_bool().ok_or("expected true or false")?;
+            live.write("audio", name, toml_edit::value(on), None, false)?;
             crate::audio::push(&app);
             Ok(false)
         }

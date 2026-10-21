@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager};
 use crate::settings::{Live, Settings};
 
 /// The plugins of the `audio` page module.
-pub const PLUGINS: &[&str] = &["equalizer", "compressor"];
+pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade"];
 
 /// Equalizer presets: gains in dB for 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz ("custom" is
 /// `[audio] eq_bands`).
@@ -29,6 +29,11 @@ pub const EQ_MAX_DB: f64 = 12.0;
 
 /// Compressor presets (their settings are in the page module); "none" leaves it out of the path.
 pub const COMPRESSORS: &[&str] = &["none", "soft", "night", "strong"];
+
+/// Crossfade curves (built in the page module).
+pub const CURVES: &[&str] = &["linear", "equal_power", "s_curve", "exponential"];
+pub const MAX_CROSSFADE_MS: u32 = 12_000;
+pub const MAX_FADE_IN_MS: u32 = 5_000;
 
 /// `--measure`: the graph's state, printed every 10 s.
 pub const PROBE: &str = "(() => window.__feathertune?.audio?.probe?.() ?? 'audio=none')()";
@@ -74,5 +79,14 @@ fn payload(s: &Settings) -> Value {
     let plugins: Map<String, Value> = PLUGINS.iter().map(|p| (p.to_string(), json!(s.plugin(p)))).collect();
     let compressor =
         if COMPRESSORS.contains(&s.audio.compressor.as_str()) { s.audio.compressor.as_str() } else { "none" };
-    json!({ "plugins": plugins, "eq": eq_gains(s), "compressor": compressor })
+    let a = &s.audio;
+    let crossfade = s.plugin("crossfade").then(|| {
+        json!({
+            "duration_ms": a.crossfade_ms.min(MAX_CROSSFADE_MS),
+            "curve": if CURVES.contains(&a.curve.as_str()) { a.curve.as_str() } else { "equal_power" },
+            "fade_in_ms": a.fade_in_ms.min(MAX_FADE_IN_MS),
+            "echo": a.echo_out,
+        })
+    });
+    json!({ "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade })
 }

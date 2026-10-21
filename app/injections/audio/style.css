@@ -30,3 +30,21 @@ ytmusic-player-queue-item:hover > .feathertune-mix,
   border-color: rgba(255, 255, 255, 0.5);
   color: #fff;
 }
+
+/* The visualizer under the artwork (page.js, visualizer). */
+ytmusic-player-page #player:has(> .feathertune-visualizer) {
+  position: relative;
+}
+.feathertune-visualizer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 22%;
+  pointer-events: none;
+  z-index: 1;
+}
+.feathertune-visualizer[hidden] {
+  display: none;
+}

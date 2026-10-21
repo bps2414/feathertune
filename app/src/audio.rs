@@ -15,7 +15,10 @@ use crate::player::Player;
 use crate::settings::{Live, Settings};
 
 /// The plugins of the `audio` page module.
-pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis", "skip_silence"];
+pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis", "skip_silence", "visualizer"];
+
+/// Visualizer styles (drawn in the page module).
+pub const VISUALIZERS: &[&str] = &["bars", "wave"];
 
 /// Equalizer presets: gains in dB for 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz ("custom" is
 /// `[audio] eq_bands`).
@@ -119,5 +122,9 @@ fn payload(s: &Settings) -> Value {
             "echo": a.echo_out,
         })
     });
-    json!({ "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade })
+    let visualizer = if VISUALIZERS.contains(&a.visualizer.as_str()) { a.visualizer.as_str() } else { "bars" };
+    json!({
+        "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade,
+        "visualizer": visualizer,
+    })
 }

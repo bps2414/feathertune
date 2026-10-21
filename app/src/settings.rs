@@ -35,6 +35,7 @@
 //! curve = "equal_power"            # linear, equal_power, s_curve, exponential
 //! fade_in_ms = 1500                # 0 to 5000, into the next track
 //! echo_out = false                 # an echo on the tail of the track that fades out
+//! visualizer = "bars"              # bars, wave
 //!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
@@ -135,6 +136,8 @@ pub struct AudioSettings {
     pub fade_in_ms: u32,
     /// An echo on the tail of the track that fades out.
     pub echo_out: bool,
+    /// `audio::VISUALIZERS`.
+    pub visualizer: String,
 }
 
 impl Default for AudioSettings {
@@ -147,6 +150,7 @@ impl Default for AudioSettings {
             curve: "equal_power".into(),
             fade_in_ms: 1500,
             echo_out: false,
+            visualizer: "bars".into(),
         }
     }
 }

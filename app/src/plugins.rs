@@ -297,6 +297,17 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "visualizer",
+        name: "Visualizer",
+        description: "Bars or a wave of the music under the artwork on the expanded player page, in the album's \
+                      colors (Audio tab). Hidden while an ad plays.",
+        cost: "Not measured yet: drawing about 60 times a second only while the expanded player is open, the \
+               window focused and the music playing; nothing otherwise.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

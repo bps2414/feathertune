@@ -166,6 +166,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "curve": s.audio.curve,
             "fade_in_ms": s.audio.fade_in_ms,
             "echo_out": s.audio.echo_out,
+            "visualizer": s.audio.visualizer,
         },
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
         "desktop_lyrics": { "open": crate::desktop_lyrics::is_open(), "locked": crate::desktop_lyrics::is_locked() },
@@ -178,7 +179,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `audio.eq_preset`, `audio.eq_bands`,
-/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out` or
+/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer` or
 /// `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
@@ -320,6 +321,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("audio", "echo_out") => {
             let on = value.as_bool().ok_or("expected true or false")?;
             live.write("audio", name, toml_edit::value(on), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "visualizer") => {
+            let style = value.as_str().filter(|v| crate::audio::VISUALIZERS.contains(v)).ok_or("unknown style")?;
+            live.write("audio", name, toml_edit::value(style), None, false)?;
             crate::audio::push(&app);
             Ok(false)
         }

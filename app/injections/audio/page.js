@@ -25,6 +25,10 @@ const SELECTORS = {
   listRows: 'ytmusic-playlist-shelf-renderer ytmusic-responsive-list-item-renderer',
   queueRows: 'ytmusic-player-queue ytmusic-player-queue-item',
   rowLink: 'a[href*="watch?v="]',
+  // The expanded player page: the layout's attribute while it is open, and the artwork's box.
+  layout: 'ytmusic-app-layout',
+  playerOpenAttr: 'player-page-open',
+  artwork: 'ytmusic-player-page #player',
 };
 const OFF_KEY = 'feathertune-audio-off';
 const RAMP = 0.03;
@@ -1233,6 +1237,7 @@ const setAd = (now) => {
   ad = now;
   onAd(now);
   apply();
+  visUpdate();
 };
 // An ad: nothing stays scheduled (apply() brings every parameter back to neutral).
 const onAd = (now) => {
@@ -1325,6 +1330,111 @@ const watchRows = () => {
 };
 document.addEventListener('yt-navigate-finish', () => setTimeout(renderButtons, 300));
 
+// --- visualizer ---
+//
+// Bars or a wave under the artwork on the expanded player page, in the theme's accent color. One
+// requestAnimationFrame loop, only while the player page is open, the page visible, the window
+// focused and the music playing (no ad); the analyser is connected only meanwhile. Stopped, the
+// last frame stays; an ad hides it.
+
+const VIS_BARS = 48;
+const vis = { canvas: null, g: null, raf: 0, bytes: null, color: '#fff', frames: 0 };
+const playerOpen = () => !!document.querySelector(SELECTORS.layout)?.hasAttribute(SELECTORS.playerOpenAttr);
+const visWanted = () =>
+  on('visualizer') && !!nodes && !ad && !!video && !video.paused && playerOpen() && document.visibilityState === 'visible' && document.hasFocus();
+
+const visCanvas = () => {
+  const box = document.querySelector(SELECTORS.artwork);
+  if (!box) return null;
+  if (!vis.canvas) {
+    vis.canvas = document.createElement('canvas');
+    vis.canvas.className = 'feathertune-visualizer';
+    vis.canvas.setAttribute('aria-hidden', 'true');
+    vis.g = vis.canvas.getContext('2d');
+  }
+  if (vis.canvas.parentElement !== box) box.append(vis.canvas);
+  return vis.canvas;
+};
+const visColor = () => {
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--feathertune-accent').trim();
+  vis.color = accent || '#fff';
+};
+
+const visUpdate = () => {
+  const want = visWanted();
+  if (want && !vis.raf && visCanvas()) {
+    useAnalyser('visualizer', true);
+    visColor();
+    vis.canvas.hidden = false;
+    vis.raf = requestAnimationFrame(visFrame);
+  } else if (!want && vis.raf) {
+    cancelAnimationFrame(vis.raf);
+    vis.raf = 0;
+    useAnalyser('visualizer', false);
+  }
+  if (vis.canvas && (ad || !on('visualizer') || !playerOpen())) vis.canvas.hidden = true;
+};
+
+const visFrame = () => {
+  vis.raf = 0;
+  if (!visWanted()) return visUpdate();
+  const c = vis.canvas;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(c.clientWidth * dpr);
+  const h = Math.round(c.clientHeight * dpr);
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+  // The theme may change with the track: read again now and then.
+  if (++vis.frames % 120 === 0) visColor();
+  const a = nodes.analyser;
+  vis.bytes ||= new Uint8Array(a.frequencyBinCount);
+  const g = vis.g;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = vis.color;
+  g.strokeStyle = vis.color;
+  if (data?.visualizer === 'wave') {
+    a.getByteTimeDomainData(vis.bytes);
+    g.lineWidth = 2 * dpr;
+    g.globalAlpha = 0.9;
+    g.beginPath();
+    const n = vis.bytes.length;
+    for (let i = 0; i < n; i += 4) g.lineTo((i / (n - 1)) * w, (vis.bytes[i] / 255) * h);
+    g.stroke();
+  } else {
+    a.getByteFrequencyData(vis.bytes);
+    // Log-spaced bands from ~40 Hz to ~16 kHz.
+    const bin = ctx.sampleRate / a.fftSize;
+    const gap = 2 * dpr;
+    const bw = (w - gap * (VIS_BARS - 1)) / VIS_BARS;
+    g.globalAlpha = 0.85;
+    for (let i = 0; i < VIS_BARS; i++) {
+      const lo = Math.max(1, Math.floor((40 * Math.pow(400, i / VIS_BARS)) / bin));
+      const hi = Math.max(lo + 1, Math.floor((40 * Math.pow(400, (i + 1) / VIS_BARS)) / bin));
+      let peak = 0;
+      for (let k = lo; k < hi && k < vis.bytes.length; k++) peak = Math.max(peak, vis.bytes[k]);
+      const bh = Math.max(dpr, (peak / 255) * h);
+      g.fillRect(i * (bw + gap), h - bh, bw, bh);
+    }
+  }
+  g.globalAlpha = 1;
+  vis.raf = requestAnimationFrame(visFrame);
+};
+
+let layoutWatched = null;
+const layoutObserver = new MutationObserver(() => visUpdate());
+const watchLayout = () => {
+  const layout = document.querySelector(SELECTORS.layout);
+  if (!layout || layout === layoutWatched) return;
+  layoutObserver.disconnect();
+  layoutObserver.observe(layout, { attributes: true, attributeFilter: [SELECTORS.playerOpenAttr] });
+  layoutWatched = layout;
+};
+document.addEventListener('visibilitychange', visUpdate);
+window.addEventListener('focus', visUpdate);
+window.addEventListener('blur', visUpdate);
+
 // --- media events ---
 
 const onMedia = (e) => {
@@ -1338,6 +1448,8 @@ const onMedia = (e) => {
   }
   if (!ctx || !sources.has(v)) return;
   video = v;
+  watchLayout();
+  if (e.type === 'play' || e.type === 'pause' || e.type === 'playing') visUpdate();
   switch (e.type) {
     case 'play':
       clearTimeout(suspendTimer);
@@ -1397,6 +1509,7 @@ feathertune.audio = Object.freeze({
     apply();
     runCommand(d?.command);
     renderButtons();
+    visUpdate();
   },
   // The transition voice (deck.rs) reads this through ExecuteScript.
   deck: () => {

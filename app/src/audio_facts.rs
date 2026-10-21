@@ -39,6 +39,9 @@ pub struct Facts {
     /// Where the sound ends; unknown when the end was not heard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_ms: Option<f64>,
+    /// Where a track that fades out by itself was last loud (15 dB under its median); with `tail_ms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_ms: Option<f64>,
     /// Base64 of u8 triples (low < 250 Hz, mid, high > 4 kHz), one per 100 ms, -60 dB = 0 to 0 dB = 255.
     pub envelope: String,
 }
@@ -64,6 +67,7 @@ pub fn parse(json: &str) -> Option<Facts> {
         && f.camelot.as_deref().is_none_or(valid_camelot)
         && in_track(f.lead_in_ms)
         && f.tail_ms.is_none_or(|t| in_track(t) && t >= f.lead_in_ms)
+        && f.fade_ms.is_none_or(|x| f.tail_ms.is_some_and(|t| in_track(x) && x <= t))
         && valid_envelope(&f.envelope);
     ok.then_some(f)
 }

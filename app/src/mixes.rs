@@ -199,13 +199,17 @@ pub fn keys_match(a: &str, b: &str) -> bool {
 /// Without A's tempo: 6 s from the end.
 fn auto(a: Option<&Facts>) -> (Option<u32>, u32) {
     let Some(a) = a else { return (None, AUTO_DEFAULT_MS) };
-    let end = a.tail_ms.unwrap_or(a.duration_s * 1000.0);
+    let tail = a.tail_ms.unwrap_or(a.duration_s * 1000.0);
+    // A track that fades out by itself: the transition ends halfway into its own fade, not at the end
+    // of it (a fade over a fade is not heard).
+    let end = |d: f64| a.fade_ms.map_or(tail, |f| tail.min(f + d / 2.0));
     let Some(bpm) = a.bpm else {
-        return (Some((end - f64::from(AUTO_DEFAULT_MS)).max(0.0) as u32), AUTO_DEFAULT_MS);
+        let d = f64::from(AUTO_DEFAULT_MS);
+        return (Some((end(d) - d).max(0.0) as u32), AUTO_DEFAULT_MS);
     };
     let beat = 60_000.0 / bpm;
     let duration = (AUTO_BEATS * beat).clamp(AUTO_MIN_MS, AUTO_MAX_MS);
-    let mut out = end - duration;
+    let mut out = end(duration) - duration;
     if let Some(offset) = a.beat_offset_ms {
         out = offset + ((out - offset) / beat).floor() * beat;
     }
@@ -491,6 +495,7 @@ mod tests {
             camelot: None,
             lead_in_ms: 1200.0,
             tail_ms: Some(198_000.0),
+            fade_ms: None,
             envelope: String::new(),
         }
     }

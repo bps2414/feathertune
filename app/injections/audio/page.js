@@ -408,7 +408,8 @@ let fade = null;
 let armed = false;
 // The fade-out reached its end (or was cut short by a track change).
 let faded = false;
-let ownSeek = false;
+// Where our own seek goes (null: none). A seek elsewhere is the user's, even while ours is pending.
+let ownSeek = null;
 const echo = { on: false, until: 0 };
 const sweep = { on: false };
 const bassCut = { on: false };
@@ -429,11 +430,12 @@ const currentId = () => {
 };
 const repeatOne = (v) => v.loop || siteState()?.queue?.repeatMode === 'ONE';
 // `silence`: the time skipped is known to be silent (skip_silence); otherwise the analysis of the
-// track ends where it got to.
+// track ends there, sent only if it was heard to the end (a partial one would be kept for good).
 const seekTo = (v, t, silence = false) => {
+  if (Math.abs(v.currentTime - t) < 0.01) return;
   if (silence) skipAnalysis(t);
-  else if (analysis) stopAnalysis(true);
-  ownSeek = true;
+  else if (analysis) stopAnalysis(analysis.id === trackId && t >= analysis.duration - 0.5);
+  ownSeek = t;
   v.currentTime = t;
 };
 
@@ -454,7 +456,10 @@ const planFade = (v) => {
   const dur = ms / 1000;
   // Before the final silence, once it is known.
   const tail = facts()?.tail_ms;
-  const end = tail && tail / 1000 < v.duration ? tail / 1000 : v.duration;
+  let end = tail && tail / 1000 < v.duration ? tail / 1000 : v.duration;
+  // A track that fades out by itself: halfway into its own fade (a fade over a fade is not heard).
+  const own = facts()?.fade_ms;
+  if (own) end = Math.min(end, own / 1000 + dur / 2);
   let out = end - dur;
   if (m && Number.isFinite(m.out_ms)) out = Math.min(m.out_ms / 1000, v.duration - dur);
   else if (end < 3 * dur) return null;
@@ -563,6 +568,7 @@ const startTrack = (v, id) => {
   armed = false;
   faded = false;
   preview = null;
+  ownSeek = null;
   stopSweep();
   stopBassCut();
   if (rateBack) {
@@ -620,6 +626,8 @@ const onTime = (v) => {
   if (analysis && Math.abs(analysis.t - t) > 0.5) {
     // Out of step (buffering): the envelope goes on from here, the beat window is lost.
     if (inBeatWindow(analysis)) analysis.beatOk = false;
+    // Before any sound was heard: where it starts is not known (the time skipped was not heard).
+    if (analysis.soundAt === null) analysis.leadLost = true;
     analysis.t = t;
   }
   // A track that starts under the transition voice is entered late: not measured.
@@ -734,7 +742,7 @@ const overlapStep = (v) => {
     return;
   }
   if (o.waiting && Date.now() - o.since > HANDOFF_WAIT_MS) return overlapOff();
-  if (!o.sync || ownSeek || v.readyState < 3) return;
+  if (!o.sync || ownSeek !== null || v.readyState < 3) return;
   const drift = v.currentTime - voiceAt(wall());
   if (Math.abs(drift) > 0.08 && o.tries < 3) return syncTo(v);
   takeOver(v);
@@ -771,10 +779,11 @@ const previewMix = (pair) => {
 };
 
 const onSeek = (v, type) => {
-  if (ownSeek) {
-    if (type === 'seeked') ownSeek = false;
+  if (ownSeek !== null && Math.abs(v.currentTime - ownSeek) < 1) {
+    if (type === 'seeked') ownSeek = null;
     return;
   }
+  ownSeek = null;
   if (type !== 'seeking') return;
   // A seek by the user: this track is not measured in this session.
   stopAnalysis(false);
@@ -945,6 +954,7 @@ const startAnalysis = (v, id) => {
     bins: new Float32Array(Math.min(A.MAX_BINS, Math.ceil(v.duration / A.BIN_S) + 1) * 4),
     covered: 0,
     soundAt: null,
+    leadLost: false,
     onsets: [],
     onsetFrom: null,
     beatOk: true,
@@ -1053,11 +1063,13 @@ const finish = (a) => {
   };
   let first = null;
   let last = null;
+  const levels = new Float32Array(bins);
   for (let b = 0; b < bins; b++) {
     const frames = a.bins[b * 4 + 3];
     for (let band = 0; band < 3; band++) bytes[b * 3 + band] = toByte(a.bins[b * 4 + band], frames);
     const sum = a.bins[b * 4] + a.bins[b * 4 + 1] + a.bins[b * 4 + 2];
     const db = frames ? 10 * Math.log10(sum / frames + 1e-12) + 3.01 : -Infinity;
+    levels[b] = db;
     if (db > A.SILENCE_DB) {
       first ??= b;
       last = b;
@@ -1070,11 +1082,20 @@ const finish = (a) => {
   const facts = {
     id: a.id,
     duration_s: Math.round(a.duration * 1000) / 1000,
-    lead_in_ms: Math.min(durationMs, ms((first ?? 0) * A.BIN_S)),
+    lead_in_ms: a.leadLost ? 0 : Math.min(durationMs, ms((first ?? 0) * A.BIN_S)),
     envelope: btoa(b64),
   };
   // The end is known only if it was heard.
-  if (last !== null && a.t >= a.duration - 0.5) facts.tail_ms = Math.max(facts.lead_in_ms, Math.min(durationMs, ms((last + 1) * A.BIN_S)));
+  if (last !== null && a.t >= a.duration - 0.5) {
+    facts.tail_ms = Math.max(facts.lead_in_ms, Math.min(durationMs, ms((last + 1) * A.BIN_S)));
+    // A fade-out of its own: the last moment within 15 dB of the median level, if over 3 s before the tail.
+    const heard = levels.filter((db) => db > A.SILENCE_DB).sort();
+    const loud = heard[Math.floor(heard.length / 2)] - 15;
+    let b = last;
+    while (b > 0 && !(levels[b] > loud)) b--;
+    const fadeMs = ms((b + 1) * A.BIN_S);
+    if (fadeMs < facts.tail_ms - 3000 && fadeMs >= facts.lead_in_ms) facts.fade_ms = fadeMs;
+  }
   const fps = a.sr / A.HOP;
   if (a.beatOk && a.onsets.length / fps >= A.MIN_BEAT_S) Object.assign(facts, tempo(a.onsets, fps, a.onsetFrom));
   if (a.chromaFrames >= 20) Object.assign(facts, key(a.chroma));
@@ -1171,14 +1192,14 @@ const resetQuiet = () => {
   useAnalyser('silence', false);
 };
 // Whether the input has been under the threshold for long enough (reading the analyser now).
-const quietFor = (t) => {
+const quietFor = (t, s = QUIET.FOR_S) => {
   useAnalyser('silence', true);
   if (level() > A.SILENCE_DB) {
     quiet.from = null;
     return false;
   }
   quiet.from ??= t;
-  return t - quiet.from >= QUIET.FOR_S;
+  return t - quiet.from >= s;
 };
 const skipSilence = (v, t) => {
   if (!on('skip_silence') || quiet.userSeek || ad) return useAnalyser('silence', false);
@@ -1186,10 +1207,17 @@ const skipSilence = (v, t) => {
   const end = v.duration;
   let listening = false;
   if (!quiet.startDone) {
-    if (f) {
+    const lead = f ? f.lead_in_ms / 1000 : 0;
+    if (f && !(lead > QUIET.MIN_LEAD_S && t < lead - 0.5)) {
       quiet.startDone = true;
-      const lead = f.lead_in_ms / 1000;
-      if (lead > QUIET.MIN_LEAD_S && t < lead - 0.5) seekTo(v, lead - 0.1, true);
+    } else if (f) {
+      // The measured lead-in is checked against the sound now: a bad measurement never skips music.
+      listening = true;
+      if (level() > A.SILENCE_DB && analyserUsers.has('silence')) quiet.startDone = true;
+      else if (quietFor(t, 0.5)) {
+        quiet.startDone = true;
+        seekTo(v, lead - 0.1, true);
+      }
     } else if (t > QUIET.START_S || quiet.steps >= QUIET.MAX_STEPS) {
       quiet.startDone = true;
     } else {
@@ -1469,7 +1497,7 @@ const onMedia = (e) => {
       onSeek(v, e.type);
       break;
     case 'loadstart':
-      ownSeek = false;
+      ownSeek = null;
       break;
     case 'loadedmetadata':
     case 'durationchange':

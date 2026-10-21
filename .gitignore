@@ -3,3 +3,5 @@ target/
 data/
 # measure.ps1 output: local paths and listening history, never committed
 results/
+# Local work plans (pt-BR, not part of the product docs)
+plans/

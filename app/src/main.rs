@@ -8,6 +8,10 @@
 // login state, and the audio graph's state, so measure.ps1 can record them. The page can call three
 // Tauri commands: `player_state` (player.rs) and `audio_facts` (audio_facts.rs), which only report
 // data, and `mix_open` (mixes.rs), which only opens the Mix tab (see capabilities/).
+// Two more flags work only together with --measure (measure-plugins.ps1 uses them; nothing is written
+// to config.toml): --plugins-off=<id,id,...|all> forces those plugins off in memory (unknown ids are
+// reported and skipped), and --open=<lyrics-tab|desktop-lyrics|share-lyrics|mini-player|settings>
+// (repeatable) opens that once the player bar shows, printing `opened=<x> ms=<t>`.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -81,6 +85,8 @@ fn main() {
     let mut measure = false;
     let mut hidden = false;
     let mut mini = false;
+    let mut plugins_off: Vec<String> = Vec::new();
+    let mut opens: Vec<String> = Vec::new();
     let mut url: Url = START_URL.parse().unwrap();
     for arg in std::env::args().skip(1) {
         if arg == "--measure" {
@@ -89,6 +95,10 @@ fn main() {
             hidden = true;
         } else if arg == "--mini-player" {
             mini = true;
+        } else if let Some(ids) = arg.strip_prefix("--plugins-off=") {
+            plugins_off.extend(ids.split(',').map(str::trim).filter(|id| !id.is_empty()).map(String::from));
+        } else if let Some(what) = arg.strip_prefix("--open=") {
+            opens.push(what.to_owned());
         } else if let Ok(u) = arg.parse::<Url>()
             && u.scheme() == "https"
             && u.host_str() == Some("music.youtube.com")
@@ -98,7 +108,10 @@ fn main() {
     }
     smtc::set_app_id();
     let profile = profile_dir();
-    let settings = settings::Settings::load(&profile);
+    let mut settings = settings::Settings::load(&profile);
+    if measure {
+        settings.force_off(&plugins_off);
+    }
     let args = browser_args(&settings.browser);
     let script = injections::script(&settings);
     // The start screen (splash.rs) is for an interactive start; the window opens when it is done.
@@ -226,7 +239,7 @@ fn main() {
             }
             if measure {
                 log_player(app.handle(), start);
-                measure_probes(site, start);
+                measure_probes(site, start, opens.clone());
             }
             Ok(())
         })
@@ -504,7 +517,60 @@ fn log_player(app: &AppHandle, start: Instant) {
     });
 }
 
-fn measure_probes(site: Webview, start: Instant) {
+/// One step toward the Lyrics tab: opens the player page, then presses the tab. "done" once the
+/// tab renderer shows the lyrics page.
+const LYRICS_TAB_PROBE: &str = "(() => { \
+    if (document.querySelector('ytmusic-tab-renderer[page-type=\"MUSIC_PAGE_TYPE_TRACK_LYRICS\"]')) return 'done'; \
+    if (!document.querySelector('ytmusic-app-layout')?.hasAttribute('player-page-open')) { \
+    document.querySelector('ytmusic-player-bar .toggle-player-page-button')?.click(); return 'opening' } \
+    const tabs = [...document.querySelectorAll('ytmusic-player-page tp-yt-paper-tab')]; \
+    const tab = tabs.find(t => /lyrics|letra/i.test(t.textContent)) ?? tabs[1]; \
+    if (!tab) return 'waiting'; tab.click(); return 'clicked' })()";
+
+/// What the page shows with the Lyrics tab open: the player page, the tab, our box and its lines.
+const LYRICS_TAB_DETAIL: &str = "(() => ({ \
+    playerPage: document.querySelector('ytmusic-app-layout')?.hasAttribute('player-page-open') ?? null, \
+    tab: document.querySelector('ytmusic-tab-renderer#tab-renderer')?.getAttribute('page-type') ?? null, \
+    box: !!document.getElementById('feathertune-lyrics'), \
+    lines: document.querySelectorAll('#feathertune-lyrics .ft-line').length }))()";
+
+/// --measure --open=<x>: opens `what` the way the tray (or the page) would.
+fn open_for_measure(site: &Webview, what: &str, start: Instant) {
+    let app = site.app_handle();
+    let ok = match what {
+        "lyrics-tab" => (0..40).any(|_| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            eval_with(site, LYRICS_TAB_PROBE, move |r| {
+                let _ = tx.send(r);
+            });
+            let done = rx.recv_timeout(Duration::from_secs(2)).is_ok_and(|r| r.contains("done"));
+            if !done {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            done
+        }),
+        "desktop-lyrics" | "share-lyrics" | "mini-player" | "settings" => {
+            tray_command(app, &what.replace('-', "_"));
+            true
+        }
+        _ => {
+            println!("open: unknown target {what:?}, ignored");
+            return;
+        }
+    };
+    if ok {
+        println!("opened={what} ms={}", start.elapsed().as_millis());
+        if what == "lyrics-tab" {
+            // What the page shows once the lines had time to arrive.
+            std::thread::sleep(Duration::from_secs(3));
+            eval_with(site, LYRICS_TAB_DETAIL, |r| println!("lyrics-tab {r}"));
+        }
+    } else {
+        println!("opened={what} failed");
+    }
+}
+
+fn measure_probes(site: Webview, start: Instant, opens: Vec<String>) {
     std::thread::spawn(move || {
         let found = Arc::new(AtomicBool::new(false));
         while !found.load(Ordering::Relaxed) && start.elapsed() < Duration::from_secs(60) {
@@ -515,6 +581,13 @@ fn measure_probes(site: Webview, start: Instant) {
                 }
             });
             std::thread::sleep(Duration::from_millis(100));
+        }
+        if found.load(Ordering::Relaxed) {
+            // Let the track start before opening anything.
+            std::thread::sleep(Duration::from_secs(2));
+            for what in &opens {
+                open_for_measure(&site, what, start);
+            }
         }
         loop {
             std::thread::sleep(Duration::from_secs(10));

@@ -61,6 +61,9 @@ pub struct Settings {
     /// The whole file, for the plugin switches (`plugin`).
     #[serde(skip)]
     raw: toml::Table,
+    /// Plugins forced off in memory by `--measure --plugins-off=...`; never written to the file.
+    #[serde(skip)]
+    forced_off: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -204,9 +207,26 @@ impl Settings {
         Ok(settings)
     }
 
+    /// Forces plugins off for this run only (`--plugins-off=a,b` or `all`). Unknown ids are reported
+    /// and skipped.
+    pub fn force_off(&mut self, ids: &[String]) {
+        for id in ids {
+            if id == "all" {
+                self.forced_off.extend(PLUGINS.iter().map(|p| p.id.to_owned()));
+            } else if plugins::get(id).is_some() {
+                self.forced_off.push(id.clone());
+            } else {
+                println!("plugins-off: unknown plugin {id:?}, ignored");
+            }
+        }
+    }
+
     /// The plugin's switch: `[plugins]`, then its old place, then its default. Unknown ids are off.
     pub fn plugin(&self, id: &str) -> bool {
         let Some(plugin) = plugins::get(id) else { return false };
+        if self.forced_off.iter().any(|f| f == id) {
+            return false;
+        }
         let switch = |table: &str, key: &str| self.raw.get(table).and_then(|t| t.get(key)).and_then(|v| v.as_bool());
         switch("plugins", id)
             .or_else(|| plugin.legacy.and_then(|(table, key)| switch(table, key)))
@@ -272,7 +292,8 @@ impl Live {
             Err(e) => return Err(format!("could not read config.toml: {e}")),
         };
         let text = edit(&text, table, key, value, remove)?;
-        let settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
+        let mut settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
+        settings.forced_off = self.get().forced_off.clone();
         std::fs::write(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
         *self.get() = settings;
         if restart {

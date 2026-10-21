@@ -59,32 +59,47 @@ Todo recurso opcional é um plugin em `app/src/plugins.rs`, com um interruptor e
 
 | Plugin | Padrão | Custo |
 |---|---|---|
-| `launcher` (tela de abertura, checagem de atualização) | ligado | não medido: uma requisição pequena ao GitHub por abertura |
-| `controls` (aperta os botões do player) | ligado | nenhum mensurável |
-| `tracker_filter` | ligado | economiza ~16 MB de WS e um pouco de CPU |
-| `track_notifications`, `global_shortcuts` | ligado | nenhum mensurável |
-| `discord`, `lastfm` | ligado (precisam de um id / uma conta) | não medido: uma thread parada cada |
-| `mini_player` | ligado | nada enquanto fechado |
-| `animated_title_bar` | ligado | ainda não medido |
-| `album_color` | ligado | +1 MB privado, dentro do ruído |
-| `synced_lyrics` (LRCLIB, Better Lyrics) | ligado | ~+5 MB, dentro da variação (uma rodada); a transição e o scroll ainda não medidos |
-| `ambient_mode` | ligado | ~+25 MB privados, +15 MB de WS (uma rodada) |
-| `taskbar_controls` | ligado | ainda não medido: atualiza o progresso a cada 1–5 s tocando com a janela visível |
-| `themed_tray_menu` | ligado | ainda não medido: nada enquanto fechado |
-| `desktop_lyrics` | ligado (aberta pela bandeja) | ainda não medido: nada enquanto fechada; um redesenho por troca de linha ou palavra |
-| `share_lyrics` | ligado (aberto pela barra de título, bandeja ou configurações) | ainda não medido: nada até abrir; redesenha só com entrada |
-| `listening_stats` | ligado | ainda não medido: uma thread parada, uma linha gravada por faixa |
-| `navigation` | ligado (ao vivo) | ainda não medido: redesenho dos dois botões quando o histórico muda |
-| `song_mode` | ligado | ainda não medido: um observer de atributos, um clique por faixa; poupa a decodificação de vídeo nas faixas que têm vídeo |
-| `precise_volume` | ligado | ainda não medido: um listener de roda, nada roda fora disso |
-| `skip_disliked` | ligado | ainda não medido: uma checagem por faixa |
-| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (grafo de áudio) | ligado; neutro (flat, none), crossfade 6 s | ainda não medido: um grafo Web Audio depois que algo toca; nada na cadeia enquanto neutro |
+Custo = o plugin ligado contra desligado (`measure-plugins.ps1`, janela aberta, 3 rodadas cada, 21/10/2026, uma faixa fixa); "dentro do ruído" = abaixo de uns 3 pontos de CPU ou 5 MB privados (veja Medições). Todos os plugins juntos: +9,6 pontos de CPU, +70 MB privados, +19 MB de WS.
+
+| Plugin | Padrão | Custo |
+|---|---|---|
+| `launcher` (tela de abertura, checagem de atualização) | ligado | não mensurável aqui (fica desligado sob `--measure`; a linha dele é o ruído do método); uma requisição pequena ao GitHub por abertura |
+| `controls` (aperta os botões do player) | ligado | dentro do ruído (+2,0 pontos, −3 MB privados) |
+| `tracker_filter` | ligado | economiza ~8 MB privados e ~8 MB de WS; CPU dentro do ruído |
+| `track_notifications`, `global_shortcuts` | ligado | dentro do ruído (+0,2 / +0,8 pontos, −3 / −4 MB) |
+| `discord`, `lastfm` | ligado (precisam de um id / uma conta) | dentro do ruído, mas o perfil não tinha id nem conta, então nada rodou: uma thread parada cada, não medido com conta |
+| `mini_player` | ligado | fechado: dentro do ruído (+2,6 pontos, −2 MB). Aberto (janela principal escondida): 4,5% de CPU, 518 MB privados, 227 MB de WS, igual à bandeja |
+| `animated_title_bar` | ligado | +3,8 pontos de CPU, +1 MB privado; perto do nível do ruído (as rodadas de base variam 2,8 pontos) |
+| `album_color` | ligado | dentro do ruído (+2,6 pontos, +1 MB) |
+| `synced_lyrics` (Better Lyrics, Unison, lrcmux, LRCLIB) | ligado | aba Letra fechada: dentro do ruído (+3,8 pontos, −1 MB). **Aba aberta: +44 pontos de CPU, +338 MB privados, +330 MB de WS** (55% contra 11% com o plugin desligado; ainda não otimizado) |
+| `ambient_mode` | ligado | **+56 MB privados, +8 MB de WS, +4,3 pontos de CPU** |
+| `taskbar_controls` | ligado | dentro do ruído (+1,5 pontos, +1 MB) |
+| `themed_tray_menu` | ligado | dentro do ruído enquanto fechado (−2,2 pontos, −4 MB privados) |
+| `desktop_lyrics` | ligado (aberta pela bandeja) | fechada: dentro do ruído (+3,4 pontos, +1 MB). Aberta: 5,6% de CPU, 519 MB privados, 764 MB de WS (veja abaixo) |
+| `share_lyrics` | ligado (aberto pela barra de título, bandeja ou configurações) | fechado: dentro do ruído (−0,2 pontos, +1 MB). Aberto: 5,2% de CPU, 535 MB privados, 770 MB de WS |
+| `listening_stats` | ligado | dentro do ruído (0,0 pontos, −2 MB) |
+| `navigation` | ligado (ao vivo) | dentro do ruído (+0,3 pontos, −4 MB) |
+| `song_mode` | ligado | dentro do ruído nesta faixa (+1,6 pontos, +1 MB) |
+| `precise_volume` | ligado | dentro do ruído (−0,4 pontos, −2 MB) |
+| `skip_disliked` | ligado | dentro do ruído (+1,1 pontos, −4 MB) |
+| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (grafo de áudio) | ligado; neutro (flat, none), crossfade 6 s | cada um dentro do ruído com os outros ligados (+3,9, +1,2, −1,3, +2,9, +0,9, −1,1 pontos; −3, −5, −1, −2, −3, −6 MB privados); o grafo não foi medido inteiro, e um visualizador com a página do player aberta e um crossfade em andamento não foram exercitados |
+
+As rodadas com a letra flutuante ou a janela de compartilhar abertas marcam 5–6% de CPU contra 12,9% do `base`, perto da linha da bandeja, então a CPU delas não se compara com o `base`; o motivo não foi apurado. A memória delas se compara: +10 MB (letra flutuante) e +26 MB (janela de compartilhar) privados contra o `base`.
 
 **Filtro de rastreadores:** `WebResourceRequested` do WebView2 e o crate `adblock` sem regras cosméticas, então ele só consegue bloquear requisições. Só vê scripts, imagens, XHR/fetch, pings e "outros" (nunca documentos, frames, mídia, fontes ou folhas de estilo), e pula os domínios do player, todo domínio do Google e os domínios de entrega de anúncios do Google antes de consultar a lista, então nem uma lista de anúncios colocada por engano muda algo ali. A lista embutida (`app/filters/privacy.txt`) tem só analytics de terceiros; neste site ela bloqueia um host.
 
 **Last.fm:** autenticação desktop (`auth.getToken` → navegador → `auth.getSession`, consultado em intervalos); a session key fica no Gerenciador de Credenciais do Windows. Os builds de release da CI embutem a API key do mantenedor a partir dos secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` do repositório (`option_env!`); chaves no `config.toml` têm prioridade. O ponto do scrobble conta só o tempo tocado; scrobbles que falham esperam em `lastfm-queue.json` (nova tentativa a cada 5 min, descartados depois de 14 dias).
 
-**Letras sincronizadas:** as fontes de `[lyrics] providers` (janela de configurações, aba Lyrics) são consultadas todas ao mesmo tempo, cada uma numa thread curta. A primeira resposta com linhas aparece na hora e uma melhor a substitui quando chega: linhas sincronizadas palavra por palavra vencem linhas sincronizadas só por inteiro, depois vale a ordem da lista (padrão: Better Lyrics, Unison, lrcmux, LRCLIB); para de esperar quando nenhuma fonte à frente da vencedora ainda pode trazer tempo por palavra. A resposta fica em cache em `lyrics-cache/` no perfil: linhas com tempo por palavra enquanto a fonte estiver ligada; linhas só por inteiro e um "não encontrado" por uma semana e só para a mesma lista de fontes, já que uma fonte pode ganhar tempo por palavra depois. Em quatro faixas de teste as primeiras linhas apareceram em uns 0,1–1,3 s e o lrcmux respondeu em até 5 s.
+**Letras sincronizadas:** as fontes de `[lyrics] providers` (janela de configurações, aba Lyrics) são consultadas todas ao mesmo tempo, cada uma numa thread curta. A primeira resposta com linhas aparece na hora e uma melhor a substitui quando chega: linhas sincronizadas palavra por palavra vencem linhas sincronizadas só por inteiro, depois vale a ordem da lista (padrão: Better Lyrics, Unison, lrcmux, LRCLIB); para de esperar quando nenhuma fonte à frente da vencedora ainda pode trazer tempo por palavra. A resposta fica em cache em `lyrics-cache/` no perfil: linhas com tempo por palavra enquanto a fonte estiver ligada; linhas só por inteiro e um "não encontrado" por uma semana e só para a mesma lista de fontes, já que uma fonte pode ganhar tempo por palavra depois. Medido em 26 faixas do histórico do próprio mantenedor (`sources_bench`; sem ids de vídeo, então o Unison foi consultado por título, artista e duração; não se conferiu se o resultado é a música certa), da melhor para a pior:
+
+| Fonte | Achou | Com tempo por palavra | Mediana / p90 |
+|---|---|---|---|
+| LRCLIB | 72% | 0% | 255 ms / 1,6 s |
+| Better Lyrics | 62% | 23% | 376 ms / 455 ms |
+| lrcmux | 46% | 46% | 3,1 s / 6,4 s |
+| Unison | 12% | 12% | 485 ms / 537 ms |
+
+Combinado: achou 69% (com tempo por palavra 58%); as primeiras linhas aparecem em mediana de 236 ms (p90 255 ms) e a escolha final em 455 ms (p90 4,2 s). Uma requisição do LRCLIB falhou e não conta. O Unison pode achar mais com o id do vídeo, que o histórico não guarda.
 - **LRCLIB** (aberto, feito pela comunidade): `GET https://lrclib.net/api/get` (título, artista, álbum, duração). Sem linhas sincronizadas ali, `GET /api/search` com o título limpo do que títulos de vídeo acrescentam ("(Official Video)", "[Lyrics]", "feat. ...", um "Artista - " na frente, " - Remastered" atrás), depois só por artista e título (`q`) se isso não achar nada; fica o resultado de duração mais próxima (no máximo 10 s de diferença) cujo artista e título batem (normalizados, iguais ou um contendo o outro) e que não é instrumental.
 - **Unison** ([banco aberto](https://docs.betterlyrics.org/unison), 120 leituras por minuto, sem chave): letras sincronizadas pela comunidade do Better Lyrics, quase sempre palavra por palavra (TTML, ou LRC). Pelo id do vídeo, senão por título, artista e duração; entradas que a comunidade ocultou são puladas, e uma duração diferente conta como falta.
 - **lrcmux** ([API pública](https://lrcmux.dev), sem chave): um agregador de letras, consultado só por tempo por palavra (`level=word&strict=true`) e nunca a partir das letras do próprio serviço ou do Genius (`sources=!ytmusic,!genius`); o tempo por palavra dele vem quase sempre do KuGou. Texto corrompido (U+FFFD) conta como falta.
@@ -154,6 +169,10 @@ Critério: `Win32_Process`, soma da árvore de processos; privado = `PrivatePage
 | casca nativa, `dist` | janela aberta | 4,5% (4,1–5,5) | 430 MB | 761 MB | 1,9 s |
 | casca nativa, `dist` | mini player, janela principal escondida | 4,0% | 442 MB | 218 MB | 2,0 s |
 | padrões atuais, `release` | janela aberta | 4,4% (3,1–4,5) | 433 MB | 765 MB | 1,9 s |
+| padrões atuais, `release`, 21/10/2026 | janela aberta | 12,9% (12,5–15,3) | 509 MB | 761 MB | 1,8 s |
+| padrões atuais, `release`, 21/10/2026 | na bandeja | 3,6% (3,1–3,7) | 519 MB | **224 MB** | 1,8 s |
+| padrões atuais, `release`, 21/10/2026 | mini player, janela principal escondida | 4,5% (3,8–4,9) | 518 MB | 227 MB | 1,9 s |
+| todos os plugins desligados, `release`, 21/10/2026 | janela aberta | 3,3% (3,1–5,1) | 439 MB | 742 MB | 2,0 s |
 
 | | Cliente Electron (referência, medição anterior) | Meta |
 |---|---|---|
@@ -161,7 +180,9 @@ Critério: `Win32_Process`, soma da árvore de processos; privado = `PrivatePage
 | Na bandeja | igual a aberto | ≤ 260 MB de WS |
 | Instalador | ~100 MB | poucos MB (feathertune: ~3 MB) |
 
-- As linhas da casca nativa estão acima das anteriores, mas não houve base no mesmo dia, então ainda não se sabe quanto vem da casca e quanto do site ou do runtime do WebView2 mudando. CPU aberta e WS ficam um pouco acima da meta.
+- As linhas de 21/10/2026 são as rodadas de um dia (3 cada, em ordem embaralhada, com um aquecimento antes) numa faixa fixa diferente da das linhas de 20/10/2026, e a CPU com a janela aberta depende da faixa: compare só linhas do mesmo dia. Com todos os plugins desligados a janela custa 3,3% de CPU e 439 MB privados, então os plugins juntos custam uns 9,6 pontos de CPU e 70 MB privados; o resto é a casca, o site e o runtime. Nenhum build sem a casca nativa rodou nesse dia, então a parte da casca ainda não está separada. A CPU com a janela aberta (12,9%) fica bem acima da meta de ≤ 4% nesta faixa; na bandeja é 3,6%.
+- Ruído: o `launcher` fica desligado sob `--measure`, então a linha dele é a mesma configuração do `base`. Ela marca +2,7 pontos de CPU e −5 MB privados, e o próprio `base` varia 2,8 pontos; então abaixo de uns 3 pontos de CPU e 5 MB privados o número de um plugin não se distingue de zero.
+- Uma hora na bandeja (mesmo dia, o tempo de vídeo da faixa fixa chegou a 3622 s): WS 346 MB aos 5 min, 551 MB aos 60 min (×1,59), privado 511 → 674 MB, CPU mediana 3,0%. Cresce uns 3,4 MB de WS por minuto e a checagem de "sem vazamento" (fim ≤ 1,1 × o valor de 5 min) falha. Se é o app, a página ou a faixa longa não foi apurado; o valor da bandeja acima (224 MB de WS) é o do começo.
 - Mantidos dos experimentos: sem descoberta de Cast (`MediaRouter`, `DialMediaRouteProvider`: −12 MB de WS) e o filtro de rastreadores (−16 MB de WS). Testados e descartados: sem renderer reserva, sem prerender, sem optimization hints, um módulo CSS "sem animações", a lista EasyPrivacy completa. Não testados de propósito: isolamento de sites desligado, `--disable-component-update`, `--disable-gpu` (CPU 15%), V8 lite (mais CPU), qualquer coisa ligada a anúncios.
 - Para onde vai a RAM (tocando, privado): processo principal ~40 MB + ~4 MB do exe em Rust, GPU ~190 MB, renderer ~180 MB, rede/áudio/armazenamento ~33 MB. O que sobra é o Chromium mais a própria página, que nenhum wrapper corta.
 
@@ -179,7 +200,24 @@ $a = '--measure', '<url da faixa>'
 ./median.ps1 -Prefix open-
 ```
 
-`-HideAfter` manda WM_CLOSE (o app vai para a bandeja); `-MiniAfter` roda `feathertune.exe --mini-player` na instância aberta; `-Exe app/target/dist/feathertune.exe` mede o build `dist` totalmente otimizado (o do instalador).
+`-HideAfter` manda WM_CLOSE (o app vai para a bandeja); `-MiniAfter` roda `feathertune.exe --mini-player` na instância aberta; `-Exe app/target/dist/feathertune.exe` mede o build `dist` totalmente otimizado (o do instalador). A janela é trazida para a frente antes (a animação da barra de título só roda assim); o resultado registra se ela chegou lá.
+
+O custo de cada plugin, de uma vez (umas 2,5 h nas rodadas curtas, depois uma hora na bandeja; deixe o PC em paz e o app fechado):
+
+```powershell
+./measure-plugins.ps1 -Url '<url da faixa>'                  # todos os cenários, 3 rodadas cada, depois o teste de 1 h na bandeja
+./measure-plugins.ps1 -Url '<url da faixa>' -Only '^(base|off-ambient_mode)$' -SkipHour   # alguns
+./measure-plugins.ps1 -SummaryOnly                             # refaz results/plugins-summary.md
+```
+
+Ele lê os ids de `plugins.rs` e roda `base`, `alloff`, `off-<id>` para cada plugin, `tray`, `mini`, `lyrics` e `lyrics-off` (aba Letra aberta), `desktop-lyrics` e `share-lyrics`, três rodadas em ordem embaralhada cada, depois de uma rodada de aquecimento descartada. Com `--measure` o app aceita `--plugins-off=<id,id|all>` (desliga em memória; o `config.toml` nunca é tocado) e `--open=<lyrics-tab|desktop-lyrics|share-lyrics|mini-player|settings>`. O resumo traz a mediana e a faixa por cenário e a diferença contra `base`, e chama a diferença de "inside the noise" quando é menor que a variação das rodadas de base. Ele guarda e restaura os arquivos de estado da letra flutuante e do mini player e o histórico de reproduções, que as rodadas mudariam.
+
+Quanto cada fonte de letra acha uma faixa, e com que rapidez (consulta os serviços de verdade, uma faixa a cada 2 s por fonte, no máximo 100 faixas; o arquivo tem `título<TAB>artista<TAB>álbum<TAB>segundos<TAB>id do vídeo` por linha):
+
+```powershell
+cd app; $env:FEATHERTUNE_BENCH_TRACKS = '<faixas.tsv>'
+cargo test --release -- --ignored sources_bench --nocapture
+```
 
 ## Instalador
 
@@ -191,18 +229,17 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 
 - Com mouse de verdade: snap layouts, arrastar, redimensionar e maximizar/restaurar, em 150% de escala e num segundo monitor; digitar no site depois de trocar de janela.
 - Discord Rich Presence e um login e scrobble reais no Last.fm, inclusive num build da CI com a chave embutida.
-- "Start with Windows" gravando a entrada Run; o aviso de faixa sendo visto; o teste de 1 h na bandeja.
+- "Start with Windows" gravando a entrada Run; o aviso de faixa sendo visto.
 - O caminho "apagar dados" do desinstalador.
 - A transição de 0,7 s entre capas, o Windows em modo claro, uma falta no LRCLIB, e um recarregamento mantendo tema e letras.
-- Letras: com que frequência cada fonte acha uma faixa (e se algum resultado vem errado), a qualidade do tempo por palavra do KuGou via lrcmux, a troca das primeiras linhas pelas com tempo por palavra no meio da música; o tempo estimado por palavra em músicas em português e outras línguas; a aba Letra depois de Próxima com a página do player expandida num álbum; a aba Lyrics da janela de configurações, a ordem das fontes e a busca.
-- Uma base no mesmo dia para saber se a casca nativa custa memória e CPU, e o plugin `animated_title_bar` medido ligado e desligado.
-- A transição e o scroll no ritmo da letra no app rodando (suavidade, rolagem manual e seeks) e o custo de CPU deles; os tempos do novo scroll que estaciona.
+- Letras: se algum resultado vem errado, a qualidade do tempo por palavra do KuGou via lrcmux, a troca das primeiras linhas pelas com tempo por palavra no meio da música; o tempo estimado por palavra em músicas em português e outras línguas; a aba Letra depois de Próxima com a página do player expandida num álbum; a aba Lyrics da janela de configurações, a ordem das fontes e a busca.
+- O que a própria casca nativa custa (nenhum build sem ela foi medido no dia da base); por que a hora na bandeja cresce uns 3,4 MB de WS por minuto (o app, a página ou a faixa longa); por que as rodadas com a letra flutuante ou a janela de compartilhar abertas marcam bem menos CPU que o `base`; por que a aba Letra com `synced_lyrics` ligado custa +44 pontos de CPU e +338 MB (a transição, o laço de scroll ou a página do player que ela exige; só medido, não perfilado).
+- A transição e o scroll no ritmo da letra no app rodando (suavidade, rolagem manual e seeks); os tempos do novo scroll que estaciona.
 - No app rodando: os botões e o progresso da barra de tarefas (também depois de reiniciar o Explorer e rodando como administrador); o menu da bandeja no tema (posição em cada borda da barra, fechar com clique fora, teclado, escala de 150%); a letra flutuante (legibilidade, tempo das palavras contra o site, arrastar, segundo monitor); a aba Stats com um histórico real e a exportação CSV.
 - A janela de compartilhar letra no app rodando (os visuais com capas claras e escuras, colar em apps de chat, Save, escala de 150%) e o botão dela na barra de título; a faixa de letra do mini player (o glifo de letra, o tempo, a rolagem entre linhas, redimensionar perto da borda da tela) e os botões maiores com rótulos ao passar o mouse; o menu da bandeja não ficar mais aberto depois de um clique em outro lugar.
 - O botão de tela cheia do player (a janela entra em tela cheia com o site cobrindo tudo, Esc e o botão de sair da página restauram, esconder na bandeja em tela cheia), a posição do site depois de restaurar da bandeja ou mover entre monitores de DPI diferentes, e o "Reload page" da bandeja.
-- O custo dos cinco plugins novos.
-- Voltar e avançar, modo música, volume preciso e pular não gostei no app rodando: os seletores da página (`ytmusic-av-toggle .song-button` / `.video-button`, o `aria-pressed` dele, `has-av-switcher` e `playback-mode`; `#movie_player` `.ad-showing` e seu `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` aceitando um valor; `#main-panel` para a roda; `#like-button-renderer[like-status]`); a chave Música / Vídeo se apertando uma vez por faixa (e não de novo depois de um clique em Vídeo); a posição e o tema do HUD de volume; o passo da roda num mouse e num touchpad; as teclas globais de volume; uma faixa marcada sendo pulada uma vez (e uma fila delas parando em cinco); os botões de voltar e avançar apagando e mexendo no histórico (e Alt+← / Alt+→); o custo dos quatro plugins.
-- Grafo de áudio (no app rodando): som com o grafo em 20 trocas de faixa nos modos Música e Vídeo, depois de "Recarregar página" e de um novo login; a guarda de falha nunca disparando sem motivo (`feathertune-audio-off` no console); uma pausa de mais de 10 s (contexto suspenso) e play: o som volta na hora, na posição certa; trocar o dispositivo de saída padrão no meio da faixa (fone ↔ caixa); o custo do grafo com `measure.ps1` (qualquer plugin de áudio ligado contra todos desligados, e `latencyHint: 'interactive'` contra `'playback'`); o `worklet=` da sonda sob a CSP do site; a leitura de `getState()` do `ytmusic-player-bar` (`player.adPlaying`).
+- Voltar e avançar, modo música, volume preciso e pular não gostei no app rodando: os seletores da página (`ytmusic-av-toggle .song-button` / `.video-button`, o `aria-pressed` dele, `has-av-switcher` e `playback-mode`; `#movie_player` `.ad-showing` e seu `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` aceitando um valor; `#main-panel` para a roda; `#like-button-renderer[like-status]`); a chave Música / Vídeo se apertando uma vez por faixa (e não de novo depois de um clique em Vídeo); a posição e o tema do HUD de volume; o passo da roda num mouse e num touchpad; as teclas globais de volume; uma faixa marcada sendo pulada uma vez (e uma fila delas parando em cinco); os botões de voltar e avançar apagando e mexendo no histórico (e Alt+← / Alt+→).
+- Grafo de áudio (no app rodando): som com o grafo em 20 trocas de faixa nos modos Música e Vídeo, depois de "Recarregar página" e de um novo login; a guarda de falha nunca disparando sem motivo (`feathertune-audio-off` no console); uma pausa de mais de 10 s (contexto suspenso) e play: o som volta na hora, na posição certa; trocar o dispositivo de saída padrão no meio da faixa (fone ↔ caixa); o custo do grafo inteiro (os seis plugins de áudio desligados juntos não rodou; cada um sozinho fica dentro do ruído) e `latencyHint: 'interactive'` contra `'playback'`; o `worklet=` da sonda sob a CSP do site; a leitura de `getState()` do `ytmusic-player-bar` (`player.adPlaying`).
 - Equalizador e compressor (no app rodando): cada preset de ouvido, sem estalo ao arrastar uma banda ou trocar de preset, e o som original durante um anúncio.
 - Crossfade (no app rodando): as quatro curvas de ouvido; repeat-one, repeat-all e shuffle; próxima no meio de um fade; uma pausa no meio; um anúncio entre faixas tocando inteiro e no volume normal; o seek para `duration − 0,05` fazendo o site seguir; a leitura de `getState().queue.repeatMode` do `ytmusic-player-bar`; o eco de saída.
 - Análise da faixa (no app rodando): depois de 10 faixas, os arquivos em `audio-facts/` existem e o tempo fica a ±2 BPM de um site de BPM aberto à mão em pelo menos 7 delas; o tom contra o mesmo site; qual derivação foi usada (`worklet=` na sonda); a CPU no primeiro minuto de uma faixa nova contra uma faixa já medida.

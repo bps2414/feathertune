@@ -27,7 +27,20 @@ New-Item -ItemType Directory -Force $results | Out-Null
 $running = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Exe }
 if ($running) { throw "$(Split-Path $Exe -Leaf) is already running (pid $($running.ProcessId -join ', ')). Close it first." }
 
-Add-Type -Namespace Measure -Name Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
+Add-Type -Namespace Measure -Name Win32 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr h, bool altTab);
+public static void BringToFront(IntPtr h) {
+    uint pid; uint fg = GetWindowThreadProcessId(GetForegroundWindow(), out pid); uint me = GetCurrentThreadId();
+    AttachThreadInput(me, fg, true); SetForegroundWindow(h); AttachThreadInput(me, fg, false);
+    if (GetForegroundWindow() != h) SwitchToThisWindow(h, true);
+}
+'@
 
 $start = @{ FilePath = $Exe; PassThru = $true; RedirectStandardOutput = $log }
 if ($ArgumentList) { $start.ArgumentList = $ArgumentList }
@@ -71,6 +84,23 @@ function Wait-Until([double]$seconds) {
 }
 
 try {
+    # Work that runs only for the window in front (the title bar animation) needs it in front: sharing
+    # input with the current foreground thread lets SetForegroundWindow through (a synthetic Alt press
+    # would put the app in its menu loop). `focused` ends up in the result.
+    Wait-Until 18
+    $h = (Get-Process -Id $p.Id).MainWindowHandle
+    $focused = $false
+    for ($try = 0; $try -lt 5 -and -not $focused -and $h -ne [IntPtr]::Zero; $try++) {
+        [Measure.Win32]::BringToFront($h)
+        Start-Sleep -Milliseconds 400
+        $focused = [Measure.Win32]::GetForegroundWindow() -eq $h
+    }
+    if (-not $focused) {
+        $fg = [Measure.Win32]::GetForegroundWindow(); $fgPid = 0
+        [void][Measure.Win32]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+        Write-Host "not in front: main window $h, foreground $fg (process $((Get-Process -Id $fgPid -ErrorAction SilentlyContinue).ProcessName), the app's: $($fgPid -eq $p.Id))"
+    }
+
     if ($HideAfter -gt 0) {
         Wait-Until $HideAfter
         $h = (Get-Process -Id $p.Id).MainWindowHandle
@@ -126,5 +156,6 @@ Start-Sleep -Milliseconds 300
 $out = Get-Content $log
 $bar = $out | Select-String '^player_bar_ms=(\d+)' | Select-Object -First 1
 if ($bar) { $sum | Add-Member playerBarMs ([int]$bar.Matches[0].Groups[1].Value) }
+$sum | Add-Member focused $focused
 $sum | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $results "$Name.json")
 $out

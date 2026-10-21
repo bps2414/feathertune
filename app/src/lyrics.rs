@@ -152,19 +152,7 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
     let dir = profile.join("lyrics-cache");
     let mut rx = app.state::<Player>().subscribe();
     std::thread::spawn(move || {
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder()
-                .tls_config(
-                    TlsConfig::builder()
-                        .provider(TlsProvider::NativeTls)
-                        .root_certs(RootCerts::PlatformVerifier)
-                        .build(),
-                )
-                .user_agent(USER_AGENT)
-                .max_redirects(0)
-                .timeout_global(Some(Duration::from_secs(10)))
-                .build(),
-        );
+        let agent = agent();
         // The track being shown, and whether it was already asked for.
         let mut current = String::new();
         let mut asked = false;
@@ -197,6 +185,20 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
             });
         }
     });
+}
+
+/// The HTTP client of the sources: the platform's TLS and roots, our User-Agent, no redirects, 10 s.
+fn agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .tls_config(
+                TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build(),
+            )
+            .user_agent(USER_AGENT)
+            .max_redirects(0)
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build(),
+    )
 }
 
 /// Shows the lines of the current track again with the settings of now (word estimate, offset).
@@ -975,5 +977,125 @@ mod tests {
         assert_eq!(lines[1].words.len(), 4);
         assert!(lines[2].words.is_empty());
         assert!(!estimate(&mut lines));
+    }
+
+    type Answer = Result<Option<Lines>, String>;
+
+    /// The `p`th percentile (0..=1) of sorted values.
+    fn percentile(sorted: &[u64], p: f64) -> u64 {
+        sorted.get(((sorted.len().max(1) - 1) as f64 * p).round() as usize).copied().unwrap_or(0)
+    }
+
+    fn median_p90(mut ms: Vec<u64>) -> String {
+        ms.sort_unstable();
+        format!("{:>7} {:>7}", percentile(&ms, 0.5), percentile(&ms, 0.9))
+    }
+
+    /// How often each source finds a track, how often with word times, and how fast, over a list of
+    /// tracks; then the same for the combined lookup (first answer shown, last change of the lines).
+    /// It asks the real services (one track every 2 s per source, at most 100 tracks), so it is run
+    /// by hand; the file has one track per line: title, artist, album, duration in seconds, video id
+    /// (the id may be empty), tab-separated.
+    ///   FEATHERTUNE_BENCH_TRACKS=<file> cargo test --release -- --ignored sources_bench --nocapture
+    #[test]
+    #[ignore]
+    fn sources_bench() {
+        use std::time::Instant;
+
+        let path = std::env::var("FEATHERTUNE_BENCH_TRACKS").expect("FEATHERTUNE_BENCH_TRACKS: the track list");
+        let tracks: Vec<Track> = std::fs::read_to_string(path)
+            .expect("track list")
+            .lines()
+            .filter_map(|line| {
+                let f: Vec<&str> = line.split('\t').map(str::trim).collect();
+                Some(Track {
+                    id: f.get(4).filter(|id| !id.is_empty()).map(|id| id.to_string()),
+                    title: f.first()?.to_string(),
+                    artist: f.get(1)?.to_string(),
+                    album: f.get(2)?.to_string(),
+                    artwork: None,
+                    duration: f.get(3)?.parse().ok()?,
+                })
+            })
+            .take(100)
+            .collect();
+        assert!(!tracks.is_empty(), "no tracks in the list");
+
+        let agent = agent();
+        // One thread per source, each at most one track every 2 s; no cache involved.
+        let threads: Vec<_> = PROVIDERS
+            .iter()
+            .map(|&(id, _)| {
+                let (agent, tracks) = (agent.clone(), tracks.clone());
+                std::thread::spawn(move || {
+                    let mut last: Option<Instant> = None;
+                    let mut out: Vec<(u64, Answer)> = Vec::new();
+                    for track in &tracks {
+                        if let Some(l) = last {
+                            std::thread::sleep(Duration::from_secs(2).saturating_sub(l.elapsed()));
+                        }
+                        let t = Instant::now();
+                        last = Some(t);
+                        let answer = ask(&agent, id, track, track.duration.round() as u32);
+                        out.push((t.elapsed().as_millis() as u64, answer));
+                    }
+                    out
+                })
+            })
+            .collect();
+        let results: Vec<Vec<(u64, Answer)>> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+
+        println!("\n{} tracks", tracks.len());
+        println!(
+            "{:<13} {:>6} {:>7} {:>8} {:>7}   {:>7} {:>7}",
+            "source", "errors", "found%", "words%", "answered", "med ms", "p90 ms"
+        );
+        for ((id, _), rows) in PROVIDERS.iter().zip(&results) {
+            let answered = rows.iter().filter(|(_, a)| a.is_ok()).count();
+            let found = rows.iter().filter(|(_, a)| matches!(a, Ok(Some(_)))).count();
+            let words = rows.iter().filter(|(_, a)| matches!(a, Ok(Some(l)) if has_words(l))).count();
+            let pct = |n: usize| 100.0 * n as f64 / answered.max(1) as f64;
+            println!(
+                "{:<13} {:>6} {:>6.0}% {:>7.0}% {:>8}   {}",
+                id,
+                rows.len() - answered,
+                pct(found),
+                pct(words),
+                answered,
+                median_p90(rows.iter().map(|r| r.0).collect()),
+            );
+        }
+
+        // The combined lookup, replayed from the same answers in the order they came.
+        let (mut first, mut last, mut found, mut words) = (Vec::new(), Vec::new(), 0, 0);
+        let per_track = (0..tracks.len()).map(|i| results.iter().map(|rows| &rows[i]).collect::<Vec<_>>());
+        for sources in per_track {
+            let mut order: Vec<usize> = (0..PROVIDERS.len()).collect();
+            order.sort_by_key(|&r| sources[r].0);
+            let mut answers: Vec<Option<Answer>> = vec![None; PROVIDERS.len()];
+            let (mut shown, mut first_ms, mut last_ms) = (None, None, 0);
+            for r in order {
+                answers[r] = Some(sources[r].1.clone());
+                let Some(best) = best(&answers) else { continue };
+                if shown != Some(best) {
+                    shown = Some(best);
+                    first_ms.get_or_insert(sources[r].0);
+                    last_ms = sources[r].0;
+                }
+                if answers[..best].iter().all(Option::is_some) && has_words(lines_of(&answers, best).unwrap()) {
+                    break;
+                }
+            }
+            if let (Some(best), Some(ms)) = (shown, first_ms) {
+                found += 1;
+                words += usize::from(has_words(lines_of(&answers, best).unwrap()));
+                first.push(ms);
+                last.push(last_ms);
+            }
+        }
+        let pct = |n: usize| 100.0 * n as f64 / tracks.len() as f64;
+        println!("\ncombined lookup: found {:.0}%, with word times {:.0}%", pct(found), pct(words));
+        println!("  first answer  med / p90 ms: {}", median_p90(first));
+        println!("  final answer  med / p90 ms: {}", median_p90(last));
     }
 }

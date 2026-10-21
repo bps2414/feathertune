@@ -59,32 +59,47 @@ Every optional feature is a plugin in `app/src/plugins.rs`, with a switch under 
 
 | Plugin | Default | Cost |
 |---|---|---|
-| `launcher` (start screen, update check) | on | not measured: one small request to GitHub per start |
-| `controls` (presses the player's buttons) | on | none measurable |
-| `tracker_filter` | on | saves ~16 MB WS and some CPU |
-| `track_notifications`, `global_shortcuts` | on | none measurable |
-| `discord`, `lastfm` | on (need an app id / an account) | not measured: one idle thread each |
-| `mini_player` | on | nothing while closed |
-| `animated_title_bar` | on | not measured yet |
-| `album_color` | on | +1 MB private, inside the noise |
-| `synced_lyrics` (LRCLIB, Better Lyrics) | on | ~+5 MB, inside the spread (one run); the cross-fade and scroll not measured yet |
-| `ambient_mode` | on | ~+25 MB private, +15 MB WS (one run) |
-| `taskbar_controls` | on | not measured yet: a progress update every 1–5 s while playing with the window shown |
-| `themed_tray_menu` | on | not measured yet: nothing while closed |
-| `desktop_lyrics` | on (opened from the tray) | not measured yet: nothing while closed; a repaint per line or word change |
-| `share_lyrics` | on (opened from the title bar, the tray or settings) | not measured yet: nothing until opened; repaints only on input |
-| `listening_stats` | on | not measured yet: one idle thread, one line appended per track |
-| `navigation` | on (live) | not measured yet: a repaint of the two buttons when the history changes |
-| `song_mode` | on | not measured yet: one attribute observer, one click per track; saves video decoding on tracks that have a video |
-| `precise_volume` | on | not measured yet: one wheel listener, nothing runs otherwise |
-| `skip_disliked` | on | not measured yet: one check per track |
-| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (audio graph) | on; neutral (flat, none), crossfade 6 s | not measured yet: one Web Audio graph once anything plays; nothing in the chain while neutral |
+Cost = the plugin on against off (`measure-plugins.ps1`, window open, 3 runs each, 2026-10-21, one fixed track); "inside the noise" = under about 3 points of CPU or 5 MB private (see Measurements). Every plugin together: +9.6 points of CPU, +70 MB private, +19 MB WS.
+
+| Plugin | Default | Cost |
+|---|---|---|
+| `launcher` (start screen, update check) | on | not measurable here (it is off under `--measure`; its row is the noise of the method); one small request to GitHub per start |
+| `controls` (presses the player's buttons) | on | inside the noise (+2.0 points, −3 MB private) |
+| `tracker_filter` | on | saves ~8 MB private and ~8 MB WS; CPU inside the noise |
+| `track_notifications`, `global_shortcuts` | on | inside the noise (+0.2 / +0.8 points, −3 / −4 MB) |
+| `discord`, `lastfm` | on (need an app id / an account) | inside the noise, but the profile had no app id and no account, so nothing ran: one idle thread each, not measured with an account |
+| `mini_player` | on | closed: inside the noise (+2.6 points, −2 MB). Open (main window hidden): 4.5% CPU, 518 MB private, 227 MB WS, the same as the tray |
+| `animated_title_bar` | on | +3.8 points of CPU, +1 MB private; about the noise level (the base runs span 2.8 points) |
+| `album_color` | on | inside the noise (+2.6 points, +1 MB) |
+| `synced_lyrics` (Better Lyrics, Unison, lrcmux, LRCLIB) | on | Lyrics tab closed: inside the noise (+3.8 points, −1 MB). **Tab open: +44 points of CPU, +338 MB private, +330 MB WS** (55% against 11% with the plugin off; not optimized yet) |
+| `ambient_mode` | on | **+56 MB private, +8 MB WS, +4.3 points of CPU** |
+| `taskbar_controls` | on | inside the noise (+1.5 points, +1 MB) |
+| `themed_tray_menu` | on | inside the noise while closed (−2.2 points, −4 MB private) |
+| `desktop_lyrics` | on (opened from the tray) | closed: inside the noise (+3.4 points, +1 MB). Open: 5.6% CPU, 519 MB private, 764 MB WS (see below) |
+| `share_lyrics` | on (opened from the title bar, the tray or settings) | closed: inside the noise (−0.2 points, +1 MB). Open: 5.2% CPU, 535 MB private, 770 MB WS |
+| `listening_stats` | on | inside the noise (0.0 points, −2 MB) |
+| `navigation` | on (live) | inside the noise (+0.3 points, −4 MB) |
+| `song_mode` | on | inside the noise on this track (+1.6 points, +1 MB) |
+| `precise_volume` | on | inside the noise (−0.4 points, −2 MB) |
+| `skip_disliked` | on | inside the noise (+1.1 points, −4 MB) |
+| `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (audio graph) | on; neutral (flat, none), crossfade 6 s | each inside the noise with the others on (+3.9, +1.2, −1.3, +2.9, +0.9, −1.1 points; −3, −5, −1, −2, −3, −6 MB private); the graph is not measured as a whole, and a visualizer with the player page open and a crossfade in progress were not exercised |
+
+The runs with the floating lyrics or the share window open read 5–6% CPU against 12.9% for `base`, close to the tray row, so their CPU cannot be compared with `base`; why was not found out. Their memory can: +10 MB (floating lyrics) and +26 MB (share window) private against `base`.
 
 **Tracker filter:** WebView2 `WebResourceRequested` and the `adblock` crate with cosmetic rules dropped, so it can only block requests. It only sees scripts, images, XHR/fetch, pings and "other" (never documents, frames, media, fonts or stylesheets), and skips the player's domains, every Google domain and Google's ad-delivery domains before the list is asked, so even an ad list dropped in by mistake changes nothing there. The bundled list (`app/filters/privacy.txt`) has only third-party analytics; on this site it blocks one host.
 
 **Last.fm:** desktop auth (`auth.getToken` → browser → `auth.getSession`, polled); the session key lives in the Windows Credential Manager. CI release builds embed the maintainer's API key from the repository secrets `FEATHERTUNE_LASTFM_API_KEY` / `_SECRET` (`option_env!`); keys in `config.toml` take priority. The scrobble point counts played time only; failed scrobbles wait in `lastfm-queue.json` (retried every 5 min, dropped after 14 days).
 
-**Synced lyrics:** the sources of `[lyrics] providers` (settings window, Lyrics tab) are asked all at once, each on a short-lived thread. The first answer with lines is shown at once and a better one replaces it when it comes: lines timed word by word win over lines timed as a whole, then the order of the list (default: Better Lyrics, Unison, lrcmux, LRCLIB); it stops waiting once no source ahead of the winner could still bring word times. The answer is cached in `lyrics-cache/` in the profile: word-timed lines while their source is on; lines timed as a whole and a "not found" for a week and only for the same list of sources, since a source may get word times later. On four test tracks the first lines showed in about 0.1–1.3 s and lrcmux answered in up to 5 s.
+**Synced lyrics:** the sources of `[lyrics] providers` (settings window, Lyrics tab) are asked all at once, each on a short-lived thread. The first answer with lines is shown at once and a better one replaces it when it comes: lines timed word by word win over lines timed as a whole, then the order of the list (default: Better Lyrics, Unison, lrcmux, LRCLIB); it stops waiting once no source ahead of the winner could still bring word times. The answer is cached in `lyrics-cache/` in the profile: word-timed lines while their source is on; lines timed as a whole and a "not found" for a week and only for the same list of sources, since a source may get word times later. Measured on 26 tracks of the maintainer's own history (`sources_bench`; no video ids, so Unison was asked by title, artist and duration; whether a match is the right song was not checked), best first:
+
+| Source | Found | With word times | Median / p90 |
+|---|---|---|---|
+| LRCLIB | 72% | 0% | 255 ms / 1.6 s |
+| Better Lyrics | 62% | 23% | 376 ms / 455 ms |
+| lrcmux | 46% | 46% | 3.1 s / 6.4 s |
+| Unison | 12% | 12% | 485 ms / 537 ms |
+
+Combined: found 69% (word times 58%); the first lines show after a median 236 ms (p90 255 ms) and the final choice after 455 ms (p90 4.2 s). One LRCLIB request failed and is not counted. Unison may find more with the video id, which the history does not keep.
 - **LRCLIB** (open, community-made): `GET https://lrclib.net/api/get` (title, artist, album, duration). With no synced lines there, `GET /api/search` with the title cleaned of what video titles add ("(Official Video)", "[Lyrics]", "feat. ...", an "Artist - " in front, " - Remastered" behind), then by artist and title only (`q`) if that finds nothing; the result kept is the closest in length (at most 10 s off) whose artist and title match (normalized, equal or one holding the other) and that is not instrumental.
 - **Unison** ([open database](https://docs.betterlyrics.org/unison), 120 reads a minute, no key): Better Lyrics' community-synced lyrics, mostly word by word (TTML, or LRC). By the video id, else by title, artist and duration; entries the community hid are skipped, and a different length is a miss.
 - **lrcmux** ([public API](https://lrcmux.dev), no key): a lyrics aggregator, asked for word times only (`level=word&strict=true`) and never from the service's own lyrics or Genius (`sources=!ytmusic,!genius`); its word times come mostly from KuGou. Garbled text (U+FFFD) is a miss.
@@ -154,6 +169,10 @@ Criterion: `Win32_Process`, sum of the process tree; private = `PrivatePageCount
 | native shell, `dist` | window open | 4.5% (4.1–5.5) | 430 MB | 761 MB | 1.9 s |
 | native shell, `dist` | mini player, main window hidden | 4.0% | 442 MB | 218 MB | 2.0 s |
 | current defaults, `release` | window open | 4.4% (3.1–4.5) | 433 MB | 765 MB | 1.9 s |
+| current defaults, `release`, 2026-10-21 | window open | 12.9% (12.5–15.3) | 509 MB | 761 MB | 1.8 s |
+| current defaults, `release`, 2026-10-21 | in the tray | 3.6% (3.1–3.7) | 519 MB | **224 MB** | 1.8 s |
+| current defaults, `release`, 2026-10-21 | mini player, main window hidden | 4.5% (3.8–4.9) | 518 MB | 227 MB | 1.9 s |
+| every plugin off, `release`, 2026-10-21 | window open | 3.3% (3.1–5.1) | 439 MB | 742 MB | 2.0 s |
 
 | | Electron client (reference, earlier measurement) | Target |
 |---|---|---|
@@ -161,7 +180,9 @@ Criterion: `Win32_Process`, sum of the process tree; private = `PrivatePageCount
 | In the tray | same as open | ≤ 260 MB WS |
 | Installer | ~100 MB | a few MB (feathertune: ~3 MB) |
 
-- The native-shell rows are above the earlier ones, but there was no same-day baseline, so it is not known yet how much comes from the shell and how much from the site or the WebView2 runtime changing. Open and WS are slightly over target.
+- The 2026-10-21 rows are one day's runs (3 each, in a shuffled order, a warm-up first) on a different fixed track from the 2026-10-20 rows, and the window-open CPU depends on the track: compare rows of the same day only. With every plugin off the window costs 3.3% CPU and 439 MB private, so the plugins together cost about 9.6 points of CPU and 70 MB private; what is left is the shell, the site and the runtime. No build without the native shell was run that day, so the shell's own share is still not separated. The window-open CPU (12.9%) is far over the ≤ 4% target on this track; in the tray it is 3.6%.
+- Noise: `launcher` is off under `--measure`, so its row is the same configuration as `base`. It reads +2.7 points of CPU and −5 MB private, and `base` itself spans 2.8 points; so under about 3 points of CPU and 5 MB private a plugin's number cannot be told from zero.
+- One hour in the tray (same day, the fixed track's video time reached 3622 s): WS 346 MB at 5 min, 551 MB at 60 min (×1.59), private 511 → 674 MB, median CPU 3.0%. It grows by about 3.4 MB of WS per minute and the "no leak" check (end ≤ 1.1 × the 5-minute value) fails. Whether it is the app, the page or the long-playing track was not found out; the tray figure above (224 MB WS) is the one at the start.
 - Kept from the experiments: no Cast discovery (`MediaRouter`, `DialMediaRouteProvider`: −12 MB WS) and the tracker filter (−16 MB WS). Tried and dropped: no spare renderer, no prerender, no optimization hints, a CSS "no animations" module, a full EasyPrivacy list. Not tried on purpose: site isolation off, `--disable-component-update`, `--disable-gpu` (CPU 15%), V8 lite mode (CPU up), anything ad-related.
 - Where the RAM goes (playing, private): main process ~40 MB + ~4 MB for the Rust exe, GPU ~190 MB, renderer ~180 MB, network/audio/storage ~33 MB. What remains is Chromium plus the page itself, which no wrapper can cut.
 
@@ -179,7 +200,24 @@ $a = '--measure', '<track url>'
 ./median.ps1 -Prefix open-
 ```
 
-`-HideAfter` sends WM_CLOSE (the app goes to the tray); `-MiniAfter` runs `feathertune.exe --mini-player` in the running instance; `-Exe app/target/dist/feathertune.exe` measures the fully optimized `dist` build (the installer's).
+`-HideAfter` sends WM_CLOSE (the app goes to the tray); `-MiniAfter` runs `feathertune.exe --mini-player` in the running instance; `-Exe app/target/dist/feathertune.exe` measures the fully optimized `dist` build (the installer's). The window is brought to the front first (the title bar animation runs only then); the result records whether it got there.
+
+Every plugin's cost, in one go (about 2.5 h for the short runs, then an hour in the tray; leave the PC alone and the app closed):
+
+```powershell
+./measure-plugins.ps1 -Url '<track url>'                     # all scenarios, 3 runs each, then the 1 h tray test
+./measure-plugins.ps1 -Url '<track url>' -Only '^(base|off-ambient_mode)$' -SkipHour   # a few
+./measure-plugins.ps1 -SummaryOnly                             # rebuild results/plugins-summary.md
+```
+
+It reads the plugin ids from `plugins.rs` and runs `base`, `alloff`, `off-<id>` for each plugin, `tray`, `mini`, `lyrics` and `lyrics-off` (the Lyrics tab open), `desktop-lyrics` and `share-lyrics`, three rounds in a shuffled order each, after one discarded warm-up run. Under `--measure` the app takes `--plugins-off=<id,id|all>` (forced off in memory; `config.toml` is never touched) and `--open=<lyrics-tab|desktop-lyrics|share-lyrics|mini-player|settings>`. The summary gives the median and range per scenario and the delta against `base`, and calls a delta "inside the noise" when it is smaller than the spread of the base runs. It backs up and restores the floating-lyrics and mini-player state files and the play history, which the runs would otherwise change.
+
+How often each lyrics source finds a track, and how fast (asks the real services, one track every 2 s per source, at most 100 tracks; the file has `title<TAB>artist<TAB>album<TAB>seconds<TAB>video id` per line):
+
+```powershell
+cd app; $env:FEATHERTUNE_BENCH_TRACKS = '<tracks.tsv>'
+cargo test --release -- --ignored sources_bench --nocapture
+```
 
 ## Installer
 
@@ -191,18 +229,17 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 
 - With a real mouse: snap layouts, dragging, resizing and maximize/restore, at 150% scaling and on a second monitor; typing in the site after switching windows.
 - Discord Rich Presence and a real Last.fm sign-in and scrobble, including on a CI build with the embedded key.
-- "Start with Windows" writing its Run entry; the track toast being seen; the 1 h tray test.
+- "Start with Windows" writing its Run entry; the track toast being seen.
 - The "delete data" uninstall path.
 - The 0.7 s color flow between covers, light-mode Windows, an LRCLIB miss, and a reload keeping the theme and lyrics.
-- Lyrics: how often each source finds a track (and whether a match is ever wrong), the timing quality of lrcmux's KuGou word times, the switch from the first lines to word-timed ones mid-song; the estimated word times on Portuguese and other non-English songs; the Lyrics tab after Next with the player page expanded on an album; the settings window's Lyrics tab, source order and search.
-- A same-day baseline to tell whether the native shell costs memory and CPU, and the `animated_title_bar` plugin measured on and off.
-- The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks) and their CPU cost; the new parked scroll's timings.
+- Lyrics: whether a match is ever wrong, the timing quality of lrcmux's KuGou word times, the switch from the first lines to word-timed ones mid-song; the estimated word times on Portuguese and other non-English songs; the Lyrics tab after Next with the player page expanded on an album; the settings window's Lyrics tab, source order and search.
+- What the native shell itself costs (no build without it was measured on the same day as the baseline); why the hour in the tray grows by ~3.4 MB of WS a minute (the app, the page or the long track); why the runs with the floating lyrics or the share window open read far less CPU than `base`; why the Lyrics tab with `synced_lyrics` on costs +44 points of CPU and +338 MB (the cross-fade, the scroll loop or the player page it needs; found by measuring only, not profiled).
+- The lyrics cross-fade and in-time scroll in the running app (smoothness, manual scroll and seeks); the new parked scroll's timings.
 - In the running app: the taskbar buttons and progress (also after Explorer restarts and when running elevated); the themed tray menu (position on each taskbar edge, closing on a click outside, keyboard, 150% scaling); the floating lyrics (readability, word timing against the site, dragging, a second monitor); the Stats tab with a real history and the CSV export.
 - The share lyrics window in the running app (the looks on light and dark covers, pasting into chat apps, Save, 150% scaling) and its title bar button; the mini player's lyrics band (the lyrics glyph, timing, the roll between lines, resizing near the screen edge) and its larger buttons with hover labels; the tray menu no longer left open after a click elsewhere.
 - The player's fullscreen button (the window goes fullscreen with the site covering it, Esc and the page's exit button restore it, hiding to the tray while fullscreen), the site's bounds after restoring from the tray or moving between monitors of different DPI, and the tray's "Reload page".
-- The cost of the five new plugins.
-- Back and forward, song mode, precise volume and skip disliked in the running app: the page selectors (`ytmusic-av-toggle .song-button` / `.video-button`, its `aria-pressed`, `has-av-switcher` and `playback-mode`; `#movie_player` `.ad-showing` and its `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` taking a value; `#main-panel` for the wheel; `#like-button-renderer[like-status]`); the Song / Video switch pressing itself once per track (and not again after a Video click); the volume HUD placement and theme; the wheel step on a mouse and a touchpad; the global volume keys; a disliked track being skipped once (and a queue of them stopping at five); the back and forward buttons dimming and moving the history (and Alt+Left / Alt+Right); the costs of the four plugins.
-- Audio graph (in the running app): sound with the graph over 20 track changes in Song and Video mode, after "Reload page" and after a new sign-in; the failure guard never tripping without reason (`feathertune-audio-off` in the console); a pause over 10 s (context suspended) and play: sound back at once, at the right position; changing the default output device mid-track (headphones ↔ speakers); the graph's cost with `measure.ps1` (any audio plugin on against all off, and `latencyHint: 'interactive'` against `'playback'`); the probe's `worklet=` under the site's CSP; the `ytmusic-player-bar` `getState()` read (`player.adPlaying`).
+- Back and forward, song mode, precise volume and skip disliked in the running app: the page selectors (`ytmusic-av-toggle .song-button` / `.video-button`, its `aria-pressed`, `has-av-switcher` and `playback-mode`; `#movie_player` `.ad-showing` and its `getVolume` / `setVolume` / `isMuted` / `unMute` / `getVideoData`; `#volume-slider` taking a value; `#main-panel` for the wheel; `#like-button-renderer[like-status]`); the Song / Video switch pressing itself once per track (and not again after a Video click); the volume HUD placement and theme; the wheel step on a mouse and a touchpad; the global volume keys; a disliked track being skipped once (and a queue of them stopping at five); the back and forward buttons dimming and moving the history (and Alt+Left / Alt+Right).
+- Audio graph (in the running app): sound with the graph over 20 track changes in Song and Video mode, after "Reload page" and after a new sign-in; the failure guard never tripping without reason (`feathertune-audio-off` in the console); a pause over 10 s (context suspended) and play: sound back at once, at the right position; changing the default output device mid-track (headphones ↔ speakers); the graph's cost as a whole (the six audio plugins off together was not run; each alone is inside the noise) and `latencyHint: 'interactive'` against `'playback'`; the probe's `worklet=` under the site's CSP; the `ytmusic-player-bar` `getState()` read (`player.adPlaying`).
 - Equalizer and compressor (in the running app): each preset by ear, no click while dragging a band or switching presets, and the original sound during an ad.
 - Crossfade (in the running app): the four curves by ear; repeat-one, repeat-all and shuffle; next in the middle of a fade; a pause in the middle; an ad between tracks playing whole and at full level; the seek to `duration − 0.05` making the site move on; the `ytmusic-player-bar` `getState().queue.repeatMode` read; the echo out.
 - Track analysis (in the running app): after 10 tracks, the files in `audio-facts/` exist and the tempo is within ±2 BPM of a tempo site opened by hand for at least 7 of them; the key against the same site; which tap was used (`worklet=` in the probe); the CPU during the first minute of a new track against a track already measured.

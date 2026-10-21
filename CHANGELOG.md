@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.1 — 2026-10-21
+
+- **The window opens after the start screen, maximized.** It could stay in the tray, or come up at its normal size when it had been maximized.
+
 ## 0.2.0 — 2026-10-21
 
 **Experimental release.** The new audio features (crossfade, mixes, skip silence, track analysis) are still rough and may misbehave, so they start off, in the new Experimental tab of the settings. Everything else is on as usual.

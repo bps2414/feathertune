@@ -486,9 +486,30 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
         }
     });
     if !hidden {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{IsWindowVisible, SW_SHOW, ShowWindow};
+
+        // The window is created hidden (start screen, --hidden), and tao applies the maximize the
+        // window state restores to a hidden window as a style bit only: shown, SW_MAXIMIZE then takes
+        // it as already maximized and it comes up at its normal size, at times not at all. The first
+        // time it shows, maximize it again for real (once visible: tao would hide it again otherwise).
+        static FIRST_SHOW: AtomicBool = AtomicBool::new(true);
+        let remaximize = FIRST_SHOW.swap(false, Ordering::Relaxed) && window.is_maximized().unwrap_or(false);
         miniplayer::close(app);
         let _ = window.show();
         let _ = window.unminimize();
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                if !IsWindowVisible(HWND(hwnd.0)).as_bool() {
+                    eprintln!("main window still hidden after show; showing it directly");
+                    let _ = ShowWindow(HWND(hwnd.0), SW_SHOW);
+                }
+            }
+        }
+        if remaximize {
+            let _ = window.unmaximize();
+            let _ = window.maximize();
+        }
         let _ = window.set_focus();
     }
     println!("{} memory {}", if hidden { "hidden," } else { "shown," }, if hidden { "Low" } else { "Normal" });

@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.1 — 2026-10-21
+
+- **A janela abre depois da tela de abertura, maximizada.** Ela podia ficar na bandeja, ou aparecer no tamanho normal quando estava maximizada.
+
 ## 0.2.0 — 2026-10-21
 
 **Versão experimental.** Os recursos de áudio novos (crossfade, mixes, pular silêncio, análise de faixa) ainda estão crus e podem falhar, então vêm desligados, na nova aba Experimental das configurações. O resto vem ligado como sempre.

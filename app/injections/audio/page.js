@@ -92,6 +92,7 @@ let settleTimer = 0;
 const taps = () => {
   const list = [];
   if (analyserUsers.size) list.push([nodes.input, nodes.analyser]);
+  if (tapNode) list.push([nodes.input, tapNode], [tapNode, nodes.zero], [nodes.zero, ctx.destination]);
   if (echo.on) {
     list.push([nodes.trim, nodes.echoSend], [nodes.echoSend, nodes.delay], [nodes.delay, nodes.feedback]);
     list.push([nodes.feedback, nodes.delay], [nodes.delay, nodes.echoWet], [nodes.echoWet, ctx.destination]);
@@ -264,8 +265,8 @@ const testWorklet = () => {
     worklet = 'missing';
     return;
   }
-  const code = 'registerProcessor("feathertune-probe", class extends AudioWorkletProcessor { process() { return false; } });';
-  const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+  // The module is the analysis tap itself (see track analysis).
+  const url = URL.createObjectURL(new Blob([TAP_CODE], { type: 'application/javascript' }));
   ctx.audioWorklet
     .addModule(url)
     .then(() => (worklet = 'ok'))
@@ -357,7 +358,10 @@ const slice = (curve, p) => {
 
 let trackId = null;
 // The analysis of the current and next track (from Rust; see track_analysis).
-const facts = () => data?.facts?.current ?? null;
+const facts = () => {
+  const f = data?.facts?.current;
+  return f && f.id === trackId ? f : null;
+};
 // The fade of the current track: { out, dur, curve } in video seconds, or null.
 let fade = null;
 let armed = false;
@@ -371,7 +375,11 @@ const currentId = () => {
   return player?.getVideoData?.()?.video_id || new URLSearchParams(location.search).get('v');
 };
 const repeatOne = (v) => v.loop || siteState()?.queue?.repeatMode === 'ONE';
-const seekTo = (v, t) => {
+// `silence`: the time skipped is known to be silent (skip_silence); otherwise the analysis of the
+// track ends where it got to.
+const seekTo = (v, t, silence = false) => {
+  if (silence) skipAnalysis(t);
+  else if (analysis) stopAnalysis(true);
   ownSeek = true;
   v.currentTime = t;
 };
@@ -381,7 +389,9 @@ const planFade = (v) => {
   const c = data?.crossfade;
   if (!on('crossfade') || !c?.duration_ms || ad || repeatOne(v)) return null;
   const dur = c.duration_ms / 1000;
-  const end = v.duration;
+  // Before the final silence, once it is known.
+  const tail = facts()?.tail_ms;
+  const end = tail && tail / 1000 < v.duration ? tail / 1000 : v.duration;
   if (!Number.isFinite(end) || end < 3 * dur) return null;
   return { out: end - dur, dur, curve: CURVES[c.curve] || CURVES.equal_power, echo: !!c.echo };
 };
@@ -447,6 +457,7 @@ const inWindow = (t) => fade && t >= fade.out - ARM_BEFORE_S && t < fade.out + f
 
 // The next track starts: it fades in if the last one faded out (a short fade if it was cut off).
 const startTrack = (v, id) => {
+  if (analysis && analysis.id !== id) stopAnalysis(analysis.t >= analysis.duration - 1.5);
   const cut = armed && !faded;
   const prev = nodes.master.gain.value;
   trackId = id;
@@ -483,6 +494,12 @@ const onTime = (v) => {
   if (id && id !== trackId) startTrack(v, id);
   if (!fade && on('crossfade')) fade = planFade(v);
   const t = v.currentTime;
+  if (analysis && Math.abs(analysis.t - t) > 0.5) {
+    // Out of step (buffering): the envelope goes on from here, the beat window is lost.
+    if (inBeatWindow(analysis)) analysis.beatOk = false;
+    analysis.t = t;
+  }
+  if (id) startAnalysis(v, id);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
   if (faded && t < 2) startTrack(v, id);
   if (!fade) return;
@@ -500,11 +517,381 @@ const onSeek = (v, type) => {
     return;
   }
   if (type !== 'seeking') return;
+  // A seek by the user: this track is not measured in this session.
+  stopAnalysis(false);
   holdFade();
   if (!inWindow(v.currentTime)) {
     cancelFade();
     faded = false;
   }
+};
+
+// --- track analysis ---
+//
+// The first time a track plays from its start (normal play: no ad, rate 1, no seek by the user),
+// a tap on the input reads the samples and works out, on this page only:
+// - an envelope: the level of three bands (< 250 Hz, mid, > 4 kHz) every 100 ms, as bytes;
+// - where the sound starts and ends (above -50 dBFS);
+// - the tempo and first beat: onset strength (spectral flux) over the first 60 s of sound,
+//   autocorrelated between 60 and 200 BPM;
+// - the key: a chromagram over the same 60 s against the Krumhansl profiles (an estimate).
+// Only these numbers leave the page (audio_facts); the samples are never kept. The tap is an
+// AudioWorklet when the site's CSP lets a Blob module load, else a ScriptProcessor; it outputs
+// silence into a zero gain, and exists only while a track is being measured.
+
+const A = {
+  FRAME: 1024,
+  HOP: 512,
+  CHROMA: 8192,
+  CHROMA_EVERY_S: 0.5,
+  BEAT_S: 60,
+  BIN_S: 0.1,
+  MAX_BINS: 9000,
+  SILENCE_DB: -50,
+  MIN_BEAT_S: 20,
+};
+const KEY_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+const TAP_CODE = `registerProcessor('feathertune-tap', class extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(4096); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0];
+    if (!ch || !ch.length) return true;
+    const a = ch[0], b = ch[1] || ch[0];
+    for (let i = 0; i < a.length; i++) {
+      this.buf[this.n++] = (a[i] + b[i]) / 2;
+      if (this.n === this.buf.length) { this.port.postMessage(this.buf, [this.buf.buffer]); this.buf = new Float32Array(4096); this.n = 0; }
+    }
+    return true;
+  }
+});`;
+
+// In-place radix-2 FFT (re, im of length n, a power of two), with tables kept per size.
+const fftTables = new Map();
+const fft = (re, im) => {
+  const n = re.length;
+  let t = fftTables.get(n);
+  if (!t) {
+    const rev = new Uint32Array(n);
+    for (let i = 0, j = 0; i < n; i++) {
+      rev[i] = j;
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j |= bit;
+    }
+    const cos = new Float32Array(n / 2);
+    const sin = new Float32Array(n / 2);
+    for (let i = 0; i < n / 2; i++) {
+      cos[i] = Math.cos((2 * Math.PI * i) / n);
+      sin[i] = -Math.sin((2 * Math.PI * i) / n);
+    }
+    const win = Float32Array.from({ length: n }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / n));
+    t = { rev, cos, sin, win };
+    fftTables.set(n, t);
+  }
+  for (let i = 0; i < n; i++) {
+    const j = t.rev[i];
+    if (j > i) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const half = size >> 1;
+    const step = n / size;
+    for (let start = 0; start < n; start += size) {
+      for (let k = 0; k < half; k++) {
+        const wr = t.cos[k * step];
+        const wi = t.sin[k * step];
+        const a = start + k;
+        const b = a + half;
+        const xr = re[b] * wr - im[b] * wi;
+        const xi = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - xr;
+        im[b] = im[a] - xi;
+        re[a] += xr;
+        im[a] += xi;
+      }
+    }
+  }
+  return t;
+};
+// The windowed spectrum's magnitudes of the last n samples of `ring` (a circular buffer at `pos`).
+const spectrum = (ring, pos, n) => {
+  const re = new Float32Array(n);
+  const im = new Float32Array(n);
+  const len = ring.length;
+  for (let i = 0; i < n; i++) re[i] = ring[(pos - n + i + len) % len];
+  const t = fftTables.get(n) || fft(new Float32Array(n), new Float32Array(n));
+  for (let i = 0; i < n; i++) re[i] *= t.win[i];
+  fft(re, im);
+  const mag = new Float32Array(n / 2);
+  for (let k = 0; k < n / 2; k++) mag[k] = Math.hypot(re[k], im[k]);
+  return mag;
+};
+
+let tapNode = null;
+let tapKind = null;
+let analysis = null;
+// Tracks measured or given up in this page session.
+const analysed = new Set();
+
+const ensureTap = () => {
+  if (tapNode) return;
+  nodes.zero ||= ctx.createGain();
+  nodes.zero.gain.value = 0;
+  if (worklet === 'ok') {
+    tapNode = new AudioWorkletNode(ctx, 'feathertune-tap', { numberOfOutputs: 1, outputChannelCount: [1] });
+    tapNode.port.onmessage = (e) => feed(e.data);
+    tapKind = 'worklet';
+  } else {
+    tapNode = ctx.createScriptProcessor(4096, 2, 1);
+    tapNode.onaudioprocess = (e) => {
+      const input = e.inputBuffer;
+      const a = input.getChannelData(0);
+      const b = input.numberOfChannels > 1 ? input.getChannelData(1) : a;
+      const mono = new Float32Array(a.length);
+      for (let i = 0; i < a.length; i++) mono[i] = (a[i] + b[i]) / 2;
+      feed(mono);
+    };
+    tapKind = 'script';
+  }
+};
+const dropTap = () => {
+  if (!tapNode) return;
+  const node = tapNode;
+  tapNode = null;
+  wire();
+  if (node.port) node.port.onmessage = null;
+  else node.onaudioprocess = null;
+};
+
+const startAnalysis = (v, id) => {
+  if (!on('track_analysis') || analysed.has(id) || analysis || ad || v.playbackRate !== 1) return;
+  if (facts()?.id === id || v.currentTime > 0.5 || !Number.isFinite(v.duration)) return;
+  const sr = ctx.sampleRate;
+  analysis = {
+    id,
+    sr,
+    duration: v.duration,
+    t: v.currentTime,
+    ring: new Float32Array(A.CHROMA),
+    pos: 0,
+    sinceHop: 0,
+    sinceChroma: 0,
+    prev: null,
+    // Per 100 ms bin: summed power of low, mid, high and the frame count.
+    bins: new Float32Array(Math.min(A.MAX_BINS, Math.ceil(v.duration / A.BIN_S) + 1) * 4),
+    covered: 0,
+    soundAt: null,
+    onsets: [],
+    onsetFrom: null,
+    beatOk: true,
+    chroma: new Float32Array(12),
+    chromaFrames: 0,
+  };
+  ensureTap();
+  wire();
+};
+
+const stopAnalysis = (send) => {
+  if (!analysis) return;
+  const a = analysis;
+  analysis = null;
+  analysed.add(a.id);
+  dropTap();
+  if (send) {
+    const facts = finish(a);
+    if (facts) window.__TAURI_INTERNALS__?.invoke('audio_facts', { facts: JSON.stringify(facts) }).catch(() => {});
+  }
+};
+
+// The samples of one block (mono). Dropped while paused, buffering, during an ad or after a seek.
+const feed = (samples) => {
+  const a = analysis;
+  const v = video;
+  if (!a || !v || v.paused || v.readyState < 3 || ad) return;
+  const nyquist = a.sr / 2;
+  const t0 = a.t;
+  for (let i = 0; i < samples.length; i++) {
+    a.t = t0 + i / a.sr;
+    a.ring[a.pos] = samples[i];
+    a.pos = (a.pos + 1) % a.ring.length;
+    if (++a.sinceHop >= A.HOP) {
+      a.sinceHop = 0;
+      frame(a, nyquist);
+    }
+    if (++a.sinceChroma >= A.CHROMA_EVERY_S * a.sr) {
+      a.sinceChroma = 0;
+      if (inBeatWindow(a)) chromaFrame(a);
+    }
+  }
+  a.t = t0 + samples.length / a.sr;
+};
+const inBeatWindow = (a) => a.onsetFrom !== null && a.t - a.onsetFrom < A.BEAT_S;
+
+// One 1024-sample frame every 512 samples: band levels for the envelope and the onset strength.
+const frame = (a, nyquist) => {
+  const mag = spectrum(a.ring, a.pos, A.FRAME);
+  const n = A.FRAME;
+  // Mean square per band (Parseval with the Hann window: sum of w^2 is 3n/8).
+  const norm = 2 / (n * ((3 * n) / 8));
+  let low = 0;
+  let mid = 0;
+  let high = 0;
+  for (let k = 1; k < mag.length; k++) {
+    const f = (k * nyquist) / mag.length;
+    const p = mag[k] * mag[k] * norm;
+    if (f < 250) low += p;
+    else if (f < 4000) mid += p;
+    else high += p;
+  }
+  const bin = Math.floor(a.t / A.BIN_S);
+  if (bin < a.bins.length / 4) {
+    a.bins[bin * 4] += low;
+    a.bins[bin * 4 + 1] += mid;
+    a.bins[bin * 4 + 2] += high;
+    a.bins[bin * 4 + 3] += 1;
+    a.covered = Math.max(a.covered, bin + 1);
+  }
+  const db = 10 * Math.log10(low + mid + high + 1e-12) + 3.01;
+  if (db > A.SILENCE_DB && a.soundAt === null) {
+    a.soundAt = a.t;
+    a.onsetFrom = a.t;
+  }
+  if (inBeatWindow(a) && a.beatOk) {
+    let flux = 0;
+    if (a.prev) for (let k = 1; k < mag.length; k++) flux += Math.max(0, Math.log1p(100 * mag[k]) - Math.log1p(100 * a.prev[k]));
+    a.onsets.push(flux);
+  }
+  a.prev = mag;
+};
+
+const chromaFrame = (a) => {
+  const mag = spectrum(a.ring, a.pos, A.CHROMA);
+  const df = a.sr / A.CHROMA;
+  for (let k = Math.ceil(65 / df); k < Math.min(mag.length, 2000 / df); k++) {
+    const midi = 69 + 12 * Math.log2((k * df) / 440);
+    a.chroma[((Math.round(midi) % 12) + 12) % 12] += mag[k];
+  }
+  a.chromaFrames++;
+};
+
+// Our own forward seek over silence (skip_silence): the skipped time counts as silent.
+const skipAnalysis = (to) => {
+  if (analysis && to > analysis.t) analysis.t = to;
+};
+
+const finish = (a) => {
+  const bins = a.covered;
+  if (bins < 10) return null;
+  const bytes = new Uint8Array(bins * 3);
+  const toByte = (p, frames) => {
+    const db = frames ? 10 * Math.log10(p / frames + 1e-12) + 3.01 : -60;
+    return Math.round(((Math.min(0, Math.max(-60, db)) + 60) / 60) * 255);
+  };
+  let first = null;
+  let last = null;
+  for (let b = 0; b < bins; b++) {
+    const frames = a.bins[b * 4 + 3];
+    for (let band = 0; band < 3; band++) bytes[b * 3 + band] = toByte(a.bins[b * 4 + band], frames);
+    const sum = a.bins[b * 4] + a.bins[b * 4 + 1] + a.bins[b * 4 + 2];
+    const db = frames ? 10 * Math.log10(sum / frames + 1e-12) + 3.01 : -Infinity;
+    if (db > A.SILENCE_DB) {
+      first ??= b;
+      last = b;
+    }
+  }
+  let b64 = '';
+  for (let i = 0; i < bytes.length; i += 3000) b64 += String.fromCharCode(...bytes.subarray(i, i + 3000));
+  const ms = (x) => Math.round(x * 1000);
+  const durationMs = Math.floor(a.duration * 1000);
+  const facts = {
+    id: a.id,
+    duration_s: Math.round(a.duration * 1000) / 1000,
+    lead_in_ms: Math.min(durationMs, ms((first ?? 0) * A.BIN_S)),
+    envelope: btoa(b64),
+  };
+  // The end is known only if it was heard.
+  if (last !== null && a.t >= a.duration - 0.5) facts.tail_ms = Math.max(facts.lead_in_ms, Math.min(durationMs, ms((last + 1) * A.BIN_S)));
+  const fps = a.sr / A.HOP;
+  if (a.beatOk && a.onsets.length / fps >= A.MIN_BEAT_S) Object.assign(facts, tempo(a.onsets, fps, a.onsetFrom));
+  if (a.chromaFrames >= 20) Object.assign(facts, key(a.chroma));
+  return facts;
+};
+
+// Tempo by autocorrelation of the onset strength, weighted toward 120 BPM (one octave either way).
+const tempo = (onsets, fps, from) => {
+  const mean = onsets.reduce((s, x) => s + x, 0) / onsets.length;
+  const o = onsets.map((x) => Math.max(0, x - mean));
+  const lo = Math.floor((fps * 60) / 200);
+  const hi = Math.ceil((fps * 60) / 60);
+  const r = new Float64Array(hi + 2);
+  for (let lag = lo - 1; lag <= hi + 1; lag++) {
+    let s = 0;
+    for (let i = 0; i + lag < o.length; i++) s += o[i] * o[i + lag];
+    r[lag] = s;
+  }
+  let best = -1;
+  let bestScore = -Infinity;
+  for (let lag = lo; lag <= hi; lag++) {
+    const bpm = (60 * fps) / lag;
+    const score = r[lag] * Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120), 2));
+    if (score > bestScore && r[lag] >= r[lag - 1] && r[lag] >= r[lag + 1]) {
+      bestScore = score;
+      best = lag;
+    }
+  }
+  if (best < 0 || !(bestScore > 0)) return {};
+  const [a, b, c] = [r[best - 1], r[best], r[best + 1]];
+  const shift = a - 2 * b + c ? (0.5 * (a - c)) / (a - 2 * b + c) : 0;
+  const period = best + Math.max(-0.5, Math.min(0.5, shift));
+  const bpm = Math.round(((60 * fps) / period) * 10) / 10;
+  // The phase whose beats land on the most onset strength.
+  let phase = 0;
+  let phaseScore = -1;
+  for (let p = 0; p < period; p++) {
+    let s = 0;
+    for (let i = p; i < o.length; i += period) s += o[Math.round(i)] || 0;
+    if (s > phaseScore) {
+      phaseScore = s;
+      phase = p;
+    }
+  }
+  const beatS = 60 / bpm;
+  const first = from + phase / fps;
+  return { bpm, beat_offset_ms: Math.round((first - Math.floor(first / beatS) * beatS) * 1000) };
+};
+
+// The key whose profile correlates best with the chroma; also on the Camelot wheel.
+const key = (chroma) => {
+  const corr = (x, y) => {
+    const mx = x.reduce((s, v) => s + v, 0) / 12;
+    const my = y.reduce((s, v) => s + v, 0) / 12;
+    let n = 0;
+    let dx = 0;
+    let dy = 0;
+    for (let i = 0; i < 12; i++) {
+      n += (x[i] - mx) * (y[i] - my);
+      dx += (x[i] - mx) ** 2;
+      dy += (y[i] - my) ** 2;
+    }
+    return dx && dy ? n / Math.sqrt(dx * dy) : -1;
+  };
+  let best = null;
+  for (let tonic = 0; tonic < 12; tonic++) {
+    for (const [mode, profile] of [['major', MAJOR], ['minor', MINOR]]) {
+      const rotated = profile.map((_, i) => profile[(i - tonic + 12) % 12]);
+      const c = corr(chroma, rotated);
+      if (!best || c > best.c) best = { tonic, mode, c };
+    }
+  }
+  if (!best || best.c <= 0) return {};
+  // Camelot: C major is 8B and each fifth up adds one; a minor key sits with its relative major.
+  const major = best.mode === 'major' ? best.tonic : (best.tonic + 3) % 12;
+  const number = ((((major * 7) % 12) + 7) % 12) + 1;
+  return { key: `${KEY_NAMES[best.tonic]} ${best.mode}`, camelot: `${number}${best.mode === 'major' ? 'B' : 'A'}` };
 };
 
 // --- ads ---
@@ -533,6 +920,7 @@ const onAd = (now) => {
   fade = null;
   nodes.master.gain.cancelAndHoldAtTime(ctx.currentTime);
   stopEcho(true);
+  stopAnalysis(false);
 };
 
 // --- media events ---
@@ -560,6 +948,7 @@ const onMedia = (e) => {
       break;
     case 'ratechange':
       holdFade();
+      if (v.playbackRate !== 1) stopAnalysis(false);
       break;
     case 'seeking':
     case 'seeked':
@@ -572,8 +961,13 @@ const onMedia = (e) => {
     case 'durationchange':
       // A new duration: the fade is planned again.
       if (!armed) fade = null;
+    if (analysis && d?.facts?.current?.id === analysis.id) stopAnalysis(false);
       break;
     case 'playing':
+      // After a pause or a stall, the samples dropped meanwhile: back in step.
+      if (analysis) analysis.t = v.currentTime;
+      onTime(v);
+      break;
     case 'timeupdate':
       if (e.type === 'timeupdate') checkGuard(v);
       onTime(v);

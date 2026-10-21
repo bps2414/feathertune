@@ -274,6 +274,18 @@ pub const PLUGINS: &[Plugin] = &[
         live: true,
         legacy: None,
     },
+    Plugin {
+        id: "track_analysis",
+        name: "Track analysis",
+        description: "The first time a track plays from its start, measures its tempo, key (an estimate), where \
+                      its sound starts and ends, and a loudness outline, on this PC only. Only those numbers are \
+                      kept (in the profile), never audio. The crossfade, skip silence and the Mix tab use them.",
+        cost: "Not measured yet: some CPU while a new track plays its first minute (tempo and key), then a \
+               little until it ends; nothing for a track already measured.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

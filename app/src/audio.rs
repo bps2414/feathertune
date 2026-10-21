@@ -11,10 +11,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Map, Value, json};
 use tauri::{AppHandle, Manager};
 
+use crate::audio_facts::Store;
+use crate::player::Player;
 use crate::settings::{Live, Settings};
 
 /// The plugins of the `audio` page module.
-pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade"];
+pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis"];
 
 /// Equalizer presets: gains in dB for 31, 62, 125, 250, 500 Hz, 1, 2, 4, 8 and 16 kHz ("custom" is
 /// `[audio] eq_bands`).
@@ -44,9 +46,30 @@ static LOADED: AtomicBool = AtomicBool::new(false);
 pub fn start(app: &AppHandle) {
     let on = PLUGINS.iter().any(|p| app.state::<Live>().plugin(p));
     LOADED.store(on, Ordering::Relaxed);
-    if on {
-        push(app);
+    if !on {
+        return;
     }
+    push(app);
+    // A new track: the page gets the facts of the current (and next) track.
+    let mut rx = app.state::<Player>().subscribe();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use tokio::sync::broadcast::error::RecvError;
+        let mut last = None;
+        loop {
+            match rx.blocking_recv() {
+                Ok(event) => {
+                    let id = event.state().track.id.clone();
+                    if id != last {
+                        last = id;
+                        push(&app);
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Whether the page has the module; without it, turning an audio plugin on needs a restart.
@@ -59,8 +82,17 @@ pub fn push(app: &AppHandle) {
     if !loaded() {
         return;
     }
-    let data = payload(&app.state::<Live>().get());
+    let mut data = payload(&app.state::<Live>().get());
+    let current = app.state::<Player>().current().and_then(|s| s.track.id);
+    data["facts"] = json!({ "current": current.and_then(|id| page_facts(app, &id)) });
     crate::injections::send(app, "audio", &data);
+}
+
+/// A track's facts for the page: everything but the envelope (only the Mix tab draws it).
+fn page_facts(app: &AppHandle, id: &str) -> Option<Value> {
+    let mut facts = serde_json::to_value(app.state::<Store>().load(id)?).ok()?;
+    facts.as_object_mut()?.remove("envelope");
+    Some(facts)
 }
 
 /// The equalizer gains the settings ask for (flat for anything unknown).

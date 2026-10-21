@@ -5,14 +5,16 @@
 // The main window has no system frame: titlebar.rs draws the title bar and the site is a child
 // webview (label `site`) below it.
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
-// login state, and the audio graph's state, so measure.ps1 can record them. The page can call a single
-// Tauri command, `player_state` (see player.rs and capabilities/), which only reports data.
+// login state, and the audio graph's state, so measure.ps1 can record them. The page can call two Tauri
+// commands, `player_state` (player.rs) and `audio_facts` (audio_facts.rs), which only report data
+// (see capabilities/).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod album_color;
 mod artwork;
 mod audio;
+mod audio_facts;
 mod desktop_lyrics;
 mod discord;
 mod gfx;
@@ -124,11 +126,13 @@ fn main() {
         .manage(player::Player::new())
         .manage(injections::PageData::default())
         .manage(lyrics::Lyrics::default())
+        .manage(audio_facts::Store::new(&profile))
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
         .invoke_handler(tauri::generate_handler![
             player::player_state,
+            audio_facts::audio_facts,
             settings_window::settings_get,
             settings_window::settings_set,
             settings_window::settings_action,

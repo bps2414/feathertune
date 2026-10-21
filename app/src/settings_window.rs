@@ -138,6 +138,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "next": s.shortcuts.next,
             "previous": s.shortcuts.previous,
             "mini_player": s.shortcuts.mini_player,
+            "volume_up": s.shortcuts.volume_up,
+            "volume_down": s.shortcuts.volume_down,
         },
         "discord": { "client_id": s.discord.client_id },
         "lastfm": {
@@ -188,11 +190,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 "mini_player" if !on => crate::miniplayer::close(&app),
                 "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
+                "navigation" => crate::titlebar::set_navigation(&app, on),
                 _ => {}
             }
             Ok(!plugin.live)
         }
-        ("shortcuts", "play_pause" | "next" | "previous" | "mini_player") => {
+        ("shortcuts", "play_pause" | "next" | "previous" | "mini_player" | "volume_up" | "volume_down") => {
             let keys = text(&value, 64)?;
             if !keys.is_empty() {
                 keys.parse::<tauri_plugin_global_shortcut::Shortcut>().map_err(|e| format!("invalid shortcut: {e}"))?;

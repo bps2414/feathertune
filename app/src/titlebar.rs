@@ -9,6 +9,10 @@
 //!   share lyrics, mini player and settings buttons are client area and the rest is HTCAPTION (drag, Aero Snap,
 //!   double click maximizes, right click opens the system menu). The share lyrics button is there only while the
 //!   track has synced lyrics (`set_lyrics`, from lyrics.rs) and the `share_lyrics` plugin is on.
+//! - With the `navigation` plugin, back and forward buttons sit left of the app name. They call the
+//!   WebView2's own `GoBack`/`GoForward` (no command on the page), are dimmed and inert when there is
+//!   nowhere to go (`CanGoBack`/`CanGoForward`, updated on `HistoryChanged`, which repaints only the
+//!   two buttons), and appear or vanish at once with the switch, moving the app name.
 //! - The caption buttons are clicked on the non-client mouse messages, which are not passed on:
 //!   DefWindowProc would draw the classic buttons over the strip.
 //! - Sizes are DIPs scaled by the window's DPI; colors follow the system light/dark setting and, with
@@ -32,10 +36,10 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, Webview, Window};
 use tokio::sync::broadcast::error::RecvError;
-use webview2_com::ContainsFullScreenElementChangedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
 };
+use webview2_com::{ContainsFullScreenElementChangedEventHandler, HistoryChangedEventHandler};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1SolidColorBrush};
 use windows::Win32::Graphics::DirectWrite::{
@@ -64,8 +68,11 @@ const BUTTON: f32 = 46.0;
 /// The mini player and settings buttons, left of the caption buttons with a small gap.
 const SMALL: f32 = 40.0;
 const GAP: f32 = 6.0;
-/// Left margin of the app name.
+/// Left margin of the app name (without the navigation buttons).
 const NAME_LEFT: f32 = 12.0;
+/// The back and forward buttons: width, and where the first one starts.
+const NAV: f32 = 34.0;
+const NAV_LEFT: f32 = 6.0;
 const SUBCLASS_ID: usize = 0xfea7;
 /// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
 pub const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -75,6 +82,8 @@ const WM_TRACK: u32 = WM_APP + 2;
 const WM_ANIMATE: u32 = WM_APP + 3;
 /// Posted to lay the site webview out again (fullscreen entered or left).
 const WM_RELAYOUT: u32 = WM_APP + 4;
+/// Posted when the history changed: repaint the navigation buttons.
+const WM_NAV: u32 = WM_APP + 5;
 const TIMER: usize = 0xfea8;
 /// 30 fps: smooth for slow drift, half the repaints of 60.
 const FRAME_MS: u32 = 33;
@@ -84,6 +93,10 @@ static ANIMATED: AtomicBool = AtomicBool::new(false);
 /// The `share_lyrics` plugin was on at startup, and the current track has synced lyrics.
 static SHARE_ON: AtomicBool = AtomicBool::new(false);
 static LYRICS_READY: AtomicBool = AtomicBool::new(false);
+/// The `navigation` plugin switch, and whether the page's history has somewhere to go.
+static NAV_ON: AtomicBool = AtomicBool::new(false);
+static CAN_BACK: AtomicBool = AtomicBool::new(false);
+static CAN_FORWARD: AtomicBool = AtomicBool::new(false);
 /// The page has a fullscreen element (the player's fullscreen button): the window is fullscreen and the
 /// site takes the strip's place too.
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
@@ -188,7 +201,7 @@ impl Brushes {
 
 /// The current track line, kept until the track, the width or the brushes change.
 struct TrackLine {
-    key: (String, String, u32, u32),
+    key: (String, String, u32, u32, u32),
     layout: IDWriteTextLayout,
     left: f32,
 }
@@ -203,7 +216,7 @@ impl TrackLine {
         width: f32,
         dim: &ID2D1SolidColorBrush,
     ) -> Option<Self> {
-        let (left, right) = (NAME_LEFT + 150.0, first_button_left(width) - 24.0);
+        let (left, right) = (name_left() + 150.0, first_button_left(width) - 24.0);
         if title.is_empty() || right - left < 80.0 {
             return None;
         }
@@ -225,6 +238,8 @@ impl TrackLine {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Button {
+    Back,
+    Forward,
     Share,
     MiniPlayer,
     Settings,
@@ -271,6 +286,7 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
     let fullscreen_window = window.clone();
     ANIMATED.store(app.state::<Live>().plugin("animated_title_bar"), Ordering::Relaxed);
     SHARE_ON.store(app.state::<Live>().plugin("share_lyrics"), Ordering::Relaxed);
+    NAV_ON.store(app.state::<Live>().plugin("navigation"), Ordering::Relaxed);
     WINDOW.store(hwnd, Ordering::Relaxed);
     let player = app.state::<Player>();
     let now = Arc::new(Mutex::new(Now::of(player.current().as_ref())));
@@ -350,6 +366,23 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
                 }));
                 let mut token = 0;
                 let _ = core.add_ContainsFullScreenElementChanged(&handler, &mut token);
+                // The history, for the back and forward buttons.
+                let history = HistoryChangedEventHandler::create(Box::new(move |core, _| {
+                    if let Some(core) = core {
+                        let (mut back, mut forward) = (windows_core::BOOL::default(), windows_core::BOOL::default());
+                        core.CanGoBack(&mut back)?;
+                        core.CanGoForward(&mut forward)?;
+                        let back_changed = CAN_BACK.swap(back.as_bool(), Ordering::Relaxed) != back.as_bool();
+                        let forward_changed =
+                            CAN_FORWARD.swap(forward.as_bool(), Ordering::Relaxed) != forward.as_bool();
+                        if back_changed || forward_changed {
+                            PostMessageW(Some(hwnd), WM_NAV, WPARAM(0), LPARAM(0))?;
+                        }
+                    }
+                    Ok(())
+                }));
+                let mut token = 0;
+                let _ = core.add_HistoryChanged(&history, &mut token);
             }
         }
     })
@@ -380,6 +413,12 @@ pub fn set_animated(app: &AppHandle, on: bool) {
     }
 }
 
+/// Shows or hides the back and forward buttons (the `navigation` switch).
+pub fn set_navigation(app: &AppHandle, on: bool) {
+    NAV_ON.store(on, Ordering::Relaxed);
+    set_animated(app, ANIMATED.load(Ordering::Relaxed));
+}
+
 /// Shows or hides the share lyrics button: whether the current track has synced lyrics. Any thread.
 pub fn set_lyrics(ready: bool) {
     if LYRICS_READY.swap(ready, Ordering::Relaxed) != ready {
@@ -404,6 +443,20 @@ fn invalidate(hwnd: HWND) {
         let _ = GetClientRect(hwnd, &mut client);
         let strip = RECT { bottom: height, ..client };
         let _ = InvalidateRect(Some(hwnd), Some(&strip), false);
+    }
+}
+
+/// Repaints only the region of the two navigation buttons.
+fn invalidate_nav(hwnd: HWND) {
+    let scale = gfx::scale(hwnd);
+    let region = RECT {
+        left: (NAV_LEFT * scale).floor() as i32,
+        top: 0,
+        right: ((NAV_LEFT + 2.0 * NAV) * scale).ceil() as i32,
+        bottom: (HEIGHT * scale).round() as i32,
+    };
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), Some(&region), false);
     }
 }
 
@@ -479,7 +532,15 @@ impl TitleBar {
         let command = |c: u32| unsafe {
             let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(c as usize), LPARAM(0));
         };
+        let history = |back: bool| unsafe {
+            if let Ok(core) = self.controller.CoreWebView2() {
+                let _ = if back { core.GoBack() } else { core.GoForward() };
+            }
+        };
         match button {
+            Button::Back if CAN_BACK.load(Ordering::Relaxed) => history(true),
+            Button::Forward if CAN_FORWARD.load(Ordering::Relaxed) => history(false),
+            Button::Back | Button::Forward => {}
             Button::Share => crate::share_lyrics::open(self.window.app_handle()),
             Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
             Button::Settings => crate::settings_window::open(self.window.app_handle()),
@@ -613,7 +674,7 @@ impl TitleBar {
                 let left = button_left(button, width);
                 let right = left + button_width(button);
                 let r = rect(left, 0.0, right, HEIGHT);
-                let mut glyph = text;
+                let mut glyph = if enabled(button) { text } else { gfx::with_alpha(text, 0.3) };
                 if hover == Some(button) || pressed == Some(button) {
                     let down = pressed == Some(button);
                     let fill = match button {
@@ -626,6 +687,8 @@ impl TitleBar {
                     }
                 }
                 let icon = match button {
+                    Button::Back => "\u{e72b}",
+                    Button::Forward => "\u{e72a}",
                     Button::Share => "\u{e72d}",
                     Button::MiniPlayer => "\u{e8a7}",
                     Button::Settings => "\u{e713}",
@@ -636,8 +699,9 @@ impl TitleBar {
                 };
                 c.text(icon, if ours(button) { big_icons } else { icons }, r, glyph);
             }
-            c.text("feathertune", name, rect(NAME_LEFT, 0.0, NAME_LEFT + 140.0, HEIGHT), text);
-            let key = (title, artist, first_button_left(width).to_bits(), *brushes_id);
+            let name_left = name_left();
+            c.text("feathertune", name, rect(name_left, 0.0, name_left + 140.0, HEIGHT), text);
+            let key = (title, artist, first_button_left(width).to_bits(), *brushes_id, name_left.to_bits());
             if line.as_ref().is_none_or(|l| l.key != key) {
                 *line = TrackLine::new(track, &key.0, &key.1, width, &b.dim).map(|l| TrackLine { key, ..l });
             }
@@ -649,29 +713,68 @@ impl TitleBar {
     }
 }
 
-const BUTTONS: [Button; 6] =
-    [Button::Share, Button::MiniPlayer, Button::Settings, Button::Minimize, Button::Maximize, Button::Close];
+const BUTTONS: [Button; 8] = [
+    Button::Back,
+    Button::Forward,
+    Button::Share,
+    Button::MiniPlayer,
+    Button::Settings,
+    Button::Minimize,
+    Button::Maximize,
+    Button::Close,
+];
 
 /// The buttons that are client area (ours), not caption buttons.
 fn ours(b: Button) -> bool {
-    matches!(b, Button::Share | Button::MiniPlayer | Button::Settings)
+    matches!(b, Button::Back | Button::Forward | Button::Share | Button::MiniPlayer | Button::Settings)
+}
+
+/// The history buttons, on the left; every other button is on the right.
+fn nav(b: Button) -> bool {
+    matches!(b, Button::Back | Button::Forward)
 }
 
 fn shown(b: Button) -> bool {
-    b != Button::Share || (SHARE_ON.load(Ordering::Relaxed) && LYRICS_READY.load(Ordering::Relaxed))
+    match b {
+        Button::Back | Button::Forward => NAV_ON.load(Ordering::Relaxed),
+        Button::Share => SHARE_ON.load(Ordering::Relaxed) && LYRICS_READY.load(Ordering::Relaxed),
+        _ => true,
+    }
 }
 
-/// Where the leftmost button on the strip starts.
+/// Whether a click does anything: the history buttons are dimmed when there is nowhere to go.
+fn enabled(b: Button) -> bool {
+    match b {
+        Button::Back => CAN_BACK.load(Ordering::Relaxed),
+        Button::Forward => CAN_FORWARD.load(Ordering::Relaxed),
+        _ => true,
+    }
+}
+
+/// Where the app name starts: after the history buttons while they are on.
+fn name_left() -> f32 {
+    if NAV_ON.load(Ordering::Relaxed) { NAME_LEFT + 2.0 * NAV } else { NAME_LEFT }
+}
+
+/// Where the leftmost button on the right side of the strip starts.
 fn first_button_left(width: f32) -> f32 {
-    BUTTONS.into_iter().filter(|b| shown(*b)).map(|b| button_left(b, width)).fold(width, f32::min)
+    BUTTONS.into_iter().filter(|b| shown(*b) && !nav(*b)).map(|b| button_left(b, width)).fold(width, f32::min)
 }
 
 fn button_width(b: Button) -> f32 {
-    if ours(b) { SMALL } else { BUTTON }
+    if nav(b) {
+        NAV
+    } else if ours(b) {
+        SMALL
+    } else {
+        BUTTON
+    }
 }
 
 fn button_left(b: Button, width: f32) -> f32 {
     match b {
+        Button::Back => NAV_LEFT,
+        Button::Forward => NAV_LEFT + NAV,
         Button::Share => width - 3.0 * BUTTON - GAP - 3.0 * SMALL,
         Button::MiniPlayer => width - 3.0 * BUTTON - GAP - 2.0 * SMALL,
         Button::Settings => width - 3.0 * BUTTON - GAP - SMALL,
@@ -741,7 +844,7 @@ unsafe extern "system" fn subclass(
         WM_NCMOUSEMOVE => bar.set_hover(hwnd, caption_button(wparam.0), true),
         WM_MOUSEMOVE => {
             let (x, y) = client_dip(hwnd, lparam);
-            let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b));
+            let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b) && enabled(*b));
             bar.set_hover(hwnd, hover, false);
         }
         WM_NCMOUSELEAVE | WM_MOUSELEAVE => {
@@ -769,6 +872,9 @@ unsafe extern "system" fn subclass(
         WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_LBUTTONUP => {
             let (x, y) = client_dip(hwnd, lparam);
             if let Some(b) = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b)) {
+                if !enabled(b) {
+                    return LRESULT(0);
+                }
                 if msg == WM_LBUTTONUP {
                     let clicked = bar.pressed == Some(b);
                     bar.press(hwnd, None);
@@ -791,6 +897,13 @@ unsafe extern "system" fn subclass(
         }
         WM_TIMER if wparam.0 == TIMER => {
             bar.tick(hwnd);
+            return LRESULT(0);
+        }
+        WM_NAV => {
+            if bar.hover.is_some_and(|b| nav(b) && !enabled(b)) {
+                bar.hover = None;
+            }
+            invalidate_nav(hwnd);
             return LRESULT(0);
         }
         WM_ANIMATE => {

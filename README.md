@@ -28,6 +28,10 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - A tray menu in the app's look, with the track and its controls.
 - Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
 - Ambient mode: the blurred, glowing cover behind the site.
+- Back and forward buttons on the title bar.
+- Song mode: picks the song version when a track also has a video, so the video is not decoded.
+- Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
+- Skips tracks that start already marked "dislike" (never during an ad).
 - A privacy filter for third-party analytics (never ads).
 - Every feature is on out of the box and is a plugin you can switch off in the settings window. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
@@ -74,12 +78,18 @@ themed_tray_menu = true       # tray menu in the app's look; false: the Windows 
 desktop_lyrics = true         # floating lyrics over the desktop (open it from the tray)
 share_lyrics = true           # lyrics picture cards (open it from the tray)
 listening_stats = true        # history in stats/plays.jsonl in the profile, shown in the Stats tab
+navigation = true             # back and forward buttons on the title bar
+song_mode = true              # picks the song version of a track that also has a video
+precise_volume = true         # mouse wheel over the player: volume by 2% (Shift: 10%)
+skip_disliked = true          # skips a track that starts marked "dislike"
 
 [shortcuts]                  # global; "" turns one off
 play_pause = "Ctrl+Alt+Space"
 next = "Ctrl+Alt+Right"
 previous = "Ctrl+Alt+Left"
 mini_player = ""             # opens/closes the mini player
+volume_up = ""               # volume up by 2% (5% without precise_volume)
+volume_down = ""
 
 [discord]
 client_id = ""               # your own Discord application id

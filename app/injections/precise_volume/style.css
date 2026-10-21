@@ -1,0 +1,22 @@
+/* Precise volume: the "NN%" that fades in beside the volume slider (precise_volume/page.js). It takes the
+   album colors when that plugin is on (theme/page.js sets the variables), neutral colors otherwise. */
+#feathertune-volume-hud {
+  position: fixed;
+  z-index: 10000;
+  transform: translate(-50%, -100%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font: 600 13px/1.4 Roboto, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: var(--feathertune-on-accent, #fff);
+  background: var(--feathertune-accent, #3a3a3a);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#feathertune-volume-hud.on {
+  opacity: 1;
+  transition-duration: 0.1s;
+}

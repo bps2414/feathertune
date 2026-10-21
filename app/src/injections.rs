@@ -57,6 +57,24 @@ const INJECTIONS: &[Injection] = &[
         css: Some(include_str!("../injections/ambient/style.css")),
         plugin: Some("ambient_mode"),
     },
+    Injection {
+        id: "song_mode",
+        js: Some(include_str!("../injections/song_mode/page.js")),
+        css: None,
+        plugin: Some("song_mode"),
+    },
+    Injection {
+        id: "precise_volume",
+        js: Some(include_str!("../injections/precise_volume/page.js")),
+        css: Some(include_str!("../injections/precise_volume/style.css")),
+        plugin: Some("precise_volume"),
+    },
+    Injection {
+        id: "skip_disliked",
+        js: Some(include_str!("../injections/skip_disliked/page.js")),
+        css: None,
+        plugin: Some("skip_disliked"),
+    },
 ];
 
 /// The last data `send` gave each module (as JSON text).
@@ -123,9 +141,10 @@ mod tests {
 
     #[test]
     fn modules_follow_their_switch() {
-        assert!(script(&Settings::default()).contains("SELECTORS"));
+        // A selector only `controls` uses.
+        assert!(script(&Settings::default()).contains(".previous-button"));
         let off = Settings::parse("[plugins]\ncontrols = false").unwrap();
-        assert!(!script(&off).contains("SELECTORS"));
+        assert!(!script(&off).contains(".previous-button"));
         assert!(script(&off).contains("player_state"));
     }
 

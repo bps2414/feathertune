@@ -199,6 +199,48 @@ pub const PLUGINS: &[Plugin] = &[
         live: false,
         legacy: None,
     },
+    Plugin {
+        id: "navigation",
+        name: "Back and forward",
+        description: "Back and forward buttons on the title bar, dimmed when there is nowhere to go. They use the \
+                      browser's own history (Alt+Left and Alt+Right work too).",
+        cost: "Not measured yet: a repaint of the two buttons when the page's history changes.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "song_mode",
+        name: "Song mode",
+        description: "When a track comes in both a song and a video version, picks the song one (the site's own \
+                      Song / Video switch), so the video is not decoded. Choosing Video yourself holds until the \
+                      next track.",
+        cost: "Not measured yet: one observer on the player and one click per track; less CPU and memory while a \
+               track with a video plays as the song.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
+        id: "precise_volume",
+        name: "Precise volume",
+        description: "The mouse wheel over the player bar or the expanded player changes the volume by 2% (10% \
+                      with Shift), with a small percentage that fades. Optional global keys under Shortcuts.",
+        cost: "Not measured yet: one wheel listener; nothing runs while you do not scroll.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
+        id: "skip_disliked",
+        name: "Skip disliked tracks",
+        description: "Skips a track that starts already marked with the site's dislike. Never during an ad, at \
+                      most one skip per track and five in a row.",
+        cost: "Not measured yet: one observer on the player and one check per track.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Plugin> {

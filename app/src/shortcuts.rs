@@ -1,5 +1,5 @@
 //! Global shortcuts (tauri-plugin-global-shortcut, plugin `global_shortcuts`): play/pause, next,
-//! previous and the mini player, with the keys from `[shortcuts]` in `config.toml`. They run the same
+//! previous, the mini player and the volume up and down, with the keys from `[shortcuts]` in `config.toml`. They run the same
 //! commands as the tray menu. `register` can run again at any time (the settings window does).
 
 use tauri::{AppHandle, Manager};
@@ -24,6 +24,8 @@ pub fn register(app: &AppHandle) {
             (s.next.clone(), "next"),
             (s.previous.clone(), "previous"),
             (s.mini_player.clone(), "miniPlayer"),
+            (s.volume_up.clone(), "volumeUp"),
+            (s.volume_down.clone(), "volumeDown"),
         ]
     };
     for (keys, command) in wanted {

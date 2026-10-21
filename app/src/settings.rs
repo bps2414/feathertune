@@ -12,6 +12,8 @@
 //! next = "Ctrl+Alt+Right"
 //! previous = "Ctrl+Alt+Left"
 //! mini_player = ""
+//! volume_up = ""                   # the player's volume, by 2% with precise_volume (else 5%)
+//! volume_down = ""
 //!
 //! [discord]
 //! client_id = ""                   # Rich Presence is off while empty
@@ -57,6 +59,8 @@ pub struct Shortcuts {
     pub next: String,
     pub previous: String,
     pub mini_player: String,
+    pub volume_up: String,
+    pub volume_down: String,
 }
 
 impl Default for Shortcuts {
@@ -66,6 +70,8 @@ impl Default for Shortcuts {
             next: "Ctrl+Alt+Right".into(),
             previous: "Ctrl+Alt+Left".into(),
             mini_player: String::new(),
+            volume_up: String::new(),
+            volume_down: String::new(),
         }
     }
 }

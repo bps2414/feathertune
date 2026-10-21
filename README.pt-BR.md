@@ -28,6 +28,10 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Um menu da bandeja no visual do app, com a faixa e os controles.
 - Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.
 - Modo ambiente: a capa desfocada e brilhante atrás do site.
+- Botões de voltar e avançar na barra de título.
+- Modo música: escolhe a versão só áudio quando a faixa também tem vídeo, para o vídeo não ser decodificado.
+- Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
+- Pula faixas que começam já marcadas com "não gostei" (nunca durante um anúncio).
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Todo recurso vem ligado e é um plugin que você desliga na janela de configurações. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
@@ -74,12 +78,18 @@ themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu 
 desktop_lyrics = true         # letra flutuante sobre a área de trabalho (abra pela bandeja)
 share_lyrics = true           # cartões de letra em imagem (abra pela bandeja)
 listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na aba Stats
+navigation = true             # botões de voltar e avançar na barra de título
+song_mode = true              # escolhe a versão só áudio de uma faixa que também tem vídeo
+precise_volume = true         # roda do mouse sobre o player: volume em 2% (Shift: 10%)
+skip_disliked = true          # pula uma faixa que começa marcada com "não gostei"
 
 [shortcuts]                  # globais; "" desliga um
 play_pause = "Ctrl+Alt+Space"
 next = "Ctrl+Alt+Right"
 previous = "Ctrl+Alt+Left"
 mini_player = ""             # abre/fecha o mini player
+volume_up = ""               # volume +2% (5% sem precise_volume)
+volume_down = ""
 
 [discord]
 client_id = ""               # o id do seu próprio aplicativo do Discord

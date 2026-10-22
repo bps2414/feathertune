@@ -1,0 +1,28 @@
+name: Feature request
+description: An idea for the app
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, check the "Ideas" and "Not verified yet" sections of docs/DESIGN.md: it may already be decided or ruled out.
+        The app never touches ads, never records or downloads audio and never uses private APIs (see AGENTS.md), so requests for those are closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you cannot do, or do badly, today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: How it could work, and what it costs in CPU and memory if you can tell. New features are plugins that can be turned off.
+  - type: dropdown
+    id: pr
+    attributes:
+      label: Would you send a PR?
+      options:
+        - "No, just the idea"
+        - "Yes, if you agree with it first"

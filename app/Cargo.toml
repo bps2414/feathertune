@@ -3,6 +3,7 @@ name = "feathertune"
 version = "0.2.7"
 edition = "2024"
 publish = false
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2.6", features = [] }

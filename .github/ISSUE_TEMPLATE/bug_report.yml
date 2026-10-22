@@ -1,0 +1,41 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a personal project with no formal support; I read every report but cannot promise a time.
+        English or Portuguese is fine. Please read CONTRIBUTING.md if you plan to send a fix.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The version of the installer you ran (for example 0.2.7).
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Does it happen every time? With the window hidden, with an ad, after a track change?
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings > Advanced > Export diagnostics, then paste the file here. It names the tracks played since the app
+        started and has no tokens, keys, account names or paths; read it and delete what you do not want to publish.
+      render: text
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Windows 10 or 11, and the build if you know it.

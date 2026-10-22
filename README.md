@@ -136,8 +136,12 @@ disable_features = []        # extra Chromium features to turn off (experiments,
 
 The old keys `[injections] controls`, `[privacy] tracker_filter` and `[notifications] track_change` are still read; the settings window replaces them with the `[plugins]` entry. "Start with Windows", "Connect Last.fm" and the mini player are also in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file. A local build without a Last.fm key needs `api_key` and `api_secret` here.
 
+## Contributing
+
+Pull requests are welcome; open an issue first for anything big. The full guide (rules, build discipline, what is not accepted, how review works) is [CONTRIBUTING.md](CONTRIBUTING.md). Security problems: [SECURITY.md](SECURITY.md).
+
 ## Disclaimer
 
 This is an independent, unofficial project. It is not affiliated with, endorsed by or sponsored by any music streaming service or its owners. All trademarks belong to their respective owners. You are responsible for using it in line with the terms of the service you sign in to.
 
-No license has been chosen yet, so all rights are reserved for now.
+Licensed under the [MIT License](LICENSE).

@@ -1,15 +1,23 @@
 # AGENTS.md
 
-Instructions for coding agents working in this repo. Humans: see [README.md](README.md).
+Instructions for coding agents working in this repo. Humans: see [README.md](README.md) and, to send a pull request, [CONTRIBUTING.md](CONTRIBUTING.md) (pt-BR: [CONTRIBUTING.pt-BR.md](CONTRIBUTING.pt-BR.md)). A pull request written with an agent follows the same rules as one written by hand; see "Pull requests" below.
 
 feathertune is a Windows-only Tauri 2 app that hosts a music service's official website in a lean WebView2 window. Design, security model, measurements, what is not verified yet and ideas are in [docs/DESIGN.md](docs/DESIGN.md) (pt-BR: [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md)).
 
 ## Layout
 
-- `app/`: the app (Cargo project; run cargo commands from here). `src/main.rs` window, tray, navigation; `src/titlebar.rs`, `src/miniplayer.rs`, `src/gfx.rs` native UI (Direct2D); `src/plugins.rs` the plugin list; `src/settings_window.rs` + `settings/` the settings window; `src/player.rs` player state (the API integrations consume); `src/share_lyrics.rs` lyrics picture cards; `src/lyric_view.rs` current/next lyric line (floating lyrics, mini player); `src/smtc.rs` media flyout; `src/audio.rs` + `injections/audio/` the audio graph (equalizer, compressor, crossfade, analysis, skip silence, visualizer, mix buttons); `src/audio_facts.rs` track analysis store; `src/mixes.rs` mixes and the Mix tab's command; `src/deck.rs` + `injections/deck/` the transition voice; `src/injections.rs` + `injections/<id>/` page scripts; `src/privacy.rs` + `filters/` tracker filter; `capabilities/` what the remote page may call; `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
+- `app/`: the app (Cargo project; run cargo commands from here). Each `src/*.rs` starts with a `//!` comment that says what it is; read it before editing the module. Tests live inside the modules (`#[cfg(test)]`).
+  - Shell and native UI (Direct2D): `main.rs` window, tray, navigation; `titlebar.rs`, `miniplayer.rs`, `splash.rs` (start screen), `traymenu.rs`, `taskbar.rs`, `gfx.rs` (shared drawing); `settings.rs` (`config.toml`), `settings_window.rs` + `settings/` (the settings window); `plugins.rs` the plugin list with costs; `i18n.rs` + `locales/pt-BR.json` interface texts (`t("English")`); `game_mode.rs`; `shortcuts.rs`; `notify.rs`; `updater.rs` self-update; `diag.rs` the diagnostics export.
+  - Player and integrations: `player.rs` player state (what the integrations consume); `smtc.rs` media flyout; `discord.rs`; `lastfm.rs`; `stats.rs` listening stats.
+  - Lyrics and art: `lyrics.rs` sources, cache and translation; `lyric_view.rs` current/next line (floating lyrics, mini player); `desktop_lyrics.rs`; `share_lyrics.rs` picture cards; `artwork.rs` + `album_color.rs` cover and album colors.
+  - Audio: `audio.rs` + `injections/audio/` the audio graph (equalizer, compressor, crossfade, analysis, skip silence, visualizer, mix buttons); `audio_facts.rs` track analysis store; `mixes.rs` mixes and the Mix tab's command; `deck.rs` + `injections/deck/` the transition voice.
+  - Page: `injections.rs` + `injections/<id>/` page scripts (`core`, `controls`, `theme`, `lyrics`, `ambient`, `audio`, `deck`, `precise_volume`, `skip_disliked`, `song_mode`); `privacy.rs` + `filters/` tracker filter; `capabilities/` + `permissions/` what the remote page may call.
+  - Packaging: `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
 - `spike/`: frozen measurement prototype. Do not build it unless a task is about it.
-- `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs.
+- `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs. `measure-plugins.ps1`: runs `measure.ps1` for every plugin (about 2 h; maintainer only).
 - `docs/`: `DESIGN.md`, in English and pt-BR.
+- `.github/`: `workflows/ci.yml`, the pull request template and the issue forms. `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md` (+ pt-BR).
+- Local only, gitignored: `results/` (measure output) and `plans/` (work plans, pt-BR). Do not commit or quote them.
 
 ## Build discipline (important: builds are slow, do not repeat them)
 
@@ -32,8 +40,22 @@ Build settings that make this fast (keep them): `.cargo/config.toml` links with 
 The app targets Windows only (`windows` crate, WebView2), so it does not build or run on Linux. In a cloud session:
 - Edit, then push the branch and let the GitHub Actions workflow (`.github/workflows/ci.yml`, Windows runner) run fmt, clippy, tests and a build. Read its result with `gh run list` / `gh run view --log-failed` instead of guessing.
 - `cargo check --target x86_64-pc-windows-msvc` from Linux is not verified to work (`tauri-build` compiles Windows resources); try it at most once, and fall back to CI.
+- Pull requests: see "Pull requests" below. Do not bump versions, edit the changelogs or push tags in one.
 - Releases: bump `version` in `app/Cargo.toml` and `app/tauri.conf.json` together, add the version's section to `CHANGELOG.md` and `CHANGELOG.pt-BR.md` (the release notes come from the English one; CI fails without it), then push a `vX.Y.Z` tag; the CI `dist` job publishes the installer. Only when the maintainer asks.
 - Anything that needs the running app, a signed-in account or `measure.ps1` is left for the maintainer: say so in the summary instead of claiming it works.
+
+## Pull requests
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the full guide; these are the parts an agent must not miss.
+
+- Check `git status` and `git diff` first: the diff must hold only what the task asked for.
+- One subject per pull request; title and commits in English, imperative, starting with the area (`Lyrics: keep the line lit until its end`). Branch from `main`, rebased on it.
+- Run, once and in this order, from `app/`: `cargo fmt`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`. This is what CI runs on the PR (fmt, clippy, tests only: it does not open the app).
+- Fill `.github/PULL_REQUEST_TEMPLATE.md`. Say what was tested and what was not; never claim a behavior that needs the running app, a signed-in account or `measure.ps1` works.
+- New interface text goes through `t("...")` with an entry in `app/locales/pt-BR.json`. A changed doc changes its pair.
+- Do not change `version`, the changelogs or tags; the maintainer writes release notes.
+- Say in the PR when an agent wrote part of it. A change that needs a decision (new dependency, plugin, wider `capabilities/`, anything in "Legal and safety limits") goes to an issue first, not straight to a PR.
+- Never put personal data in a pull request: local paths, usernames, emails, tokens, account names, listening history, screenshots or diagnostics with any of them.
 
 ## Code rules
 

@@ -267,6 +267,7 @@ Enviar uma tag `v*` roda o job `release` da CI, que compila com `--profile dist`
 
 | Ideia | Tipo |
 |---|---|
+| Controle remoto pelo celular para um PC pareado na rede local (plano: [REMOTE.pt-BR.md](REMOTE.pt-BR.md)) | Rust + Expo |
 | Mais visuais (fontes, modo compacto, capa grande) | CSS |
 | Uma fonte externa de tempo para faixas ainda não medidas: a única pública e permitida achada é uma API grátis (3000 pedidos por hora) que exige chave e um link de volta; as outras têm termos pouco claros, usam ids de outros serviços ou fecharam | Rust |
 

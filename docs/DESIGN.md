@@ -267,6 +267,7 @@ Pushing a `v*` tag runs the CI `release` job, which builds with `--profile dist`
 
 | Idea | Type |
 |---|---|
+| A phone remote for a paired PC over the local network (plan: [REMOTE.md](REMOTE.md)) | Rust + Expo |
 | More looks (fonts, compact mode, large artwork) | CSS |
 | An outside tempo source for tracks not measured yet: the only public one allowed found is a free API (3000 requests an hour) that needs a key and a link back to it; others have unclear terms, use other services' ids, or are closed | Rust |
 

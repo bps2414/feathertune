@@ -2,10 +2,6 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
-## 0.2.8 — 2026-10-22
-
-- **Calmer scroll on fast songs.** The Lyrics tab used to drift almost all the time (in one fast song it moved 74% of it); now it moves in short glides and rests between them. In fast parts it moves once per two lines, so the next lines are already on screen and there is time to read.
-
 ## 0.2.7 — 2026-10-22
 
 - **Overlapping lyrics on fast songs.** When a second voice or an echo starts before the line before it ends, both lines now stay lit and light their own words until each one is done, instead of the first being cut off at the start of the next. Each line keeps its end time from the source.

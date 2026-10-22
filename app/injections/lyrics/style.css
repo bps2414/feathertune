@@ -1,15 +1,18 @@
 /* Synced lyrics: the timed lines replace the site's own lyrics while the Lyrics tab is open (the
    attribute is set by lyrics/page.js only then, and only when a source had lyrics). The site's root font
-   is small, so sizes are in px. Lines fade with their distance from the current one (`data-d`, set by
-   the page; lines without it are the farthest), the current one is large and bright, and every change
-   between them is a cross-fade. */
+   is small, so sizes are in px. Lines fade with their distance from the latest one (`data-d`, set by
+   the page; lines without it are the farthest), the lines being sung (`ft-current`; more than one when
+   they overlap) are large and bright, and every change between them is a cross-fade.
+   Nothing that changes while the lyrics play is painted again: a line's light is its `opacity` and its
+   size its `transform`, and its glow is a layer of its own (see below), so a change runs on the
+   compositor, also while the page is busy. */
 ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   display: none;
 }
 
 /* Scrolling moves layers instead of painting the blurred text again each frame (on a 100% scale
    display Chromium would otherwise scroll by repainting). The box is its own layer so the scroll loop
-   can add the part of a pixel that scrollTop cannot hold (page.js), and the lines near the current
+   can add the part of a pixel that scrollTop cannot hold (page.js), and the lines near the latest
    one (`data-d`) are layers before they light up, so the cross-fade and the scale run on the
    compositor without making and dropping a layer at each line switch. */
 ytmusic-tab-renderer[data-feathertune-lyrics] {
@@ -23,10 +26,11 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 
 #feathertune-lyrics .ft-line[data-d],
 #feathertune-lyrics .ft-line.ft-current {
-  will-change: transform;
+  will-change: transform, opacity;
 }
 
 #feathertune-lyrics .ft-line {
+  position: relative;
   margin: 0;
   padding: 10px 0;
   font-size: clamp(24px, 2.4vw, 40px);
@@ -34,7 +38,8 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   line-height: 1.25;
   letter-spacing: -0.01em;
   text-wrap: balance;
-  color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+  opacity: 0.28;
   cursor: pointer;
   transform-origin: left center;
   transform: scale(0.94);
@@ -45,19 +50,45 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   cursor: default;
 }
 
-#feathertune-lyrics .ft-line[data-d='4'] { color: rgba(255, 255, 255, 0.3); }
-#feathertune-lyrics .ft-line[data-d='3'] { color: rgba(255, 255, 255, 0.36); }
-#feathertune-lyrics .ft-line[data-d='2'] { color: rgba(255, 255, 255, 0.44); }
-#feathertune-lyrics .ft-line[data-d='1'] { color: rgba(255, 255, 255, 0.56); }
+#feathertune-lyrics .ft-line[data-d='4'] { opacity: 0.3; }
+#feathertune-lyrics .ft-line[data-d='3'] { opacity: 0.36; }
+#feathertune-lyrics .ft-line[data-d='2'] { opacity: 0.44; }
+#feathertune-lyrics .ft-line[data-d='1'] { opacity: 0.56; }
 
 #feathertune-lyrics .ft-line:not(.ft-gap):hover {
-  color: rgba(255, 255, 255, 0.85);
+  opacity: 0.85;
 }
 
 #feathertune-lyrics .ft-line.ft-current {
-  color: #fff;
+  opacity: 1;
   transform: scale(1);
+}
+
+/* The glow of a line being sung: a copy of its text (`data-text`), invisible itself, with the glow as
+   its shadow, behind the text. It is a layer of its own that only fades in and out, so a word lighting
+   up repaints the line's text and not the blur. The lines near the latest one keep it drawn (almost
+   invisible) so it is ready when they light up. */
+#feathertune-lyrics .ft-line::before {
+  content: attr(data-text) / '';
+  position: absolute;
+  z-index: -1;
+  top: 10px;
+  left: 0;
+  right: 0;
+  color: transparent;
   text-shadow: 0 0 28px color-mix(in srgb, var(--feathertune-accent, #fff) 65%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+#feathertune-lyrics .ft-line[data-d]::before {
+  opacity: 0.01;
+  will-change: opacity;
+}
+
+#feathertune-lyrics .ft-line.ft-current::before {
+  opacity: 1;
+  will-change: opacity;
 }
 
 /* A line timed word by word lights up as it is sung: its words start dim and turn white in turn. */
@@ -65,25 +96,43 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   color: rgba(255, 255, 255, 0.5);
 }
 
-/* Sung words keep the line's glow (inherited): a blur of their own per word repainted the whole line
-   at every word. */
+/* Sung words keep the line's glow (its own layer): a blur of their own per word repainted the whole
+   line at every word. */
 #feathertune-lyrics .ft-line.ft-current .ft-sung {
   color: #fff;
 }
 
-/* A translation under its line: smaller and lighter, lit with the line as a whole (not word by word). */
+/* Background vocals under their line: smaller and softer, lit word by word like the line. */
+#feathertune-lyrics .ft-line .ft-bg {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.62em;
+  font-weight: 700;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-bg {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-bg .ft-sung {
+  color: #fff;
+}
+
+/* A translation under its line: smaller and lighter, lit with the line as a whole (not word by word).
+   Its alpha is multiplied by the line's opacity. */
 #feathertune-lyrics .ft-line .ft-tr {
   display: block;
   margin-top: 4px;
   font-size: 0.6em;
   font-weight: 600;
   letter-spacing: 0;
-  color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 #feathertune-lyrics .ft-line.ft-current .ft-tr {
   color: rgba(255, 255, 255, 0.75);
-  text-shadow: none;
 }
 
 #feathertune-lyrics .ft-credit {
@@ -96,9 +145,13 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
    the transition is the one of the state a line goes to. */
 #feathertune-lyrics .ft-line {
   transition:
+    opacity 0.9s ease,
     color 0.9s ease,
-    text-shadow 0.9s ease,
     transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#feathertune-lyrics .ft-line::before {
+  transition: opacity 0.9s ease;
 }
 
 /* Words only fade their color; their glow follows the line's (no animation of their own). */
@@ -108,9 +161,13 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 
 #feathertune-lyrics .ft-line.ft-current {
   transition:
+    opacity 0.5s ease,
     color 0.5s ease,
-    text-shadow 0.6s ease,
     transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#feathertune-lyrics .ft-line.ft-current::before {
+  transition: opacity 0.6s ease;
 }
 
 /* A sung word fades in over a share of its own length (`--ft-word`, set by the page), at most these, so

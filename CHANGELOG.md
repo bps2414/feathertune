@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.2.7 — 2026-10-22
+
+- **Overlapping lyrics on fast songs.** When a second voice or an echo starts before the line before it ends, both lines now stay lit and light their own words until each one is done, instead of the first being cut off at the start of the next. Each line keeps its end time from the source.
+- **Background vocals.** Lyrics with background vocals show them as a smaller line under the main one, lit word by word, instead of leaving them out.
+- **Smoother Lyrics tab.** Lines now fade and grow without being painted again, and the glow (same look, same album color) is a layer of its own, so a line change or a lighting word no longer repaints a blur. Lyrics cached before this release are fetched again once to get the line ends.
+
 ## 0.2.6 — 2026-10-21
 
 - **Synced lyrics no longer go missing after a track change.** At an automatic track change or after an ad the lyrics were looked up with the wrong song length, so no source matched and the track stayed without synced lyrics until it was played again. The lookup now waits until the track's details settle, asks again if the length changes, and a slow lookup no longer holds up the next track.

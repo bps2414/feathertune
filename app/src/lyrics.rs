@@ -98,6 +98,8 @@ const MAX_DURATION_GAP: f64 = 10.0;
 const MAX_RESULTS: usize = 20;
 /// A cached "no synced lyrics" is asked again after this long.
 const NOT_FOUND_TTL: u64 = 7 * 24 * 3600;
+/// Entries with word times written before this are asked again once (line ends, background vocals).
+const ENTRY_REV: u32 = 1;
 /// The cache holds at most this many files; over it, the oldest are removed down to `KEEP_FILES`.
 const MAX_FILES: usize = 400;
 const KEEP_FILES: usize = 300;
@@ -119,6 +121,13 @@ pub struct Line {
     /// Each word with its own time and the spaces after it; empty when the line is timed as a whole.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Words,
+    /// When the line stops being sung, in ms; 0 when the source does not say. Lines overlap (an answer
+    /// or an echo starts before the line before it ends), so this is not the next line's start.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub end: u32,
+    /// Background vocals sung with the line (TTML `x-bg`), with their own times; empty when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bg: Words,
     /// Translations that came with the lyrics (TTML), as (language tag, text).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub translations: Vec<(String, String)>,
@@ -180,9 +189,24 @@ impl Lyrics {
     }
 }
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// A line's end when it is after its start, else 0 (unknown).
+fn end_after(end: u32, start: u32) -> u32 {
+    if end > start { end } else { 0 }
+}
+
 impl Line {
+    /// `[ms, text, words?, end?, bg?]` for the page (`null` words when only the later fields are there).
     fn to_json(&self) -> Value {
-        if self.words.is_empty() { json!([self.ms, self.text]) } else { json!([self.ms, self.text, self.words]) }
+        let words = if self.words.is_empty() { Value::Null } else { json!(self.words) };
+        if self.end == 0 && self.bg.is_empty() {
+            if self.words.is_empty() { json!([self.ms, self.text]) } else { json!([self.ms, self.text, words]) }
+        } else {
+            json!([self.ms, self.text, words, self.end, self.bg])
+        }
     }
 }
 
@@ -190,6 +214,9 @@ impl Line {
 struct Entry {
     /// Unix seconds.
     at: u64,
+    /// `ENTRY_REV` when written. Older entries lack line ends and background vocals.
+    #[serde(default)]
+    rev: u32,
     /// `None`: no source has synced lyrics for the track.
     lines: Option<Lines>,
     /// The source id of `lines` (entries written before there were several sources: LRCLIB).
@@ -539,10 +566,15 @@ fn lookup(
 ) {
     let duration = track.duration.round() as u32;
     let file = cache_file(dir, track, duration);
+    // Cached lines older than `ENTRY_REV` are asked again for their line ends; they are shown only if no
+    // source answers this time (offline).
+    let mut stale: Option<(Lines, &'static str)> = None;
     if let Some(entry) = read_entry(&file) {
         let source = if entry.source.is_empty() { "lrclib" } else { entry.source.as_str() };
         let fresh = now().saturating_sub(entry.at) < NOT_FOUND_TTL && entry.tried == providers;
+        let outdated = entry.rev < ENTRY_REV && entry.lines.as_deref().is_some_and(has_words);
         match entry.lines {
+            Some(lines) if outdated && providers.contains(&source) => stale = Some((lines, name(source))),
             Some(lines) if providers.contains(&source) && (fresh || has_words(&lines)) => {
                 crate::diag::log("lyrics", format_args!("cache: {source}"));
                 show(lines, name(source));
@@ -582,7 +614,7 @@ fn lookup(
         let tried = providers.iter().zip(answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
         let lines = shown.and_then(|b| lines_of(answers, b).cloned());
         let source = shown.map_or(String::new(), |b| providers[b].to_string());
-        Entry { at: now(), lines, source, tried: tried.collect(), translations: Vec::new() }
+        Entry { at: now(), rev: ENTRY_REV, lines, source, tried: tried.collect(), translations: Vec::new() }
     };
     loop {
         let next = match deadline.filter(|_| !settled) {
@@ -626,6 +658,13 @@ fn lookup(
     }
     if shown.is_none() {
         crate::diag::log("lyrics", "no source has synced lyrics");
+    }
+    // The outdated entry stays when the sources failed, instead of a "not found".
+    if shown.is_none()
+        && let Some((lines, source)) = stale
+    {
+        show(lines, source);
+        return settle();
     }
     let mut last = entry(&answers, shown);
     // A translation cached with the same lines while the slower sources answered is kept.
@@ -878,8 +917,22 @@ fn lrcmux(agent: &ureq::Agent, track: &Track, duration: u32) -> Result<Option<Li
             .collect();
         let (text, words) =
             if words.is_empty() { make_words(vec![(at, text.to_owned())], false) } else { make_words(words, true) };
+        // The line's end, or its last word's, when the source gives one.
+        let end = line
+            .get("end")
+            .and_then(Value::as_u64)
+            .into_iter()
+            .chain(
+                line.get("words")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|w| w.get("end").and_then(Value::as_u64)),
+            )
+            .max()
+            .map_or(0, |ms| ms.min(u64::from(u32::MAX)) as u32);
         if !text.is_empty() {
-            lines.push(Line { ms: at, text, words, ..Default::default() });
+            lines.push(Line { ms: at, text, words, end: end_after(end, at), ..Default::default() });
         }
     }
     lines.sort_by_key(|l| l.ms);
@@ -1094,12 +1147,17 @@ fn parse_ttml(xml: &str) -> Lines {
         let Some(open_end) = rest.find('>') else { break };
         let Some(close) = rest.find("</p>") else { break };
         let begin = attr(rest, "begin").and_then(parse_clock);
+        let p_end = attr(rest, "end").and_then(parse_clock).unwrap_or(0);
         let key = attr(rest, "itunes:key").or_else(|| attr(rest, "lrc:key"));
         let inner = &rest[open_end + 1..close.max(open_end + 1)];
         rest = &rest[close + 4..];
         let Some(begin) = begin else { continue };
         // (time, text) per word; the first holds the text before any timed span.
         let mut segments: Vec<(u32, String)> = vec![(begin, String::new())];
+        // The same for the background vocals, which have no text before their first timed span.
+        let mut bg_segments: Vec<(u32, String)> = Vec::new();
+        // The line's end: its own, or the latest end of its spans.
+        let mut last_end = p_end;
         // Each open span: whether it is (inside) background vocals.
         let mut spans: Vec<bool> = Vec::new();
         let mut s = inner;
@@ -1111,8 +1169,15 @@ fn parse_ttml(xml: &str) -> Lines {
                     spans.pop();
                 } else if body.starts_with("span") {
                     let bg = spans.last().copied().unwrap_or(false) || body.contains("x-bg");
-                    if !bg && let Some(at) = attr(s, "begin").and_then(parse_clock) {
-                        segments.push((at, String::new()));
+                    let at = attr(s, "begin").and_then(parse_clock);
+                    if let Some(to) = attr(s, "end").and_then(parse_clock) {
+                        last_end = last_end.max(to);
+                    }
+                    if let Some(at) = at {
+                        let target = if bg { &mut bg_segments } else { &mut segments };
+                        target.push((at, String::new()));
+                    } else if bg && bg_segments.is_empty() {
+                        bg_segments.push((begin, String::new()));
                     }
                     if !body.ends_with('/') {
                         spans.push(bg);
@@ -1121,9 +1186,8 @@ fn parse_ttml(xml: &str) -> Lines {
                 s = &tag[end + 1..];
             } else {
                 let end = s.find('<').unwrap_or(s.len());
-                if !spans.last().copied().unwrap_or(false)
-                    && let Some(last) = segments.last_mut()
-                {
+                let target = if spans.last().copied().unwrap_or(false) { &mut bg_segments } else { &mut segments };
+                if let Some(last) = target.last_mut() {
                     last.1.push_str(&unescape(&s[..end]));
                 }
                 s = &s[end..];
@@ -1134,9 +1198,22 @@ fn parse_ttml(xml: &str) -> Lines {
             let lead = segments.remove(0).1;
             segments[0].1.insert_str(0, &lead);
         }
-        let (text, words) = make_words(segments, timed);
+        let (mut text, mut words) = make_words(segments, timed);
+        let (_, mut bg) = make_words(bg_segments, true);
+        // The background vocals come in parentheses in the source.
+        if let Some(first) = bg.first_mut() {
+            first.1 = first.1.trim_start_matches('(').to_owned();
+        }
+        if let Some(last) = bg.last_mut() {
+            last.1 = last.1.trim_end_matches(')').to_owned();
+        }
+        // A line that is only background vocals is shown as the line itself.
+        if text.is_empty() && !bg.is_empty() {
+            words = std::mem::take(&mut bg);
+            text = words.iter().map(|w| w.1.as_str()).collect();
+        }
         if !text.is_empty() {
-            lines.push(Line { ms: begin, text, words, ..Default::default() });
+            lines.push(Line { ms: begin, text, words, end: end_after(last_end, begin), bg, ..Default::default() });
             keys.push(key);
         }
         if lines.len() >= MAX_LINES {
@@ -1209,7 +1286,10 @@ fn shift(lines: &mut [Line], offset: i32) {
     let moved = |ms: u32| (i64::from(ms) + i64::from(offset)).clamp(0, i64::from(u32::MAX)) as u32;
     for line in lines {
         line.ms = moved(line.ms);
-        for word in &mut line.words {
+        if line.end > 0 {
+            line.end = moved(line.end);
+        }
+        for word in line.words.iter_mut().chain(&mut line.bg) {
             word.0 = moved(word.0);
         }
     }
@@ -1263,6 +1343,7 @@ pub fn estimate(lines: &mut [Line]) -> bool {
         let sung = if room > paced { paced + (room - paced) * SLACK } else { room };
         let start = f64::from(lines[i].ms);
         let mut before = 0.0;
+        lines[i].end = (start + sung).round() as u32;
         lines[i].words = words
             .into_iter()
             .zip(&weights)
@@ -1343,6 +1424,18 @@ mod tests {
         assert_eq!(lines[0].words, vec![(0, "I ".to_owned()), (451, "lo&ve".to_owned())]);
         assert_eq!((lines[1].ms, lines[1].text.as_str(), lines[1].words.len()), (62_500, "Line only", 0));
         assert_eq!(attr(&xml[xml.find("<body").unwrap()..], "dur").and_then(parse_clock), Some(153_181));
+    }
+
+    #[test]
+    fn ttml_keeps_line_ends_and_background_vocals() {
+        let xml = r#"<tt><body><div><p begin="1.000" end="4.000"><span begin="1.000" end="2.000">Main </span><span begin="2.000" end="3.000">line</span><span ttm:role="x-bg"><span begin="2.500" end="3.500">(oh </span><span begin="3.000" end="5.000">no)</span></span></p><p begin="6.000" end="7.000"><span ttm:role="x-bg"><span begin="6.000" end="7.000">(only echo)</span></span></p></div></body></tt>"#;
+        let lines = parse_ttml(xml);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "Main line");
+        assert_eq!(lines[0].end, 5000);
+        assert_eq!(lines[0].bg, vec![(2500, "oh ".to_owned()), (3000, "no".to_owned())]);
+        assert_eq!((lines[1].text.as_str(), lines[1].words.len(), lines[1].bg.len()), ("only echo", 1, 0));
+        assert_eq!(lines[1].to_json()[3], 7000);
     }
 
     #[test]

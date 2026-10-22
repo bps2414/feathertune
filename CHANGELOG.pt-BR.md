@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.2.7 — 2026-10-22
+
+- **Letras sobrepostas em músicas rápidas.** Quando uma segunda voz ou um eco começa antes de a linha anterior terminar, as duas linhas agora ficam acesas e acendem as próprias palavras até cada uma acabar, em vez de a primeira ser cortada no começo da próxima. Cada linha guarda o fim que a fonte informa.
+- **Vozes de fundo.** Letras com vozes de fundo mostram essas vozes numa linha menor embaixo da principal, acesa palavra por palavra, em vez de deixá-las de fora.
+- **Aba Letra mais suave.** As linhas agora esmaecem e crescem sem ser repintadas, e o brilho (mesmo visual, mesma cor do álbum) é uma camada própria, então trocar de linha ou acender uma palavra não repinta mais um desfoque. Letras guardadas antes desta versão são buscadas de novo uma vez para pegar o fim das linhas.
+
 ## 0.2.6 — 2026-10-21
 
 - **A letra sincronizada não some mais depois de trocar de faixa.** Numa troca automática de faixa ou depois de um anúncio a letra era buscada com a duração errada, então nenhuma fonte batia e a faixa ficava sem letra sincronizada até ser tocada de novo. Agora a busca espera os dados da faixa assentarem, busca de novo se a duração mudar, e uma busca lenta não segura mais a próxima faixa.

@@ -11,9 +11,9 @@
 // one by one in each lit line, each fading in over a share of its own length (fast words at once), and
 // a one-shot timer wakes the page when the next word, line or end is due. Lines fade with their distance from
 // the latest one (`data-d`), and a click on a line seeks the <video> to it. While the song plays and the
-// window is in front, the list scrolls on its own, in time, on one smooth curve: the view rests on a line
-// with time to spare and moves on to the next one around the switch (a little before and a little after),
-// glides through lines too short to rest on, and eases to a new place after a seek, a click or a manual
+// window is in front, the list scrolls on its own, in time, on one smooth curve: the view rests, glides to a line in a
+// fixed 0.9 s when it starts (in a fast part only to every second line, the first of the two at 40% of the
+// view's height so the next is already on screen), and eases to a new place after a seek, a click or a manual
 // scroll (one animation frame loop, only while that is so; it writes the scroll only when it moves by a
 // whole device pixel). Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
 // the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
@@ -37,18 +37,22 @@ const WORD_FADE = 0.4;
 // After a seek, a click, a manual scroll or a resize, how fast the scroll catches up with the curve
 // (seconds to cover about two thirds of the way); otherwise it is on the curve.
 const FOLLOW_S = 0.25;
-// The move from one line to the next takes this share of the line that ends (at most the cap) and this
-// share of the line that starts, so when a line ends the view is still a little short of the middle
-// between the two. A line left with less rest than PARK_MIN_MS is passed through without stopping.
-const MOVE_BEFORE = 0.4;
-const MOVE_BEFORE_MAX_MS = 1600;
-const MOVE_AFTER = 0.45;
-const MOVE_AFTER_MAX_MS = 1800;
-const PARK_MIN_MS = 600;
+// The view moves in glides of a fixed length, each starting this long before its line lights up (on the
+// clock with the lead), and rests between them.
+const MOVE_MS = 900;
+const MOVE_LEAD_MS = 200;
+// A line followed by another one less than this later is in a fast part: there the view moves once per
+// two lines (see `buildKeys`).
+const DENSE_GAP_MS = 2200;
+// In a fast part the line the view goes to sits at 40% of the view's height instead of the middle: this
+// share of the height is how far the view's middle is below that line.
+const DENSE_LIFT = 0.1;
+// Two glides start at least this far apart.
+const MIN_STEP_MS = 250;
 
 let lines = null; // [{ ms, text, words?, end, bg?, translation? }], sorted by ms
 let ends = []; // when each line stops being sung (see `lineEnd`)
-let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at ms (see `goal`)
+let keys = []; // [{ ms, i, lift }]: the scroll curve puts the middle of the view at the middle of line i plus lift times the view's height, at ms (see `goal`)
 let meta = { credit: '', estimated: false };
 let box = null; // our container, first child of the tab renderer
 let items = [];
@@ -66,6 +70,7 @@ let pos = 0; // the scroll position the loop is at, in CSS px
 let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
 let catchUp = true; // the scroll eases to the curve instead of being on it
 let shifted = 0; // the box's translateY, the part of a device pixel the scroll cannot hold (see `shift`)
+let viewH = 0; // the tab's height as of the last frame, for the keys' lift
 const resizes = new ResizeObserver(() => {
   centers = null;
   catchUp = true;
@@ -352,32 +357,36 @@ const center = (i) => {
   return centers[i] ?? 0;
 };
 
-// The keys of the scroll curve. The view arrives on line k a share of it after it starts (capped; line 0
-// from its start) and leaves it a share of it before the next one (capped), so the move from one line
-// to the next spans the switch. A line with at least PARK_MIN_MS between the two gets both keys and the
-// view rests on it; a shorter one gets one key in the middle and the view glides through it.
+// The keys of the scroll curve: the view rests, then glides to a line (a glide takes MOVE_MS and starts
+// MOVE_LEAD_MS before the line lights up), and rests again. Every line moves the view except, in a fast
+// part, the second of two: a line that is followed closely by the next one and comes right after a line
+// that moved the view does not move it (the one before it put it at 40% of the height, so this one is
+// already on screen). The last line of a fast part, and every line in a slower part, is centered.
+// Glides that would overlap are chained, at least MIN_STEP_MS apart.
 const buildKeys = () => {
   keys = [];
-  const add = (ms, i) => {
-    while (keys.length && keys[keys.length - 1].ms >= ms) keys.pop();
-    keys.push({ ms, i });
-  };
+  const n = lines.length;
+  const dense = (k) => k + 1 < n && lines[k + 1].ms - lines[k].ms < DENSE_GAP_MS;
+  let moved = false; // whether the line before moved the view
   lines.forEach((l, k) => {
-    const next = lines[k + 1];
-    const len = next ? next.ms - l.ms : MOVE_AFTER_MAX_MS;
-    const arrive = k === 0 ? l.ms : l.ms + Math.min(MOVE_AFTER_MAX_MS, len * MOVE_AFTER);
-    if (!next) return add(arrive, k);
-    const leave = next.ms - Math.min(MOVE_BEFORE_MAX_MS, len * MOVE_BEFORE);
-    if (leave - arrive >= PARK_MIN_MS) {
-      add(arrive, k);
-      add(leave, k);
-    } else {
-      add((arrive + leave) / 2, k);
+    const mover = !(k > 0 && moved && dense(k - 1) && dense(k));
+    moved = mover;
+    if (!mover) return;
+    const lift = dense(k) ? DENSE_LIFT : 0;
+    const arrive = l.ms - MOVE_LEAD_MS + MOVE_MS;
+    const last = keys[keys.length - 1];
+    if (!last) {
+      keys.push({ ms: arrive, i: k, lift });
+      return;
     }
+    const leave = l.ms - MOVE_LEAD_MS;
+    // Held where it was until the glide starts.
+    if (leave > last.ms) keys.push({ ms: leave, i: last.i, lift: last.lift });
+    keys.push({ ms: Math.max(arrive, keys[keys.length - 1].ms + MIN_STEP_MS), i: k, lift });
   });
 };
 
-const keyY = (j) => center(keys[j].i);
+const keyY = (j) => center(keys[j].i) + keys[j].lift * viewH;
 const secant = (j) => (keyY(j + 1) - keyY(j)) / (keys[j + 1].ms - keys[j].ms);
 // The curve's slope at key j: flat at the ends and where it rests, else a weighted harmonic mean of the
 // two sides (monotone cubic interpolation, so the view never overshoots a line or turns back).
@@ -392,7 +401,7 @@ const slope = (j) => {
 };
 
 // Where the middle of the view should be at `ms`: on the curve through the keys, smooth in place and
-// speed, so the view never stops between lines it has no time to rest on.
+// speed (flat where it rests, so a glide starts and ends softly).
 const goal = (ms) => {
   const n = keys.length;
   if (!n) return center(0);
@@ -442,7 +451,8 @@ const step = (now) => {
     pos = t.scrollTop;
     catchUp = true;
   } else {
-    const target = goal(v.currentTime * 1000 + LEAD_MS) - t.clientHeight / 2;
+    viewH = t.clientHeight;
+    const target = goal(v.currentTime * 1000 + LEAD_MS) - viewH / 2;
     const dpr = devicePixelRatio || 1;
     if (catchUp) {
       pos += (target - pos) * (1 - Math.exp(-dt / FOLLOW_S));

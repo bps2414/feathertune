@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.3.0 — 2026-10-22
+
+- **Aba Letra sem lag.** A letra agora desliza pelo lado gráfico, num relógio próprio no ritmo da música, então uma página ocupada não a faz mais engasgar nem perder frames. Uma linha que termina não se repinta mais, as próximas linhas ficam prontas antes de entrar na tela, e o fundo do modo ambiente fica parado enquanto a letra aparece. Mesmo visual, mesma velocidade.
+- **Scroll contínuo em músicas rápidas.** Nos trechos rápidos a aba Letra flui no ritmo do trecho, em vez de acelerar e frear a cada linha.
+- **Ícone novo.** Uma pena.
+
 ## 0.2.7 — 2026-10-22
 
 - **Letras sobrepostas em músicas rápidas.** Quando uma segunda voz ou um eco começa antes de a linha anterior terminar, as duas linhas agora ficam acesas e acendem as próprias palavras até cada uma acabar, em vez de a primeira ser cortada no começo da próxima. Cada linha guarda o fim que a fonte informa.

@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.3.0 — 2026-10-22
+
+- **Lyrics tab without lag.** The lyrics now glide on the graphics side, on their own clock in time with the song, so a busy page no longer makes them stutter or drop frames. A line that ends no longer repaints itself, the next lines are prepared before they come on screen, and ambient mode's background holds still while the lyrics show. Same look, same speed.
+- **Continuous scroll on fast songs.** In fast parts the Lyrics tab flows at the part's pace instead of speeding up and slowing down with each line.
+- **New icon.** A feather.
+
 ## 0.2.7 — 2026-10-22
 
 - **Overlapping lyrics on fast songs.** When a second voice or an echo starts before the line before it ends, both lines now stay lit and light their own words until each one is done, instead of the first being cut off at the start of the next. Each line keeps its end time from the source.

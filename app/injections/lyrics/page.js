@@ -129,8 +129,9 @@ const clear = () => {
   timer = 0;
   resizes.disconnect();
   observer.disconnect();
-  anim?.cancel();
-  anim = null;
+  // The lines may come again for the same track (a translation, a better source, a setting): the view
+  // keeps its place for the new box.
+  stop();
   clearTimeout(pointing);
   box?.remove();
   box = null;
@@ -219,13 +220,13 @@ const refresh = () => {
   const t = tab();
   if (!t) return;
   if (!box) build();
+  const open = isOpen(t);
+  // Before the box moves or hides, so its place goes into the scroll of the tab it is in.
+  if (box.parentNode !== t || !open) stop();
   if (box.parentNode !== t) {
-    anim?.cancel();
-    anim = null;
     box.parentElement?.removeAttribute('data-feathertune-lyrics');
     t.prepend(box);
   }
-  const open = isOpen(t);
   box.hidden = !open;
   t.toggleAttribute('data-feathertune-lyrics', open);
   // Other modules ease off while our lyrics show (ambient/style.css).
@@ -575,15 +576,16 @@ const align = (v) => {
   if (Math.abs((anim.currentTime ?? 0) - want) > DRIFT_MS) anim.currentTime = want;
 };
 
-// Ends the glide, leaving the view where it is: what the box was moved goes into the tab's scroll.
+// Ends the glide, leaving the view where it is: what the box was moved goes into the tab's scroll (the
+// tab keeps it as if the box had been scrolled, also when the box then hides or is rebuilt).
 const stop = () => {
   if (!anim) return;
   const moved = shown();
   anim.cancel();
   anim = null;
   box.classList.remove('ft-gliding');
-  const t = box?.parentNode;
-  if (t instanceof Element && !box.hidden) {
+  const t = box.parentNode;
+  if (t instanceof Element) {
     t.scrollTop -= moved;
     ownTop = t.scrollTop;
   }

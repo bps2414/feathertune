@@ -15,9 +15,9 @@
 // with time to spare and moves on to the next one around the switch (a little before and a little after),
 // glides through lines too short to rest on (in a fast part the curve is averaged over a few lines, so the
 // view flows at the part's pace instead of jerking with each line), and eases to a new place after a seek,
-// a click or a manual scroll (one animation frame loop, only while that is so; it writes the scroll only when it moves by a
-// whole device pixel). Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
-// the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
+// a click or a manual scroll. The box glides as one transform animation that the compositor runs (see
+// `start`), only while that is so; otherwise each new line scrolls smoothly to the middle. The box goes
+// into the tab renderer showing the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
 // `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
 // left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
@@ -38,6 +38,10 @@ const WORD_FADE = 0.4;
 // After a seek, a click, a manual scroll or a resize, how fast the scroll catches up with the curve
 // (seconds to cover about two thirds of the way); otherwise it is on the curve.
 const FOLLOW_S = 0.25;
+// The glide is a list of keyframes the compositor joins with straight lines: they are at most this far
+// (CSS px) from the curve. Its clock is set back to the song's when they drift apart by more than DRIFT_MS.
+const GLIDE_TOLERANCE_PX = 0.2;
+const DRIFT_MS = 50;
 // The move from one line to the next takes this share of the line that ends (at most the cap) and this
 // share of the line that starts, so when a line ends the view is still a little short of the middle
 // between the two. A line left with less rest than PARK_MIN_MS is passed through without stopping.
@@ -73,16 +77,15 @@ let sungMain = []; // per line, the last word whose time has come (-1: none)
 let sungBg = [];
 let manualUntil = 0;
 const observer = new MutationObserver(() => refresh());
-let centers = null; // middle of each line in the tab's scroll space, measured when needed
-let frame = 0;
-let last = 0; // time of the previous frame
-let pos = 0; // the scroll position the loop is at, in CSS px
-let seen = 0; // the tab's scroll after the loop's last frame; anything else moved it by hand
-let catchUp = true; // the scroll eases to the curve instead of being on it
-let shifted = 0; // the box's translateY, the part of a device pixel the scroll cannot hold (see `shift`)
+let centers = null; // middle of each line below the top of the box, measured when needed
+let anim = null; // the box's glide along the curve (see `start`), while it follows the song
+let animStart = 0; // the song time (with the lead) at the glide's time 0
+let ownTop = 0; // the tab's scroll while the box glides; anything else moved it by hand
+let pointing = 0; // timer: the pointer stopped moving over the box (see `build`)
+const POINTER_IDLE_MS = 800;
 const resizes = new ResizeObserver(() => {
   centers = null;
-  catchUp = true;
+  if (anim) start(media());
 });
 let timer = 0;
 let due = -1; // the time (with the lead) the timer is set for
@@ -126,17 +129,28 @@ const clear = () => {
   timer = 0;
   resizes.disconnect();
   observer.disconnect();
+  anim?.cancel();
+  anim = null;
+  clearTimeout(pointing);
   box?.remove();
   box = null;
-  shifted = 0;
   for (const t of document.querySelectorAll('[data-feathertune-lyrics]')) t.removeAttribute('data-feathertune-lyrics');
+  document.documentElement.removeAttribute('data-feathertune-lyrics-open');
 };
 
 const build = () => {
   box = document.createElement('div');
   box.id = 'feathertune-lyrics';
   box.classList.toggle('ft-estimated', meta.estimated);
-  const onManual = () => (manualUntil = Date.now() + MANUAL_SCROLL_MS);
+  // The pointer's hover is not updated under content the compositor moves, so while the box glides a line
+  // shows it only while the pointer moves (style.css); a still pointer would leave it on a line gliding away.
+  const point = () => {
+    box.classList.add('ft-pointing');
+    clearTimeout(pointing);
+    pointing = setTimeout(() => box?.classList.remove('ft-pointing'), POINTER_IDLE_MS);
+  };
+  box.addEventListener('mousemove', point, { passive: true });
+  box.addEventListener('mouseleave', () => box.classList.remove('ft-pointing'));
   box.addEventListener('wheel', onManual, { passive: true });
   box.addEventListener('touchmove', onManual, { passive: true });
   box.addEventListener('click', (e) => {
@@ -206,16 +220,18 @@ const refresh = () => {
   if (!t) return;
   if (!box) build();
   if (box.parentNode !== t) {
+    anim?.cancel();
+    anim = null;
     box.parentElement?.removeAttribute('data-feathertune-lyrics');
     t.prepend(box);
   }
   const open = isOpen(t);
   box.hidden = !open;
   t.toggleAttribute('data-feathertune-lyrics', open);
-  if (open) {
-    run();
-    sync(document.querySelector('video'), true);
-  }
+  // Other modules ease off while our lyrics show (ambient/style.css).
+  document.documentElement.toggleAttribute('data-feathertune-lyrics-open', open);
+  follow();
+  if (open) sync(document.querySelector('video'), true);
 };
 
 // The last entry (line or word) whose time has come.
@@ -291,9 +307,11 @@ const light = (next) => {
   active = next;
 };
 
-// Distance from the current line, for the fade (0 to REACH; farther lines keep the default look).
-// Only the lines around the old and the new current one are touched.
-const REACH = 4;
+// Distance from the current line (0 to REACH; farther lines keep the default look). style.css fades the
+// lines up to 4 away and makes every line with a distance a layer of its own, so a line becomes one (and
+// draws its glow) about three lines before it is near enough to fade, mostly off screen, instead of at the
+// switch that brings it on. Only the lines around the old and the new current one are touched.
+const REACH = 7;
 const fade = (from, to) => {
   const near = new Set();
   for (const center of [from, to]) {
@@ -308,7 +326,7 @@ const fade = (from, to) => {
 };
 
 // Wakes `sync` when the next word, line start or line end is due (`ms`: now, with the lead), so words
-// light on time without the frame loop, also while the window is shown but not in front. One timer, set
+// light on time without a frame loop, also while the window is shown but not in front. One timer, set
 // only while playing and shown; it is set again only when what is due next changes (or `force`).
 const arm = (video, ms, force) => {
   let next = lines[current + 1]?.ms ?? Infinity;
@@ -343,7 +361,6 @@ const sync = (video, force) => {
     arm(video, ms, false);
     return;
   }
-  if (force) catchUp = true;
   const before = current;
   current = index;
   fade(before, index);
@@ -351,17 +368,18 @@ const sync = (video, force) => {
   const el = items[index];
   if (!el) return;
   const t = tab();
-  if (frame || !t || Date.now() < manualUntil) return;
-  t.scrollTo({ top: center(index) - t.clientHeight / 2, behavior: 'smooth' });
+  if (anim || !t || Date.now() < manualUntil) return;
+  const top = box.getBoundingClientRect().top - t.getBoundingClientRect().top + t.scrollTop;
+  t.scrollTo({ top: top + center(index) - t.clientHeight / 2, behavior: 'smooth' });
 };
 
+// Lines scale about their vertical middle and the box moves as a whole, so these hold while either runs.
 const center = (i) => {
   if (!centers) {
-    const t = tab();
-    const origin = t.getBoundingClientRect().top - t.scrollTop;
+    const top = box.getBoundingClientRect().top;
     centers = items.map((el) => {
       const r = el.getBoundingClientRect();
-      return r.top - origin - shifted + r.height / 2;
+      return r.top - top + r.height / 2;
     });
     smooth = null;
   }
@@ -485,57 +503,104 @@ const media = () => document.querySelector('video');
 const canRun = (v) =>
   !!lines && !!box && box.isConnected && !box.hidden && !!v && !v.paused && !document.hidden && document.hasFocus();
 
-// scrollTop holds whole device pixels, so a slow glide into a line moved in uneven 1 px steps; the
-// rest (under a pixel) moves the box instead, a compositor layer (style.css). A larger gap is the
-// scroll held at an end, not a fraction, and is left alone.
-const shift = (px) => {
-  const v = Math.abs(px) < 0.01 || Math.abs(px) > 1 ? 0 : px;
-  if (Math.abs(v - shifted) < 0.01) return;
-  shifted = v;
-  if (box) box.style.transform = v ? `translateY(${v.toFixed(2)}px)` : '';
-};
-
-// `frame` stays set while a frame runs, so `sync` leaves the scroll to the loop.
-const step = (now) => {
-  const v = media();
-  const t = tab();
-  if (!t || !canRun(v)) {
-    frame = 0;
-    shift(0);
-    return;
-  }
-  sync(v, false);
-  const dt = Math.min(0.1, (now - last) / 1000);
-  last = now;
-  if (Math.abs(t.scrollTop - seen) > 1) manualUntil = Date.now() + MANUAL_SCROLL_MS;
-  if (Date.now() < manualUntil) {
-    pos = t.scrollTop;
-    catchUp = true;
-  } else {
-    const target = goal(v.currentTime * 1000 + LEAD_MS) - t.clientHeight / 2;
-    const dpr = devicePixelRatio || 1;
-    if (catchUp) {
-      pos += (target - pos) * (1 - Math.exp(-dt / FOLLOW_S));
-      catchUp = Math.abs(target - pos) * dpr >= 0.5;
-    } else {
-      pos = target;
+// The indices of the samples `ys` (SAMPLE_MS apart) that straight lines must join to stay within
+// GLIDE_TOLERANCE_PX of every sample: each line goes on while one slope still fits all the samples it
+// passes (a cone narrowed at each one).
+const corners = (ys) => {
+  const out = [0];
+  let a = 0;
+  let lo = -Infinity;
+  let hi = Infinity;
+  for (let k = 1; k < ys.length; k++) {
+    let dt = k - a;
+    if ((ys[k] - ys[a]) / dt < lo || (ys[k] - ys[a]) / dt > hi) {
+      a = k - 1;
+      out.push(a);
+      dt = 1;
+      lo = -Infinity;
+      hi = Infinity;
     }
-    const top = Math.round(pos * dpr) / dpr;
-    if (Math.abs(top - t.scrollTop) * dpr >= 1) t.scrollTop = top;
+    lo = Math.max(lo, (ys[k] - GLIDE_TOLERANCE_PX - ys[a]) / dt);
+    hi = Math.min(hi, (ys[k] + GLIDE_TOLERANCE_PX - ys[a]) / dt);
   }
-  seen = t.scrollTop;
-  shift(seen - pos);
-  frame = requestAnimationFrame(step);
+  if (ys.length > 1) out.push(ys.length - 1);
+  return out;
 };
 
-// Starts the loop when it has something to follow; it stops on its own when that ends.
-const run = () => {
+// How far the box is moved now (its glide, or none).
+const shown = () => {
+  const m = getComputedStyle(box).transform;
+  return m && m !== 'none' ? new DOMMatrixReadOnly(m).m42 : 0;
+};
+
+// The box glides along the curve as a transform animation from the song's time now to its end, so the
+// compositor moves it on its own clock: a busy page no longer drops its frames, and the tab's scroll (and
+// the site's scroll listeners) stay still meanwhile. It starts where the box is now and eases onto the
+// curve (FOLLOW_S), and its clock follows the song's (rate, drift; see `align`). Started again after a
+// seek, a resize or a manual scroll.
+const start = (v) => {
   const t = tab();
-  if (frame || !t || !canRun(media())) return;
-  pos = seen = t.scrollTop;
-  catchUp = true;
-  last = performance.now();
-  frame = requestAnimationFrame(step);
+  if (!t || !canRun(v)) return;
+  const from = anim ? shown() : 0;
+  anim?.cancel();
+  anim = null;
+  const viewH = t.clientHeight;
+  if (!viewH) return;
+  t.scrollTop = t.scrollTop; // ends a smooth scroll of `sync` still under way
+  const rel = box.getBoundingClientRect().top - t.getBoundingClientRect().top;
+  const ms0 = v.currentTime * 1000 + LEAD_MS;
+  const onCurve = (ms) => viewH / 2 - rel - goal(ms);
+  const gap = from - onCurve(ms0);
+  const curveEnd = radii ? sampleStart + (smooth?.length ?? radii.length) * SAMPLE_MS : keys[keys.length - 1].ms;
+  const easeEnd = Math.abs(gap) > GLIDE_TOLERANCE_PX ? ms0 + FOLLOW_S * 1000 * Math.log(Math.abs(gap) / 0.05) : ms0;
+  const count = Math.max(2, Math.ceil((Math.max(curveEnd, easeEnd) - ms0) / SAMPLE_MS) + 1);
+  const ys = Float64Array.from({ length: count }, (_, s) => {
+    const ms = ms0 + s * SAMPLE_MS;
+    return onCurve(ms) + gap * Math.exp(-(ms - ms0) / (FOLLOW_S * 1000));
+  });
+  const frames = corners(ys).map((s) => ({ offset: s / (count - 1), transform: `translateY(${ys[s].toFixed(2)}px)` }));
+  anim = box.animate(frames, { duration: (count - 1) * SAMPLE_MS, fill: 'forwards' });
+  box.classList.add('ft-gliding');
+  anim.playbackRate = v.playbackRate;
+  animStart = ms0;
+  ownTop = t.scrollTop;
+  anim.ready.then(() => align(v)).catch(() => {});
+};
+
+// Sets the glide's clock back to the song's when they drift apart (the rate follows the song's too).
+const align = (v) => {
+  if (!anim) return;
+  if (anim.playbackRate !== v.playbackRate) anim.playbackRate = v.playbackRate;
+  const want = v.currentTime * 1000 + LEAD_MS - animStart;
+  if (Math.abs((anim.currentTime ?? 0) - want) > DRIFT_MS) anim.currentTime = want;
+};
+
+// Ends the glide, leaving the view where it is: what the box was moved goes into the tab's scroll.
+const stop = () => {
+  if (!anim) return;
+  const moved = shown();
+  anim.cancel();
+  anim = null;
+  box.classList.remove('ft-gliding');
+  const t = box?.parentNode;
+  if (t instanceof Element && !box.hidden) {
+    t.scrollTop -= moved;
+    ownTop = t.scrollTop;
+  }
+};
+
+// Glides while there is something to follow (the song plays, the tab is shown and in front, no manual
+// scroll); otherwise the view stays and `sync` scrolls each new line to the middle.
+const follow = () => {
+  const v = media();
+  if (!canRun(v) || Date.now() < manualUntil) return stop();
+  if (anim) align(v);
+  else start(v);
+};
+
+const onManual = () => {
+  manualUntil = Date.now() + MANUAL_SCROLL_MS;
+  stop();
 };
 
 // Media events do not bubble, but a capturing listener on the document gets them (same as the bridge).
@@ -546,7 +611,8 @@ const onTime = (e) => {
     refresh();
     return;
   }
-  run();
+  if (e.type === 'seeked' && anim) start(e.target);
+  follow();
   if (e.type === 'ratechange') {
     clearTimeout(timer);
     timer = 0;
@@ -556,8 +622,18 @@ const onTime = (e) => {
 for (const type of ['timeupdate', 'seeked', 'play', 'pause', 'ratechange']) {
   document.addEventListener(type, onTime, true);
 }
-window.addEventListener('focus', run);
-document.addEventListener('visibilitychange', run);
+window.addEventListener('focus', follow);
+window.addEventListener('blur', follow);
+document.addEventListener('visibilitychange', follow);
+// A scroll of the tab while the box glides is a manual one (the scrollbar, keys); scroll events do not
+// bubble, so this listens while capturing.
+document.addEventListener(
+  'scroll',
+  (e) => {
+    if (anim && e.target === box?.parentNode && Math.abs(e.target.scrollTop - ownTop) > 1) onManual();
+  },
+  true,
+);
 
 feathertune.lyrics = Object.freeze({
   set(data) {

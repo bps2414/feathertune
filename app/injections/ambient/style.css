@@ -148,7 +148,10 @@ html[data-feathertune-ambient] #player-bar-background {
   animation: ft-drift 90s steps(900) infinite alternate;
 }
 
-#feathertune-ambient.ft-still .ft-bg .ft-layer {
+/* It also pauses while our synced lyrics show (lyrics/page.js sets the attribute): each step blurs the
+   whole background again on the GPU, which the lyrics' glide competes with. */
+#feathertune-ambient.ft-still .ft-bg .ft-layer,
+html[data-feathertune-lyrics-open] #feathertune-ambient .ft-bg .ft-layer {
   animation-play-state: paused;
 }
 

@@ -11,10 +11,10 @@ ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
 }
 
 /* Scrolling moves layers instead of painting the blurred text again each frame (on a 100% scale
-   display Chromium would otherwise scroll by repainting). The box is its own layer so the scroll loop
-   can add the part of a pixel that scrollTop cannot hold (page.js), and the lines near the latest
-   one (`data-d`) are layers before they light up, so the cross-fade and the scale run on the
-   compositor without making and dropping a layer at each line switch. */
+   display Chromium would otherwise scroll by repainting). The box is its own layer, which the glide
+   moves on the compositor (page.js), and the lines near the latest one (`data-d`, a few more than
+   fade) are layers before they light up, so the cross-fade and the scale run on the compositor
+   without making a layer at the switch that brings a line on screen. */
 ytmusic-tab-renderer[data-feathertune-lyrics] {
   will-change: scroll-position;
 }
@@ -55,7 +55,9 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 #feathertune-lyrics .ft-line[data-d='2'] { opacity: 0.44; }
 #feathertune-lyrics .ft-line[data-d='1'] { opacity: 0.56; }
 
-#feathertune-lyrics .ft-line:not(.ft-gap):hover {
+/* The line under the pointer brightens; while the box glides, only while the pointer moves (page.js). */
+#feathertune-lyrics:not(.ft-gliding) .ft-line:not(.ft-gap):hover,
+#feathertune-lyrics.ft-pointing .ft-line:not(.ft-gap):hover {
   opacity: 0.85;
 }
 
@@ -142,11 +144,12 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 }
 
 /* A line leaves slowly (it and its sung words dim together) and the next one comes in a little faster:
-   the transition is the one of the state a line goes to. */
+   the transition is the one of the state a line goes to. A line leaving changes its color and its words'
+   at once, under the fade: by then every word is sung, so nothing shows, and a color transition would
+   paint the line again at every frame of it (opacity and transform do not). */
 #feathertune-lyrics .ft-line {
   transition:
     opacity 0.9s ease,
-    color 0.9s ease,
     transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -154,8 +157,10 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   transition: opacity 0.9s ease;
 }
 
-/* Words only fade their color; their glow follows the line's (no animation of their own). */
-#feathertune-lyrics .ft-line span {
+/* Words only fade their color; their glow follows the line's (no animation of their own). The
+   translation's color does show when its line leaves, so it keeps its fade both ways. */
+#feathertune-lyrics .ft-line.ft-current span,
+#feathertune-lyrics .ft-line .ft-tr {
   transition: color 0.9s ease;
 }
 

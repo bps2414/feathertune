@@ -13,8 +13,9 @@
 // the latest one (`data-d`), and a click on a line seeks the <video> to it. While the song plays and the
 // window is in front, the list scrolls on its own, in time, on one smooth curve: the view rests on a line
 // with time to spare and moves on to the next one around the switch (a little before and a little after),
-// glides through lines too short to rest on, and eases to a new place after a seek, a click or a manual
-// scroll (one animation frame loop, only while that is so; it writes the scroll only when it moves by a
+// glides through lines too short to rest on (in a fast part the curve is averaged over a few lines, so the
+// view flows at the part's pace instead of jerking with each line), and eases to a new place after a seek,
+// a click or a manual scroll (one animation frame loop, only while that is so; it writes the scroll only when it moves by a
 // whole device pixel). Otherwise each new line scrolls smoothly to the middle. The box goes into the tab renderer showing
 // the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
 // `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
@@ -45,10 +46,23 @@ const MOVE_BEFORE_MAX_MS = 1600;
 const MOVE_AFTER = 0.45;
 const MOVE_AFTER_MAX_MS = 1800;
 const PARK_MIN_MS = 600;
+// In a fast part (lines less than DENSE_GAP_MS apart on average) the curve is averaged over a window of
+// SMOOTH_LINES of those gaps (at most SMOOTH_MAX_MS), twice, so the view flows at the part's pace instead
+// of speeding up and slowing down with each line; the window itself changes over SMOOTH_EASE_MS (at least
+// half of SMOOTH_MAX_MS, so its edges only move forward and the view never turns back), and slower parts
+// keep the curve as it is. The averaged curve is sampled every SAMPLE_MS.
+const DENSE_GAP_MS = 1200;
+const SMOOTH_LINES = 4;
+const SMOOTH_MAX_MS = 3000;
+const SMOOTH_EASE_MS = 2000;
+const SAMPLE_MS = 20;
 
 let lines = null; // [{ ms, text, words?, end, bg?, translation? }], sorted by ms
 let ends = []; // when each line stops being sung (see `lineEnd`)
-let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at ms (see `goal`)
+let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at ms (see `curveAt`)
+let radii = null; // per sample from `sampleStart`, half the averaging window in samples; null: no fast part
+let sampleStart = 0;
+let smooth = null; // the averaged curve at those samples, built when needed from the measured lines
 let meta = { credit: '', estimated: false };
 let box = null; // our container, first child of the tab renderer
 let items = [];
@@ -100,6 +114,7 @@ const clear = () => {
   lines = null;
   ends = [];
   keys = [];
+  radii = smooth = null;
   current = -1;
   active = [];
   sungMain = [];
@@ -348,6 +363,7 @@ const center = (i) => {
       const r = el.getBoundingClientRect();
       return r.top - origin - shifted + r.height / 2;
     });
+    smooth = null;
   }
   return centers[i] ?? 0;
 };
@@ -375,6 +391,45 @@ const buildKeys = () => {
       add((arrive + leave) / 2, k);
     }
   });
+  buildRadii();
+};
+
+// At each sample `s`, the mean of `src` from `r[s]` samples before it to `r[s]` after (a narrower window
+// near the ends, so it stays centered).
+const average = (src, r) => {
+  const n = src.length;
+  const sums = new Float64Array(n + 1);
+  for (let s = 0; s < n; s++) sums[s + 1] = sums[s] + src[s];
+  const out = new Float64Array(n);
+  for (let s = 0; s < n; s++) {
+    const h = Math.min(r[s], s, n - 1 - s);
+    out[s] = (sums[s + h + 1] - sums[s - h]) / (2 * h + 1);
+  }
+  return out;
+};
+
+// The averaging window at each sample, from the mean gap of the lines around it (see DENSE_GAP_MS).
+const buildRadii = () => {
+  radii = smooth = null;
+  const n = lines.length;
+  if (!keys.length) return;
+  sampleStart = keys[0].ms - SMOOTH_MAX_MS;
+  const count = Math.ceil((keys[keys.length - 1].ms + SMOOTH_MAX_MS - sampleStart) / SAMPLE_MS) + 1;
+  const widths = new Float64Array(count);
+  let dense = false;
+  for (let s = 0; s < count; s++) {
+    const i = Math.max(0, indexAt(lines, sampleStart + s * SAMPLE_MS));
+    const a = Math.max(0, i - 2);
+    const b = Math.min(n - 1, i + 2);
+    const gap = b > a ? (lines[b].ms - lines[a].ms) / (b - a) : Infinity;
+    if (gap < DENSE_GAP_MS) {
+      widths[s] = Math.min(SMOOTH_MAX_MS, gap * SMOOTH_LINES);
+      dense = true;
+    }
+  }
+  if (!dense) return;
+  const ease = new Uint32Array(count).fill(Math.round(SMOOTH_EASE_MS / 2 / SAMPLE_MS));
+  radii = Uint32Array.from(average(widths, ease), (w) => Math.round(w / 2 / SAMPLE_MS));
 };
 
 const keyY = (j) => center(keys[j].i);
@@ -391,9 +446,9 @@ const slope = (j) => {
   return (3 * (h0 + h1)) / ((2 * h1 + h0) / d0 + (h1 + 2 * h0) / d1);
 };
 
-// Where the middle of the view should be at `ms`: on the curve through the keys, smooth in place and
-// speed, so the view never stops between lines it has no time to rest on.
-const goal = (ms) => {
+// The curve through the keys at `ms`, smooth in place and speed, so the view never stops between lines
+// it has no time to rest on.
+const curveAt = (ms) => {
   const n = keys.length;
   if (!n) return center(0);
   if (ms <= keys[0].ms) return keyY(0);
@@ -409,6 +464,21 @@ const goal = (ms) => {
     (3 * s2 - 2 * s3) * keyY(j + 1) +
     (s3 - s2) * h * slope(j + 1)
   );
+};
+
+// Where the middle of the view should be at `ms`: the curve, averaged in fast parts (see `buildRadii`).
+const goal = (ms) => {
+  if (!radii) return curveAt(ms);
+  center(0); // measures the lines if needed, which drops an average built on the old ones
+  if (!smooth) {
+    const raw = Float64Array.from(radii, (_, s) => curveAt(sampleStart + s * SAMPLE_MS));
+    smooth = average(average(raw, radii), radii);
+  }
+  const f = (ms - sampleStart) / SAMPLE_MS;
+  if (f <= 0) return smooth[0];
+  if (f >= smooth.length - 1) return smooth[smooth.length - 1];
+  const s = Math.floor(f);
+  return smooth[s] + (smooth[s + 1] - smooth[s]) * (f - s);
 };
 
 const media = () => document.querySelector('video');

@@ -167,7 +167,43 @@
       </div>
       <div class="card" data-plugin="track_analysis"></div>
       <div class="card" data-plugin="skip_silence"></div>
-      <div class="card" data-plugin="remote"></div>
+      <div class="card" data-plugin="remote">
+        <div id="remote-box">
+          <p id="remote-off" class="notice error" hidden>The phone remote is not listening, so no phone can connect. The port may be in use: change port under [remote] in config.toml and restart.</p>
+          <label>PC name <input data-key="remote.name" maxlength="32" placeholder="feathertune" autocomplete="off" spellcheck="false"></label>
+          <p class="hint">Phones see this name when they connect. It is never the Windows name of this PC.</p>
+
+          <div class="pair">
+            <div id="pair-idle">
+              <button id="pair-start" type="button">Pair a phone</button>
+              <p class="hint">Open feathertune on the phone and scan the code. It works for 2 minutes and for one phone.</p>
+            </div>
+            <div id="pair-open" class="pair-open" hidden>
+              <div id="pair-qr" class="qr" hidden></div>
+              <div class="pair-side">
+                <div id="pair-title" class="name" role="status"></div>
+                <p id="pair-hint" class="hint"></p>
+                <div id="pair-left" class="countdown"></div>
+                <button id="pair-cancel" type="button" class="secondary">Cancel</button>
+              </div>
+            </div>
+            <div id="pair-ask" hidden>
+              <div id="pair-ask-title" class="name" role="alert"></div>
+              <div id="pair-code" class="code"></div>
+              <p class="hint">Check that the phone shows the same code. Allow it only if they match.</p>
+              <div class="actions">
+                <button id="pair-allow" type="button">Allow</button>
+                <button id="pair-deny" type="button" class="secondary">Deny</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="name small">Paired phones</div>
+          <ul class="devices" id="remote-devices"></ul>
+          <div class="actions"><button id="remote-forget" type="button" class="secondary">Forget all devices</button></div>
+          <p class="hint">A phone can't find this PC? Windows blocks connections from other devices on a network marked Public. Open Windows Settings, go to Network &amp; internet, choose Wi-Fi or Ethernet, open this network and set Network profile type to Private.</p>
+        </div>
+      </div>
       <h2>Mix</h2>
       <p class="hint">Transitions for a playlist and for each pair of its tracks, kept on this PC. They use the Crossfade switch; ads are never mixed.</p>
       <p id="mix-none" class="notice" hidden>Play a playlist once to list its tracks here.</p>

@@ -12,7 +12,8 @@
 //!   matches; `capabilities/player-bridge.json` gives the site `player_state` only. Each command also
 //!   checks the caller's label itself.
 //! - The settings window gets no other permission (no core window, event or webview API), and no
-//!   command here evaluates script in, or sends data to, the site webview.
+//!   command here evaluates script in, or sends data to, the site webview. The one script Rust runs in
+//!   the settings window itself is fixed text that tells its Remote section to ask again (`remote_changed`).
 //! - It can only navigate within the scheme; its CSP allows our own files and IPC only.
 
 use std::borrow::Cow;
@@ -20,12 +21,13 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use qrcodegen::{QrCode, QrCodeEcc};
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::i18n::{t, tf};
 use tauri::http::{Request, Response, StatusCode, header};
-use tauri::{AppHandle, Manager, UriSchemeContext, Url, Webview, WebviewUrl, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Manager, UriSchemeContext, Url, Webview, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -137,10 +139,29 @@ fn open_tab(app: &AppHandle, tab: &str) {
             .on_navigation(|url| url.origin().ascii_serialization() == ORIGIN)
             .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
             .build();
-        if let Err(e) = result {
-            eprintln!("settings window: {e}");
+        match result {
+            // The pairing QR is only good while this window is open.
+            Ok(window) => {
+                let app = app.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, WindowEvent::Destroyed)
+                        && let Some(remote) = app.try_state::<crate::remote::Remote>()
+                    {
+                        remote.stop_pairing();
+                    }
+                });
+            }
+            Err(e) => eprintln!("settings window: {e}"),
         }
     });
+}
+
+/// The remote changed (the pairing window, a phone asking to pair, the paired list, a connection): the
+/// Remote section of the open settings window asks `settings_remote` again. Fixed script, no data in it.
+pub fn remote_changed(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(LABEL) {
+        let _ = window.eval("window.dispatchEvent(new Event('remote-changed'))");
+    }
 }
 
 fn guard(webview: &Webview) -> Result<(), String> {
@@ -210,6 +231,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "connected": lastfm,
         },
         "browser": { "disable_features": s.browser.disable_features },
+        "remote": { "name": crate::remote::valid_name(&s.remote.name).unwrap_or_else(|| crate::remote::DEFAULT_NAME.into()) },
         "lyrics": {
             "providers": s.lyrics.providers,
             "all_providers": crate::lyrics::PROVIDERS.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect::<Vec<_>>(),
@@ -242,7 +264,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
-/// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `audio.eq_preset`, `audio.eq_bands`,
+/// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
 /// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer`,
 /// `ui.language` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
@@ -365,6 +387,18 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             crate::lyrics::republish(&app);
             Ok(false)
         }
+        ("remote", "name") => {
+            // Empty: back to the default. Phones see the new name from their next connection.
+            let given = text(&value, 128)?;
+            let new_name = if given.is_empty() {
+                crate::remote::DEFAULT_NAME.into()
+            } else {
+                crate::remote::valid_name(&given).ok_or(t("a name of 1 to 32 characters"))?
+            };
+            live.write("remote", name, toml_edit::value(new_name), None, false)?;
+            crate::remote::apply(&app);
+            Ok(false)
+        }
         ("audio", "eq_preset") => {
             let preset = value.as_str().ok_or("expected a preset")?;
             if preset != "custom" && !crate::audio::EQ_PRESETS.iter().any(|(name, _)| *name == preset) {
@@ -470,6 +504,65 @@ pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i
     }
     let stats = app.try_state::<Stats>().ok_or(t("Listening stats are not running; turn them on and restart"))?;
     Ok(stats.summary(&range, offset))
+}
+
+const NOT_LISTENING: &str = "The phone remote is not listening, so no phone can connect. The port may be in use: \
+                             change port under [remote] in config.toml and restart.";
+
+/// The Remote section of the Experimental tab. `op`: `get`, `pair_start` (opens the pairing window and
+/// returns its QR as `{ size, modules, left }`, `modules` being `size`² characters of 0 and 1, row by
+/// row), `pair_stop`, `answer` ({allow, code}: the code is the one the page showed), `remove` ({key})
+/// and `forget_all`. Only the settings window may call it.
+#[tauri::command]
+pub fn settings_remote(webview: Webview, app: AppHandle, op: String, arg: Value) -> Result<Value, String> {
+    guard(&webview)?;
+    let remote = app.try_state::<crate::remote::Remote>().ok_or("the phone remote is not available")?;
+    match op.as_str() {
+        "get" => Ok(json!({
+            "listening": remote.listening().is_some(),
+            // left: seconds; fresh: the QR can still be scanned.
+            "pairing": remote.pairing().map(|(left, fresh)| json!({ "left": left, "fresh": fresh })),
+            "pending": remote.pending(),
+            "devices": remote.devices(),
+        })),
+        "pair_start" => {
+            if remote.listening().is_none() {
+                return Err(t(NOT_LISTENING).into());
+            }
+            let uri = remote.start_pairing().map_err(|e| match e.as_str() {
+                "no local network address found" => {
+                    t("This PC has no local network address. Connect it to Wi-Fi or Ethernet and try again.").into()
+                }
+                _ => e,
+            })?;
+            let qr = QrCode::encode_text(&uri, QrCodeEcc::Medium).map_err(|e| e.to_string())?;
+            let size = qr.size();
+            let modules: String = (0..size)
+                .flat_map(|y| (0..size).map(move |x| (x, y)))
+                .map(|(x, y)| if qr.get_module(x, y) { '1' } else { '0' })
+                .collect();
+            Ok(json!({ "size": size, "modules": modules, "left": remote.pairing().map_or(0, |(left, _)| left) }))
+        }
+        "pair_stop" => {
+            remote.stop_pairing();
+            Ok(Value::Null)
+        }
+        "answer" => {
+            let allow = arg.get("allow").and_then(Value::as_bool).ok_or("expected allow or deny")?;
+            let code = arg.get("code").and_then(Value::as_str).ok_or("expected the code")?;
+            // Only the request the user saw: its code is the one on the screen.
+            if remote.pending().is_none_or(|p| p.code != code) || !remote.answer(allow) {
+                return Err(t("That request is no longer open.").into());
+            }
+            Ok(Value::Null)
+        }
+        "remove" => {
+            remote.remove(arg.get("key").and_then(Value::as_str).ok_or("expected a key")?);
+            Ok(Value::Null)
+        }
+        "forget_all" => remote.forget_all().map(|()| Value::Null),
+        _ => Err("unknown operation".into()),
+    }
 }
 
 /// The user's Downloads folder.

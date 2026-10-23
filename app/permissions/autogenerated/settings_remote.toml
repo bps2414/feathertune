@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settings-remote"
+description = "Enables the settings_remote command without any pre-configured scope."
+commands.allow = ["settings_remote"]
+
+[[permission]]
+identifier = "deny-settings-remote"
+description = "Denies the settings_remote command without any pre-configured scope."
+commands.deny = ["settings_remote"]

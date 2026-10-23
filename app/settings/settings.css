@@ -301,3 +301,25 @@ label input[type="range"] { width: 100%; }
 .mix-pairs .detail, .mix-pairs .empty { color: var(--muted); font-size: 12px; }
 #mix-canvas { display: block; width: 100%; height: 150px; margin: 8px 0; border-radius: 10px; background: var(--glass); border: 1px solid var(--edge); touch-action: none; cursor: crosshair; }
 #mix-import-text { display: block; width: 100%; box-sizing: border-box; margin: 6px 0; font: 12px/1.4 ui-monospace, monospace; color: var(--text); background: var(--glass); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px; resize: vertical; }
+
+/* Remote: the pairing stage is one box whose content follows the pairing (idle, QR, asking). The QR is a
+   pale tile with its own quiet zone, so a phone reads it on any theme; everything else stays quiet. */
+.card[data-plugin="remote"].off .extra { display: none; }
+.pair { margin: 4px 0 18px; padding: 14px; border-radius: 12px; background: var(--field); border: 1px solid var(--edge); }
+.pair .hint { margin-bottom: 0; }
+.pair-open { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.qr { flex: none; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px var(--edge), 0 10px 36px color-mix(in srgb, var(--g1), transparent 55%); }
+.qr svg { display: block; width: 100%; height: 100%; }
+.qr rect { fill: #fff; }
+.qr path { fill: #0d0b1a; }
+.pair-side { flex: 1; min-width: 180px; }
+.pair-side .hint { margin: 4px 0 10px; }
+.countdown { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+.code { margin: 8px 0 4px; font: 600 40px/1.1 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
+
+.devices { list-style: none; margin: 8px 0 0; padding: 0; }
+.devices li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 4px; border-radius: 10px; background: var(--field); border: 1px solid var(--edge); }
+.devices .body { flex: 1; min-width: 0; }
+.devices .title, .devices .detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devices .detail, .devices .empty { color: var(--muted); font-size: 12px; }
+.devices li.empty { background: none; border-style: dashed; }

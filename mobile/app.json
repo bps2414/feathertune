@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "feathertune remote",
+    "slug": "feathertune-remote",
+    "version": "0.1.0",
+    "scheme": "feathertune-remote",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "dev.feathertune.remote",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "feathertune remote talks to your PC over your home network to show what it plays and to send play, pause, next and volume. It never leaves your network.",
+        "NSCameraUsageDescription": "feathertune remote uses the camera only to scan the pairing code shown by feathertune on your PC. Nothing is recorded or saved."
+      }
+    },
+    "android": {
+      "package": "dev.feathertune.remote",
+      "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.CAMERA"]
+    },
+    "plugins": ["expo-router", "expo-localization", "expo-status-bar"]
+  }
+}

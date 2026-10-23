@@ -70,12 +70,25 @@ const rowId = (row) => {
   return new URLSearchParams(href.split('?')[1] || '').get('v');
 };
 
-// Plays queue row `index`, only if it is the track `id` (a stale index never plays another song).
+// Plays the track `id` at queue row `index`; only a row of that track is ever clicked (a stale index never
+// plays another song). `index` counts the queue entries core could read, and the page may have more rows
+// than that (a hidden song/video counterpart), so when the row there is another track, the row of `id`
+// closest to `index` is played.
 const playItem = (id, index) => {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(id)) return false;
   if (!Number.isInteger(index) || index < 0 || index >= MAX_QUEUE || adShowing()) return false;
-  const row = document.querySelectorAll(SELECTORS.queueRows)[index];
-  if (!row || rowId(row) !== id) return false;
+  const rows = [...document.querySelectorAll(SELECTORS.queueRows)];
+  let row = rows[index] && rowId(rows[index]) === id ? rows[index] : null;
+  if (!row) {
+    let best = Infinity;
+    rows.forEach((r, i) => {
+      if (Math.abs(i - index) < best && rowId(r) === id) {
+        best = Math.abs(i - index);
+        row = r;
+      }
+    });
+  }
+  if (!row) return false;
   row.click();
   return true;
 };

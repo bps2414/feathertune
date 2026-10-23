@@ -36,7 +36,7 @@ export default function Name() {
         autoFocus
         returnKeyType="done"
         onSubmitEditing={submit}
-        style={[styles.input, { color: c.text, backgroundColor: c.card }]}
+        style={[styles.input, { color: c.text, backgroundColor: c.raised }]}
       />
       {invalid && <Body muted>{t('nameInvalid')}</Body>}
       <Button label={t('namePair')} onPress={submit} />

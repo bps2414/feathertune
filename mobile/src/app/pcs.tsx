@@ -33,7 +33,7 @@ function Row({ pc }: { pc: PcRecord }) {
       { text: t('pcRemove'), style: 'destructive', onPress: () => void remote.remove(pc.id) },
     ]);
   return (
-    <View style={[styles.row, { backgroundColor: c.card }]}>
+    <View style={[styles.row, { backgroundColor: c.raised }]}>
       <View accessible accessibilityLabel={t('pcRow', { name: pc.name, status: label })}>
         <Text style={[styles.name, { color: c.text }]}>{pc.name}</Text>
         <Body muted>{label}</Body>

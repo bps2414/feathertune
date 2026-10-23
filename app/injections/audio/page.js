@@ -317,17 +317,18 @@ const checkGuard = (v) => {
     useAnalyser('guard', false);
     return;
   }
+  const t = songTime(v);
   if (ctx.state !== 'running') {
     if (guard.resumeAt === null) {
-      guard.resumeAt = v.currentTime;
+      guard.resumeAt = t;
       ctx.resume().catch(() => {});
-    } else if (v.currentTime - guard.resumeAt > 1.5) {
+    } else if (t - guard.resumeAt > 1.5) {
       trip('the audio context does not run');
     }
     return;
   }
   guard.resumeAt = null;
-  if (v.currentTime < GUARD_FROM_S || v.currentTime > GUARD_UNTIL_S) {
+  if (t < GUARD_FROM_S || t > GUARD_UNTIL_S) {
     useAnalyser('guard', false);
     guard.zeroFrom = null;
     return;
@@ -338,8 +339,8 @@ const checkGuard = (v) => {
     useAnalyser('guard', false);
     return;
   }
-  guard.zeroFrom ??= v.currentTime;
-  if (v.currentTime - guard.zeroFrom >= GUARD_ZERO_S) trip('only silence passes through the graph');
+  guard.zeroFrom ??= t;
+  if (t - guard.zeroFrom >= GUARD_ZERO_S) trip('only silence passes through the graph');
 };
 
 // --- crossfade (one player) ---
@@ -429,14 +430,18 @@ const currentId = () => {
   return player?.getVideoData?.()?.video_id || new URLSearchParams(location.search).get('v');
 };
 const repeatOne = (v) => v.loop || siteState()?.queue?.repeatMode === 'ONE';
+// The track's time and length (s), which every time in this module is: in a gapless queue the
+// <video>'s go on counting from the first track (core/page.js, `feathertune.clock`).
+const songTime = (v) => feathertune.clock.time(v);
+const songLength = (v) => feathertune.clock.duration(v);
 // `silence`: the time skipped is known to be silent (skip_silence); otherwise the analysis of the
 // track ends there, sent only if it was heard to the end (a partial one would be kept for good).
 const seekTo = (v, t, silence = false) => {
-  if (Math.abs(v.currentTime - t) < 0.01) return;
+  if (Math.abs(songTime(v) - t) < 0.01) return;
   if (silence) skipAnalysis(t);
   else if (analysis) stopAnalysis(analysis.id === trackId && t >= analysis.duration - 0.5);
   ownSeek = t;
-  v.currentTime = t;
+  feathertune.clock.seek(v, t);
 };
 
 // The mix's transition out of this track (mixes.rs `plan`: a pair, a playlist's defaults or auto),
@@ -452,16 +457,17 @@ const planFade = (v) => {
   const c = data?.crossfade;
   const m = transition();
   const ms = m ? m.duration_ms : c?.duration_ms;
-  if (!on('crossfade') || !ms || ad || repeatOne(v) || !Number.isFinite(v.duration)) return null;
+  const length = songLength(v);
+  if (!on('crossfade') || !ms || ad || repeatOne(v) || !Number.isFinite(length)) return null;
   const dur = ms / 1000;
   // Before the final silence, once it is known.
   const tail = facts()?.tail_ms;
-  let end = tail && tail / 1000 < v.duration ? tail / 1000 : v.duration;
+  let end = tail && tail / 1000 < length ? tail / 1000 : length;
   // A track that fades out by itself: halfway into its own fade (a fade over a fade is not heard).
   const own = facts()?.fade_ms;
   if (own) end = Math.min(end, own / 1000 + dur / 2);
   let out = end - dur;
-  if (m && Number.isFinite(m.out_ms)) out = Math.min(m.out_ms / 1000, v.duration - dur);
+  if (m && Number.isFinite(m.out_ms)) out = Math.min(m.out_ms / 1000, length - dur);
   else if (end < 3 * dur) return null;
   if (out < 0) return null;
   return {
@@ -481,8 +487,9 @@ const arm = (v) => {
   const g = nodes.master.gain;
   const now = ctx.currentTime;
   const rate = v.playbackRate || 1;
-  const begin = Math.max(now + RAMP, now + (fade.out - v.currentTime) / rate);
-  const p = Math.min(1, Math.max(0, (v.currentTime + (begin - now) * rate - fade.out) / fade.dur));
+  const t = songTime(v);
+  const begin = Math.max(now + RAMP, now + (fade.out - t) / rate);
+  const p = Math.min(1, Math.max(0, (t + (begin - now) * rate - fade.out) / fade.dur));
   g.cancelAndHoldAtTime(now);
   g.linearRampToValueAtTime(valueAt(fade.curve, p), begin);
   const length = ((1 - p) * fade.dur) / rate;
@@ -622,7 +629,7 @@ const onTime = (v) => {
   if (overlap) overlapStep(v);
   if (rateBack) rateStep(v);
   if (!fade && on('crossfade')) fade = planFade(v);
-  const t = v.currentTime;
+  const t = songTime(v);
   if (analysis && Math.abs(analysis.t - t) > 0.5) {
     // Out of step (buffering): the envelope goes on from here, the beat window is lost.
     if (inBeatWindow(analysis)) analysis.beatOk = false;
@@ -641,7 +648,8 @@ const onTime = (v) => {
   if (armed && !faded && t >= fade.out + fade.dur - 0.05) {
     faded = true;
     if (!overlap && fade.to && fade.in > 0) pendingIn = { from: trackId, id: fade.to, at: fade.in };
-    if (fade.out + fade.dur < v.duration - 0.1) seekTo(v, v.duration - 0.05);
+    const length = songLength(v);
+    if (fade.out + fade.dur < length - 0.1) seekTo(v, length - 0.05);
   }
 };
 
@@ -650,10 +658,11 @@ const onTime = (v) => {
 const enterAt = (v, id) => {
   if (id === pendingIn.from) return;
   if (id !== pendingIn.id) return void (pendingIn = null);
-  if (!Number.isFinite(v.duration)) return;
+  const length = songLength(v);
+  if (!Number.isFinite(length)) return;
   const at = pendingIn.at;
   pendingIn = null;
-  if (at < v.duration - 5 && v.currentTime < at) seekTo(v, at);
+  if (at < length - 5 && songTime(v) < at) seekTo(v, at);
 };
 
 // Commands from Rust (mixes.rs): each runs once, and only while fresh.
@@ -743,7 +752,7 @@ const overlapStep = (v) => {
   }
   if (o.waiting && Date.now() - o.since > HANDOFF_WAIT_MS) return overlapOff();
   if (!o.sync || ownSeek !== null || v.readyState < 3) return;
-  const drift = v.currentTime - voiceAt(wall());
+  const drift = songTime(v) - voiceAt(wall());
   if (Math.abs(drift) > 0.08 && o.tries < 3) return syncTo(v);
   takeOver(v);
 };
@@ -757,12 +766,12 @@ const takeOver = (v) => {
   overlap.done_at = at;
   if (v.playbackRate !== 1) {
     const bpm = facts()?.bpm;
-    rateBack = { from: v.playbackRate, start: v.currentTime, len: bpm ? (RATE_BACK_BEATS * 60) / bpm : 16 };
+    rateBack = { from: v.playbackRate, start: songTime(v), len: bpm ? (RATE_BACK_BEATS * 60) / bpm : 16 };
   }
 };
 // The tempo effect back to 1.0, in steps on timeupdate (a rate is not an AudioParam).
 const rateStep = (v) => {
-  const p = Math.min(1, (v.currentTime - rateBack.start) / rateBack.len);
+  const p = Math.min(1, (songTime(v) - rateBack.start) / rateBack.len);
   const rate = p >= 1 ? 1 : rateBack.from + (1 - rateBack.from) * p;
   if (Math.abs(v.playbackRate - rate) > 0.002 || rate === 1) v.playbackRate = rate;
   if (rate === 1) rateBack = null;
@@ -779,7 +788,7 @@ const previewMix = (pair) => {
 };
 
 const onSeek = (v, type) => {
-  if (ownSeek !== null && Math.abs(v.currentTime - ownSeek) < 1) {
+  if (ownSeek !== null && Math.abs(songTime(v) - ownSeek) < 1) {
     if (type === 'seeked') ownSeek = null;
     return;
   }
@@ -789,7 +798,7 @@ const onSeek = (v, type) => {
   stopAnalysis(false);
   quiet.userSeek = true;
   holdFade();
-  if (!inWindow(v.currentTime)) {
+  if (!inWindow(songTime(v))) {
     cancelFade();
     faded = false;
   }
@@ -938,20 +947,21 @@ const dropTap = () => {
 
 const startAnalysis = (v, id) => {
   if (!on('track_analysis') || analysed.has(id) || analysis || ad || v.playbackRate !== 1) return;
-  if (facts()?.id === id || v.currentTime > 0.5 || !Number.isFinite(v.duration)) return;
+  const length = songLength(v);
+  if (facts()?.id === id || songTime(v) > 0.5 || !Number.isFinite(length)) return;
   const sr = ctx.sampleRate;
   analysis = {
     id,
     sr,
-    duration: v.duration,
-    t: v.currentTime,
+    duration: length,
+    t: songTime(v),
     ring: new Float32Array(A.CHROMA),
     pos: 0,
     sinceHop: 0,
     sinceChroma: 0,
     prev: null,
     // Per 100 ms bin: summed power of low, mid, high and the frame count.
-    bins: new Float32Array(Math.min(A.MAX_BINS, Math.ceil(v.duration / A.BIN_S) + 1) * 4),
+    bins: new Float32Array(Math.min(A.MAX_BINS, Math.ceil(length / A.BIN_S) + 1) * 4),
     covered: 0,
     soundAt: null,
     leadLost: false,
@@ -1204,7 +1214,7 @@ const quietFor = (t, s = QUIET.FOR_S) => {
 const skipSilence = (v, t) => {
   if (!on('skip_silence') || quiet.userSeek || ad) return useAnalyser('silence', false);
   const f = facts();
-  const end = v.duration;
+  const end = songLength(v);
   let listening = false;
   if (!quiet.startDone) {
     const lead = f ? f.lead_in_ms / 1000 : 0;
@@ -1509,7 +1519,7 @@ const onMedia = (e) => {
       break;
     case 'playing':
       // After a pause or a stall, the samples dropped meanwhile: back in step.
-      if (analysis) analysis.t = v.currentTime;
+      if (analysis) analysis.t = songTime(v);
       onTime(v);
       break;
     case 'timeupdate':
@@ -1546,7 +1556,7 @@ feathertune.audio = Object.freeze({
     const v = video;
     return {
       id: currentId() ?? null,
-      t: v ? v.currentTime : 0,
+      t: v ? songTime(v) : 0,
       rate: v ? v.playbackRate : 1,
       paused: v ? v.paused : true,
       ad,

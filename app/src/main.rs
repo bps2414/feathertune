@@ -458,9 +458,47 @@ pub(crate) fn show_main(app: &AppHandle) {
 
 /// Runs a command of the `controls` injection (it clicks the player buttons).
 pub(crate) fn player(app: &AppHandle, command: &str) {
-    if let Some(site) = app.get_webview("site") {
-        let _ = site.eval(format!("window.__feathertune?.controls?.{command}()"));
-    }
+    player_call(app, &format!("{command}()"));
+}
+
+/// Evaluates `call` on the `controls` injection; whether it was sent (the page may still refuse it, e.g. during an ad).
+fn player_call(app: &AppHandle, call: &str) -> bool {
+    app.get_webview("site").is_some_and(|site| site.eval(format!("window.__feathertune?.controls?.{call}")).is_ok())
+}
+
+/// The queue rows `playItem` may click (the `core` injection reports at most this many tracks).
+const MAX_QUEUE_ROWS: usize = 200;
+
+/// The `controls` calls with arguments below are built from validated values only, so nothing the remote sends
+/// ever reaches the page as code.
+fn seek_call(seconds: f64) -> Option<String> {
+    (seconds.is_finite() && seconds >= 0.0).then(|| format!("seek({seconds})"))
+}
+
+fn volume_call(percent: f64) -> Option<String> {
+    (0.0..=100.0).contains(&percent).then(|| format!("setVolume({percent})"))
+}
+
+fn play_item_call(id: &str, index: usize) -> Option<String> {
+    (player::valid_id(id) && index < MAX_QUEUE_ROWS).then(|| format!("playItem(\"{id}\",{index})"))
+}
+
+/// Seeks the track to `seconds` (finite, >= 0). Refused by the page during an ad.
+#[allow(dead_code)] // the phone remote (remote.rs) calls it
+pub(crate) fn player_seek(app: &AppHandle, seconds: f64) -> bool {
+    seek_call(seconds).is_some_and(|call| player_call(app, &call))
+}
+
+/// Sets the player's volume to `percent` (0-100). Refused by the page during an ad.
+#[allow(dead_code)] // the phone remote (remote.rs) calls it
+pub(crate) fn player_set_volume(app: &AppHandle, percent: f64) -> bool {
+    volume_call(percent).is_some_and(|call| player_call(app, &call))
+}
+
+/// Plays queue row `index` if its video id is `id`. Refused by the page during an ad.
+#[allow(dead_code)] // the phone remote (remote.rs) calls it
+pub(crate) fn player_play_item(app: &AppHandle, id: &str, index: usize) -> bool {
+    play_item_call(id, index).is_some_and(|call| player_call(app, &call))
 }
 
 /// Hidden: window off, WebView2 not visible and MemoryUsageTargetLevel=Low (page memory goes to
@@ -633,4 +671,38 @@ fn measure_probes(site: Webview, start: Instant, opens: Vec<String>) {
             eval_with(&site, audio::PROBE, move |r| println!("{t:>5}s {}", r.trim_matches('"')));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seek_needs_a_finite_time_from_zero() {
+        assert_eq!(seek_call(12.5).as_deref(), Some("seek(12.5)"));
+        assert_eq!(seek_call(0.0).as_deref(), Some("seek(0)"));
+        for bad in [-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(seek_call(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn volume_is_0_to_100() {
+        assert_eq!(volume_call(0.0).as_deref(), Some("setVolume(0)"));
+        assert_eq!(volume_call(42.0).as_deref(), Some("setVolume(42)"));
+        assert_eq!(volume_call(100.0).as_deref(), Some("setVolume(100)"));
+        for bad in [-1.0, 100.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(volume_call(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn play_item_needs_a_video_id_and_a_row_below_200() {
+        assert_eq!(play_item_call("dQw4w9WgXcQ", 0).as_deref(), Some(r#"playItem("dQw4w9WgXcQ",0)"#));
+        assert!(play_item_call("dQw4w9WgXcQ", 199).is_some());
+        assert_eq!(play_item_call("dQw4w9WgXcQ", 200), None);
+        for bad in ["", "short", "dQw4w9WgXcQx", "dQw4w9WgXc\"", "dQw4w9WgXc;", "dQw4w9WgXc "] {
+            assert_eq!(play_item_call(bad, 0), None, "{bad:?}");
+        }
+    }
 }

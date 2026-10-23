@@ -2,7 +2,8 @@
 // step (10% with Shift), through the embedded player's public API (getVolume / setVolume / isMuted /
 // unMute); the site's volume slider is moved to match and a small "NN%" fades in beside it. Without that
 // API nothing happens and the wheel keeps its default. `video.volume` is never touched, and nothing
-// changes during an ad. `feathertune.precise_volume.step` is what the global volume keys call.
+// changes during an ad. `feathertune.precise_volume.step` is what the global volume keys call, and
+// `.set` (an absolute value) what the remote's volume slider calls.
 if (window.top !== window) return;
 
 const SELECTORS = {
@@ -49,16 +50,29 @@ const show = (volume) => {
   hideTimer = setTimeout(() => hud.classList.remove('on'), HUD_MS);
 };
 
-// Moves the volume by `steps` percent (negative: down). Returns whether it did.
-const step = (steps) => {
-  const player = document.querySelector(SELECTORS.player);
-  if (!usable(player)) return false;
-  if (steps > 0 && player.isMuted?.()) player.unMute?.();
-  const volume = Math.max(0, Math.min(100, Math.round(player.getVolume() + steps)));
+// Sets the volume (0-100) and shows it; `raise`: a muted player is unmuted first.
+const apply = (player, volume, raise) => {
+  if (raise && player.isMuted?.()) player.unMute?.();
+  volume = Math.max(0, Math.min(100, Math.round(volume)));
   player.setVolume(volume);
   const slider = document.querySelector(SELECTORS.slider);
   if (slider) slider.value = volume;
   show(volume);
+};
+
+// Moves the volume by `steps` percent (negative: down). Returns whether it did.
+const step = (steps) => {
+  const player = document.querySelector(SELECTORS.player);
+  if (!usable(player)) return false;
+  apply(player, player.getVolume() + steps, steps > 0);
+  return true;
+};
+
+// Sets the volume to `value` percent. Returns whether it did.
+const set = (value) => {
+  const player = document.querySelector(SELECTORS.player);
+  if (!Number.isFinite(value) || !usable(player)) return false;
+  apply(player, value, value > 0);
   return true;
 };
 
@@ -82,4 +96,5 @@ document.addEventListener(
 
 feathertune.precise_volume = Object.freeze({
   step: (direction) => step(Math.sign(direction) * STEP),
+  set,
 });

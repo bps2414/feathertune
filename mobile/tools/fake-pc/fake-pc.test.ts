@@ -331,6 +331,21 @@ describe('refusals', () => {
     expect(pc.getDevices()).toHaveLength(0);
   });
 
+  it('closes junk with invalid and leaves the window open', async () => {
+    const { pc, port } = await start();
+    const uri = await pc.startPairing();
+    // Random bytes, and a first message made for another PC's key: neither reads, neither spends the secret.
+    const junk = await open(port, '/v1/pair');
+    junk.send(random(96));
+    expect(await junk.next()).toEqual({ closed: 4006 });
+    const other = generateKeyPair(random).publicKey;
+    expect(await pair(port, uri.replace(pc.publicKey, bytesToHex(other)), generateKeyPair(random), 'Stray')).toBe(4006);
+    const phone = (await pair(port, uri, generateKeyPair(random), 'Real')) as Phone;
+    await asked(pc);
+    expect(pc.answer(true)).toBe(true);
+    expect((await phone.recv()).t).toBe('hello');
+  });
+
   it('closes a denied phone, a window that ends while it waits and a bad name', async () => {
     const { pc, port } = await start();
     const denied = (await pair(port, await pc.startPairing(), generateKeyPair(random), 'Pixel')) as Phone;

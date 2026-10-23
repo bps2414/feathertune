@@ -20,3 +20,9 @@ pnpm typecheck && pnpm lint && pnpm test
 - Outras opções: `--name <texto>` (o nome do PC), `--artwork <url https>` (capa de todas as faixas; nenhuma por padrão), `--no-rate-limit` (o PC de verdade aceita 5 conexões por endereço por minuto).
 - Não toca áudio e descarta tudo de fora da rede local. Na primeira execução o Firewall do Windows pode perguntar sobre o Node: permita redes privadas.
 - A chave do PC falso e os celulares pareados ficam em `tools/fake-pc/fake-pc.json` (fora do git); apague-o para recomeçar.
+
+## A camada de conexão e o que precisa de celular
+
+`src/remote/` é o lado do celular: `protocol.ts` (QR, código, mensagens, códigos de fechamento), `client.ts` (um socket e o seu handshake) e `remote.ts` (os PCs pareados, a reconexão, os pings, o segundo plano), com armazenamento, sockets e rede injetados. `tools/fake-pc/remote.test.ts` roda tudo contra o PC falso no mesmo processo (pareamento, reconexão, celular removido, PC de outra versão), então `pnpm test` cobre isso em qualquer sistema.
+
+Só um build de desenvolvimento num celular de verdade confere o resto: a câmera e a leitura do QR, a permissão de rede local (o pedido do Android 17, o do próprio iOS na primeira conexão), o armazenamento seguro e uma conexão `ws://` ao PC pelo Wi-Fi.

@@ -20,3 +20,9 @@ pnpm typecheck && pnpm lint && pnpm test
 - Other options: `--name <text>` (the PC name), `--artwork <https url>` (artwork for every track; none by default), `--no-rate-limit` (the real PC allows 5 connections per address a minute).
 - It plays no audio and drops anything outside the local network. The first run may trigger the Windows Firewall prompt for Node: allow private networks.
 - The fake PC's key and the paired phones are in `tools/fake-pc/fake-pc.json` (git-ignored); delete it to start over.
+
+## The connection layer and what needs a phone
+
+`src/remote/` is the phone's side: `protocol.ts` (QR, code, messages, close codes), `client.ts` (one socket and its handshake) and `remote.ts` (the paired PCs, reconnecting, pings, the background), with storage, sockets and the network injected. `tools/fake-pc/remote.test.ts` runs it against the fake PC in process (pairing, reconnecting, a removed phone, a PC of another version), so `pnpm test` covers it on any OS.
+
+Only a development build on a real phone checks the rest: the camera and the QR scan, the local network permission (Android 17's prompt, iOS's own on the first connection), the secure store, and a `ws://` connection to the PC over Wi-Fi.

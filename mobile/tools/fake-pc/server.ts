@@ -91,6 +91,8 @@ export interface FakePcOptions {
   clock?: () => number;
   /** Milliseconds between player ticks (track ends, colors, a state every few seconds); 0: only `tick()`. */
   tickMs?: number;
+  /** The `v` and `min` of `hello`, to try the phone's version check; default 1 and 1. */
+  version?: { v: number; min: number };
 }
 
 type Command =
@@ -130,6 +132,7 @@ export class FakePc {
   private readonly log: (line: string) => void;
   private readonly perMinute: number;
   private readonly tickMs: number;
+  private readonly version: { v: number; min: number };
   private keys: KeyPair;
   private devices: Stored['devices'] = [];
   private pairing: Pairing | null = null;
@@ -152,6 +155,7 @@ export class FakePc {
     this.log = options.log ?? (() => {});
     this.perMinute = options.perMinute ?? 5;
     this.tickMs = options.tickMs ?? 250;
+    this.version = options.version ?? { v: VERSION, min: MIN_VERSION };
     this.clock = options.clock ?? Date.now;
     this.playback = new Playback(this.clock, options.artwork ?? null);
     const stored = this.load();
@@ -353,11 +357,9 @@ export class FakePc {
   private async pair(ws: WebSocket, inbox: Inbox): Promise<Done> {
     const first = await inbox.read(HANDSHAKE_TIMEOUT_MS);
     const pairing = this.pairing;
-    if (!pairing) throw new Refuse('expired');
-    // One try per secret: it is gone from here on, whatever happens next.
+    if (!pairing || pairing.until <= Date.now()) throw new Refuse('expired');
     const secret = pairing.secret;
     if (!secret) throw new Refuse('expired');
-    pairing.secret = null;
     if (this.devices.length >= MAX_DEVICES) throw new Refuse('full');
     const hs = createHandshake({
       pattern: 'IKpsk2',
@@ -367,7 +369,12 @@ export class FakePc {
       psk: secret,
       random,
     });
+    // Bytes that do not read as a first message for this PC (anyone on the network can send them) leave the
+    // window open; one that reads was made with the PC's key, from the QR.
     const payload = attempt(() => hs.readMessage(first));
+    // One try per secret: it is gone from here on, whatever happens next.
+    if (this.pairing !== pairing || !pairing.secret) throw new Refuse('expired');
+    pairing.secret = null;
     const hello = parseJson(payload);
     const name = hello && Object.keys(hello).length === 1 ? validName(hello.name) : null;
     if (!name) throw new Refuse('invalid');
@@ -442,7 +449,7 @@ export class FakePc {
       ws.send(transport.send.encrypt(new TextEncoder().encode(text)));
     };
     const session: Session = { key, ws, send };
-    send({ t: 'hello', v: VERSION, min: MIN_VERSION, name: this.name });
+    send({ t: 'hello', ...this.version, name: this.name });
     send(this.playback.stateMessage());
     send(this.playback.queueMessage());
     this.sessions.add(session);

@@ -10,13 +10,29 @@
       "bundleIdentifier": "dev.feathertune.remote",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "feathertune remote talks to your PC over your home network to show what it plays and to send play, pause, next and volume. It never leaves your network.",
-        "NSCameraUsageDescription": "feathertune remote uses the camera only to scan the pairing code shown by feathertune on your PC. Nothing is recorded or saved."
+        "NSCameraUsageDescription": "feathertune remote uses the camera only to scan the pairing code shown by feathertune on your PC. Nothing is recorded or saved.",
+        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
       }
     },
     "android": {
       "package": "dev.feathertune.remote",
-      "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.CAMERA"]
+      "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.CAMERA"],
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"]
     },
-    "plugins": ["expo-router", "expo-localization", "expo-status-bar"]
+    "plugins": [
+      "expo-router",
+      "expo-localization",
+      "expo-status-bar",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "feathertune remote uses the camera only to scan the pairing code shown by feathertune on your PC. Nothing is recorded or saved.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+    ]
   }
 }

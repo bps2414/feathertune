@@ -1,17 +1,19 @@
-import { StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Redirect } from 'expo-router';
 
 import { t } from '../i18n';
+import { useRemote } from '../remote/app';
+import { Busy, Screen } from '../ui';
 
-export default function Home() {
-  const dark = useColorScheme() !== 'light';
-  return (
-    <View style={[styles.screen, { backgroundColor: dark ? '#111111' : '#ffffff' }]}>
-      <Text style={[styles.title, { color: dark ? '#f2f2f2' : '#111111' }]}>{t('title')}</Text>
-    </View>
-  );
+/** The first screen: pairing when no PC is paired yet, otherwise the chosen PC. */
+export default function Index() {
+  const ready = useRemote((s) => s.ready);
+  const paired = useRemote((s) => s.pcs.length > 0);
+  if (!ready) {
+    return (
+      <Screen>
+        <Busy label={t('title')} />
+      </Screen>
+    );
+  }
+  return <Redirect href={paired ? '/now' : '/pair'} />;
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 20, fontWeight: '600' },
-});

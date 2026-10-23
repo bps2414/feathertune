@@ -532,7 +532,7 @@ mod tests {
             artwork: None,
             duration,
         };
-        State { track, position: 0.0, paused, at: Instant::now() }
+        State { track, position: 0.0, paused, volume: 100, muted: false, ad: false, at: Instant::now() }
     }
 
     fn needed(duration: f64) -> Option<u64> {

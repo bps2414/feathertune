@@ -2,9 +2,11 @@
 // sends them to Rust through the `player_state` command: right away on a track, play/pause or
 // seek change, plus a position refresh every 15 s while playing (Rust extrapolates in between).
 // Each IPC call is a fetch with a CORS preflight: sending every second cost ~3% CPU (measured).
-// With them go where the track plays from (for the mixes): the playlist (`list=` of the URL), the
-// next track and, when it changed, the queue (at most 200 tracks), read from the site's state on a
-// track change and when the queue's DOM changes (an observer, no polling).
+// With them go the player's volume, mute and ad flag (a volume or ad change is sent right away, from the
+// video's volumechange and an observer on the player's classes), and where the track plays from: the
+// playlist (`list=` of the URL, for the mixes), the next track and, when it changed, the queue (at most
+// 200 tracks, with or without a playlist: radio and autoplay too) and the playing track's index in it,
+// read from the site's state on a track change and when the queue's DOM changes (an observer, no polling).
 // One-way: Rust never sends anything back through here.
 // The site plays a queue back to back on one <video> (gapless): the next track is appended after the
 // one playing, so the video's time and duration go on counting from the first track. The player's
@@ -50,15 +52,29 @@ const SELECTORS = {
 const REFRESH_MS = 15000;
 const MAX_QUEUE = 200;
 const QUEUE_SETTLE_MS = 500;
+const VOLUME_SETTLE_MS = 150;
 let lastKey = '';
 let lastSent = 0;
 let lastQueue = '';
 let lastWhere = '';
+let lastAd = false;
 let video = null;
 
 const adShowing = () => {
   const p = document.querySelector(SELECTORS.player);
   return !!p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
+};
+
+// The player's own volume (0-100) and mute, through its public API; the video's when that is missing.
+const volumeOf = (video) => {
+  let p = null;
+  try {
+    p = document.querySelector(SELECTORS.player);
+  } catch {}
+  const v = p?.getVolume?.();
+  const volume = Number.isFinite(v) ? v : video.volume * 100;
+  const muted = typeof p?.isMuted === 'function' ? !!p.isMuted() : video.muted;
+  return { volume: Math.max(0, Math.min(100, Math.round(volume))), muted };
 };
 
 // While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
@@ -69,6 +85,8 @@ const read = (video) => {
   const id = new URLSearchParams(location.search).get('v');
   const num = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : 0);
   return {
+    ...volumeOf(video),
+    ad: adShowing(),
     id,
     title: m.title,
     artist: m.artist || '',
@@ -89,10 +107,10 @@ const item = (entry) => {
   return { id: r.videoId, title: text(r.title), artist: text(r.shortBylineText || r.longBylineText).split(' • ')[0] };
 };
 // The playlist, the next track (repeat-one: this one; at the end: the first on repeat-all, else
-// autoplay's first) and the queue.
+// autoplay's first), the queue and the playing track's index in it (`current`, null when unknown).
 const where = () => {
   const list = new URLSearchParams(location.search).get('list');
-  const out = { list: list && /^[A-Za-z0-9_-]{1,64}$/.test(list) ? list : null, next: null, queue: [] };
+  const out = { list: list && /^[A-Za-z0-9_-]{1,64}$/.test(list) ? list : null, next: null, queue: [], current: null };
   let q = null;
   try {
     q = document.querySelector(SELECTORS.playerBar)?.getState?.()?.queue;
@@ -102,6 +120,11 @@ const where = () => {
   out.queue = items.filter(Boolean).slice(0, MAX_QUEUE);
   const i = q.selectedItemIndex;
   if (Number.isInteger(i)) {
+    // An index into the list without the entries that could not be read.
+    if (items[i]) {
+      const at = items.slice(0, i).filter(Boolean).length;
+      if (at < out.queue.length) out.current = at;
+    }
     if (q.repeatMode === 'ONE') out.next = items[i];
     else if (i + 1 < items.length) out.next = items[i + 1];
     else if (q.repeatMode === 'ALL') out.next = items[0];
@@ -115,23 +138,25 @@ const where = () => {
 const send = (video, force, queueChanged = false) => {
   const s = read(video);
   if (!s) return;
-  const key = [s.id, s.title, s.artist, s.album, s.artwork, s.duration, s.paused].join('\u0000');
+  lastAd = s.ad;
+  const key = [s.id, s.title, s.artist, s.album, s.artwork, s.duration, s.paused, s.volume, s.muted, s.ad].join('\u0000');
   const now = performance.now();
   const due = force || (!s.paused && now - lastSent >= REFRESH_MS);
   if (key === lastKey && !due && !queueChanged) return;
   // The site's state is only read here: on a change, not on every timeupdate.
   const w = where();
-  const whereKey = [w.list, w.next?.id].join('\u0000');
+  const whereKey = [w.list, w.next?.id, w.current].join('\u0000');
   if (key === lastKey && !due && whereKey === lastWhere && w.queue.map((x) => x.id).join(',') === lastQueue) return;
   lastKey = key;
   lastWhere = whereKey;
   lastSent = now;
   s.list = w.list;
   s.next = w.next;
+  s.current = w.current;
   const queueKey = w.queue.map((x) => x.id).join(',');
   if (queueKey !== lastQueue) {
     lastQueue = queueKey;
-    if (w.list) s.queue = w.queue;
+    s.queue = w.queue;
   }
   window.__TAURI_INTERNALS__?.invoke('player_state', { state: JSON.stringify(s) }).catch(() => {});
 };
@@ -151,15 +176,38 @@ const watchQueue = () => {
   watched = queue;
 };
 
+// An ad starts or ends: the player's classes change (the media events may not say so by themselves).
+const adObserver = new MutationObserver(() => {
+  if (video && adShowing() !== lastAd) send(video, true);
+});
+let watchedPlayer = null;
+const watchPlayer = () => {
+  const player = document.querySelector(SELECTORS.player);
+  if (!player || player === watchedPlayer) return;
+  adObserver.disconnect();
+  adObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
+  watchedPlayer = player;
+};
+
+// A volume slider drag fires many volumechange events: send the last one once it settles.
+let volumeSettle = 0;
 const onMedia = (e) => {
   if (!(e.target instanceof HTMLVideoElement)) return;
   video = e.target;
-  if (e.type === 'loadedmetadata') watchQueue();
+  if (e.type === 'loadedmetadata') {
+    watchQueue();
+    watchPlayer();
+  }
+  if (e.type === 'volumechange') {
+    clearTimeout(volumeSettle);
+    volumeSettle = setTimeout(() => send(video, false), VOLUME_SETTLE_MS);
+    return;
+  }
   send(video, e.type === 'seeked');
 };
 
 // Media events do not bubble, but they reach a capturing listener on the document, so this works
 // for whatever <video> the page creates and needs no polling.
-for (const type of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'durationchange', 'seeked']) {
+for (const type of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'durationchange', 'seeked', 'volumechange']) {
   document.addEventListener(type, onMedia, true);
 }

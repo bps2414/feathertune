@@ -67,9 +67,12 @@ export const ptBR: typeof en = {
   pcConnected: 'Conectado',
 
   pcsTitle: 'PCs',
+  pcsEmpty: 'Nenhum PC pareado ainda.',
   pcsPair: 'Parear outro PC',
   pcConnect: 'Conectar',
   pcConnectHint: 'Conecta a {name}',
+  pcOpenNow: 'Tocando agora',
+  pcConnectedBadge: 'Conectado',
   pcRemove: 'Remover',
   pcRemoveHint: 'Esquece {name} neste celular',
   pcRemoveTitle: 'Remover {name}?',

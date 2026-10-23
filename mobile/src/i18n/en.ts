@@ -65,9 +65,12 @@ export const en = {
   pcConnected: 'Connected',
 
   pcsTitle: 'PCs',
+  pcsEmpty: 'No PCs paired yet.',
   pcsPair: 'Pair another PC',
   pcConnect: 'Connect',
   pcConnectHint: 'Connects to {name}',
+  pcOpenNow: 'Now playing',
+  pcConnectedBadge: 'Connected',
   pcRemove: 'Remove',
   pcRemoveHint: 'Forgets {name} on this phone',
   pcRemoveTitle: 'Remove {name}?',

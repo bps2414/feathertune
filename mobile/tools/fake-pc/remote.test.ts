@@ -204,4 +204,48 @@ describe('the connection', () => {
     expect(remote.store.getState()).toMatchObject({ activeId: null, status: 'idle' });
     expect(remote.store.getState().pcs.map((pc) => pc.name)).toEqual(['Laptop']);
   });
+
+  it('controls playback, seeks, sets volume, jumps queue and handles ad mode', async () => {
+    const { pc } = await start();
+    const client = phone();
+    await pairWith(client, pc, true);
+    await until(client, (s) => s.status === 'connected' && s.player !== null && s.queue !== null);
+
+    // Play and pause
+    client.command({ c: 'pause' });
+    await until(client, (s) => s.player?.paused === true);
+    client.command({ c: 'play' });
+    await until(client, (s) => s.player?.paused === false);
+
+    // Seek
+    client.command({ c: 'seek', s: 42 });
+    await until(client, (s) => s.player !== null && Math.floor(s.player.position) === 42);
+
+    // Volume
+    client.command({ c: 'volume', v: 85 });
+    await until(client, (s) => s.player?.volume === 85);
+
+    // Play queue item
+    const queue = client.store.getState().queue!;
+    expect(queue.items.length).toBeGreaterThan(2);
+    const target = queue.items[2];
+    client.command({ c: 'play_item', id: target.id, i: 2 });
+    await until(client, (s) => s.player?.track.id === target.id);
+
+    // Ad mode
+    pc.setAd(true);
+    await until(client, (s) => s.player?.ad === true);
+
+    // Seek during ad is refused
+    client.command({ c: 'seek', s: 10 });
+    await until(client, (s) => s.refusal === 'ad');
+
+    // Pause during ad is allowed
+    client.command({ c: 'pause' });
+    await until(client, (s) => s.player?.paused === true);
+
+    // Leave ad
+    pc.setAd(false);
+    await until(client, (s) => s.player?.ad === false);
+  });
 });

@@ -70,7 +70,7 @@ Noise Protocol Framework (`25519`, `ChaChaPoly`, `SHA256`) sobre WebSocket, fram
 1. O usuário liga o plugin e aperta "Parear um celular" na janela de configurações. O PC mostra por 2 minutos um QR com: versão do protocolo, endereços de LAN e porta do PC, a chave pública do PC e um segredo novo de uso único de 32 bytes. Com essa tela fechada não há pareamento possível.
 2. O celular lê o QR e roda o `IKpsk2`: já conhece a chave do PC (então um PC falso na rede não consegue responder) e prova que viu o QR (o segredo é o PSK). A primeira mensagem leva sua chave pública e um nome que o usuário digitou ("Pixel 9").
 3. O PC pergunta na janela de configurações: "Permitir que <nome> controle o feathertune?" (com um código de 6 dígitos também mostrado no celular, derivado do hash do handshake, então as duas telas precisam bater). Só com Permitir o PC guarda a chave pública e o nome do celular.
-4. O segredo de uso único é descartado depois de um uso, de uma falha ou dos 2 minutos, o que vier primeiro.
+4. O segredo de uso único é descartado depois de um uso, de uma falha ou dos 2 minutos, o que vier primeiro. Bytes que não são uma mensagem 1 para este PC (qualquer um na rede pode mandá-los) não contam como tentativa, então não fecham a janela.
 5. O PC manda seu nome (o que o usuário definiu na seção Remoto; por padrão "feathertune", nunca o nome do computador no Windows, que muitas vezes tem o nome de uma pessoa) e, a partir da etapa 2, a chave de descoberta.
 
 Um PC não lê QR, então parear um PC com outro (etapa 3) precisa de outro primeiro passo: o PC de destino mostra um código de uso único de pelo menos 80 bits (16 caracteres base32, digitados no outro PC), achado por mDNS, usado como PSK, com a mesma conferência de 6 dígitos e os mesmos 2 minutos. A revisar antes de ser feito.
@@ -114,7 +114,7 @@ O controle ignora parâmetros que não conhece. `a` traz o endereço da interfac
 4. Celular → PC, a primeira mensagem de transporte: `{"t":"pair"}`. Ela prova que o celular usou o segredo (a PSK só entra com a mensagem 2), então só agora o PC mostra "Permitir <nome>?" com o mesmo código.
 5. Permitir: o PC guarda o celular, e a conexão segue como sessão (abaixo), começando pelo `hello`; o celular guarda o PC (`k`, o nome do `hello`, o endereço que usou) quando esse `hello` chega. Negar: fecha com `denied`. Os 2 minutos acabando ou a tela das configurações fechando: `expired`.
 
-O segredo vale uma vez: a primeira mensagem 1 que chega o consome, aconteça o que acontecer depois (um segundo celular, ou o mesmo de novo, recebe `expired`).
+O segredo vale uma vez: a primeira mensagem 1 que o PC consegue ler (feita com `k`) o consome, aconteça o que acontecer depois (um segundo celular, ou o mesmo de novo, recebe `expired`). Uma que ele não consegue ler é fechada com `invalid` e deixa a janela aberta.
 
 **Sessão, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; o celular é o iniciador com o próprio par de chaves e o `k` do PC, e o prologue são os 20 bytes ASCII `feathertune-remote/1`. A mensagem 1 (`e, es, ss`) e a mensagem 2 (`e, ee, se`) têm payload vazio. O PC testa a mensagem 1 contra cada chave pareada; sem nenhuma, fecha com `unknown`, sem responder. Depois da mensagem 2, a primeira mensagem de transporte do celular precisa ser um `ping`; só então o PC manda `hello`, `state`, `queue` e o `pong`, nessa ordem (uma mensagem 1 repetida recebe a mensagem 2 e nada mais). No máximo 4 sessões ao mesmo tempo (`busy`); o mesmo celular conectando de novo substitui a sessão antiga.
 

@@ -70,7 +70,7 @@ Noise Protocol Framework (`25519`, `ChaChaPoly`, `SHA256`) over a WebSocket, bin
 1. The user turns on the plugin and presses "Pair a phone" in the settings window. The PC shows a QR code for 2 minutes holding: protocol version, the PC's LAN addresses and port, the PC's public key and a fresh 32-byte one-time secret. No pairing is possible while that screen is closed.
 2. The phone scans it and runs `IKpsk2`: it already knows the PC's key (so a fake PC on the network cannot answer) and proves it saw the QR (the secret is the PSK). Its first message carries its public key and a name the user typed ("Pixel 9").
 3. The PC asks the user in the settings window: "Allow <name> to control feathertune?" (shows a 6-digit code also shown on the phone, derived from the handshake hash, so the two screens must match). Only on Allow does the PC store the phone's public key and name.
-4. The one-time secret is discarded after one use, a failure or the 2 minutes, whichever comes first.
+4. The one-time secret is discarded after one use, a failure or the 2 minutes, whichever comes first. Bytes that are not a first message for this PC (anyone on the network can send them) do not count as a try, so they cannot close the window.
 5. The PC sends its name (the one the user set in the Remote section; by default "feathertune", never the Windows hostname, which often holds a person's name) and, from stage 2, the discovery key.
 
 A PC cannot scan a QR, so pairing one PC with another (stage 3) needs another first step: the target shows a one-time code of at least 80 bits (16 base32 characters, typed on the other PC), found by mDNS, used as the PSK, with the same 6-digit check and the same 2 minutes. To be reviewed before it is built.
@@ -114,7 +114,7 @@ The controller ignores parameters it does not know. `a` holds the address of the
 4. Phone → PC, the first transport message: `{"t":"pair"}`. It proves the phone used the secret (the PSK only enters with message 2), so only now does the PC show "Allow <name>?" with the same code.
 5. Allow: the PC stores the phone, and the connection goes on as a session (below), starting with `hello`; the phone stores the PC (`k`, `hello`'s name, the address it used) when that `hello` arrives. Deny: closed with `denied`. The 2 minutes ending or the settings screen closing: `expired`.
 
-The secret is used once: the first message 1 to arrive takes it, whatever follows (a second phone, or the same one again, gets `expired`).
+The secret is used once: the first message 1 that the PC can read (made with `k`) takes it, whatever follows (a second phone, or the same one again, gets `expired`). One it cannot read is closed with `invalid` and leaves the window open.
 
 **Session, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; the phone is the initiator with its own key pair and the PC's `k`, and the prologue is the 20 ASCII bytes `feathertune-remote/1`. Message 1 (`e, es, ss`) and message 2 (`e, ee, se`) have empty payloads. The PC tries message 1 against each paired key; with none it closes with `unknown`, without answering. After message 2 the phone's first transport message must be a `ping`; only then does the PC send `hello`, `state`, `queue` and the `pong`, in that order (a replayed message 1 gets message 2 and nothing more). At most 4 sessions at once (`busy`); the same phone connecting again replaces its old session.
 

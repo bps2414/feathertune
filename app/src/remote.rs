@@ -271,7 +271,7 @@ pub struct Pending {
 }
 
 struct Pairing {
-    /// Taken by the first pairing message, whatever comes of it.
+    /// Taken by the first pairing message that reads (made with the PC's key), whatever comes of it.
     secret: Option<[u8; 32]>,
     until: Instant,
     asking: Option<Asking>,
@@ -599,13 +599,11 @@ impl Shared {
     async fn pair(&self, ws: &mut Ws) -> Result<(TransportState, String, Option<u64>), Close> {
         let first = read_frame(ws, Instant::now() + HANDSHAKE_TIMEOUT).await?;
         let (secret, until, keys) = {
-            let mut inner = self.lock();
+            let inner = self.lock();
             let keys = inner.keys.clone().ok_or(Close::Off)?;
-            let full = inner.devices.len() >= MAX_DEVICES;
-            let pairing = inner.pairing.as_mut().filter(|p| p.until > Instant::now()).ok_or(Close::Expired)?;
-            // One try per secret: it is gone from here on, whatever happens next.
-            let secret = pairing.secret.take().ok_or(Close::Expired)?;
-            if full {
+            let pairing = inner.pairing.as_ref().filter(|p| p.until > Instant::now()).ok_or(Close::Expired)?;
+            let secret = pairing.secret.ok_or(Close::Expired)?;
+            if inner.devices.len() >= MAX_DEVICES {
                 return Err(Close::Full);
             }
             (secret, pairing.until, keys)
@@ -617,7 +615,16 @@ impl Shared {
             .and_then(|b| b.build_responder())
             .map_err(|_| Close::Invalid)?;
         let mut buf = vec![0u8; NOISE_MAX];
+        // Bytes that do not read as a first message for this PC (anyone on the network can send them) leave the
+        // window open; one that reads was made with the PC's key, from the QR.
         let n = hs.read_message(&first, &mut buf).map_err(|_| Close::Invalid)?;
+        // One try per secret: it is gone from here on, whatever happens next.
+        self.lock()
+            .pairing
+            .as_mut()
+            .filter(|p| p.until == until)
+            .and_then(|p| p.secret.take())
+            .ok_or(Close::Expired)?;
         let hello: PairHello = serde_json::from_slice(&buf[..n]).map_err(|_| Close::Invalid)?;
         let name = valid_name(&hello.name).ok_or(Close::Invalid)?;
         let key = hs.get_remote_static().map(hex).ok_or(Close::Invalid)?;
@@ -1378,6 +1385,49 @@ mod tests {
             assert_eq!(first.recv().await.unwrap()["t"], "hello");
             assert_eq!(pair(addr, &pc, &secret, &Keys::generate(), "Copy").await.err(), Some(Some(4001)));
             assert_eq!(shared.devices().len(), 1);
+        });
+    }
+
+    #[test]
+    fn junk_leaves_the_secret_but_a_first_message_made_with_the_pc_key_spends_it() {
+        block_on(async {
+            let (shared, _host, addr) = server();
+            let (_, pc, secret) = shared.new_pairing().unwrap();
+            // Anyone on the network, without the QR: refused, and the window stays open.
+            let mut ws = open(addr, "/v1/pair").await;
+            ws.send(Message::binary(vec![7u8; 96])).await.unwrap();
+            assert_eq!(read(&mut ws).await.err(), Some(Some(4006)));
+            // The PC's key but a wrong secret: message 1 reads (the secret only enters with the reply), so it is spent.
+            let mut ws = open(addr, "/v1/pair").await;
+            let mut hs = snow::Builder::new(params(PAIR_PATTERN))
+                .local_private_key(&Keys::generate().private)
+                .and_then(|b| b.remote_public_key(&pc))
+                .and_then(|b| b.psk(2, &[0u8; 32]))
+                .and_then(|b| b.prologue(PAIR_PROLOGUE))
+                .and_then(|b| b.build_initiator())
+                .unwrap();
+            let mut buf = vec![0u8; NOISE_MAX];
+            let n = hs.write_message(json!({ "name": "Guess" }).to_string().as_bytes(), &mut buf).unwrap();
+            ws.send(Message::binary(buf[..n].to_vec())).await.unwrap();
+            read(&mut ws).await.unwrap();
+            drop(ws);
+            assert_eq!(pair(addr, &pc, &secret, &Keys::generate(), "Late").await.err(), Some(Some(4001)));
+            assert!(shared.devices().is_empty());
+        });
+    }
+
+    #[test]
+    fn junk_before_the_phone_does_not_stop_its_pairing() {
+        block_on(async {
+            let (shared, _host, addr) = server();
+            let (_, pc, secret) = shared.new_pairing().unwrap();
+            let mut ws = open(addr, "/v1/pair").await;
+            ws.send(Message::binary(vec![7u8; 96])).await.unwrap();
+            assert_eq!(read(&mut ws).await.err(), Some(Some(4006)));
+            let mut phone = pair(addr, &pc, &secret, &Keys::generate(), "Phone").await.unwrap();
+            asked(&shared).await;
+            assert!(shared.answer(true));
+            assert_eq!(phone.recv().await.unwrap()["t"], "hello");
         });
     }
 

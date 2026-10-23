@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.3.1 — 2026-10-23
+
+- **Letra sincronizada em todas as faixas da fila.** Com as faixas tocando uma atrás da outra, a duração e o tempo da música continuavam contando desde a primeira faixa, então a letra era buscada com a duração errada e muitas vezes não era achada, e o crossfade, o pular silêncio e a análise de faixa só funcionavam na primeira. Agora tudo usa o tempo da própria faixa.
+- **Aba Letra antes da primeira linha.** As primeiras linhas começam no topo da aba em vez de ficarem embaixo de uma metade vazia, e as linhas que vêm aparecem como as próximas.
+- **Botão do modo jogo.** Ligado, ele fica verde com um ponto embaixo, também com o ponteiro em cima. A letra flutuante não reabre mais ao desligar e religar o modo jogo rápido.
+
 ## 0.3.0 — 2026-10-22
 
 - **Aba Letra sem lag.** A letra agora desliza pelo lado gráfico, num relógio próprio no ritmo da música, então uma página ocupada não a faz mais engasgar nem perder frames. Uma linha que termina não se repinta mais, as próximas linhas ficam prontas antes de entrar na tela, e o fundo do modo ambiente fica parado enquanto a letra aparece. Mesmo visual, mesma velocidade.

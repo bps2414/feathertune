@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.3.1 — 2026-10-23
+
+- **Synced lyrics on every track of a queue.** When tracks played back to back, the song length and time kept counting from the first track, so lyrics were looked up with the wrong length and often not found, and crossfade, skip silence and track analysis worked only on the first track. Every feature now uses the track's own time.
+- **Lyrics tab before the first line.** The first lines start at the top of the tab instead of sitting under an empty half, and the lines to come are lit as the next ones.
+- **Game mode button.** While on, it is green with a dot under it, also with the pointer over it. The floating lyrics no longer reopen when game mode is turned off and on again quickly.
+
 ## 0.3.0 — 2026-10-22
 
 - **Lyrics tab without lag.** The lyrics now glide on the graphics side, on their own clock in time with the song, so a busy page no longer makes them stutter or drop frames. A line that ends no longer repaints itself, the next lines are prepared before they come on screen, and ambient mode's background holds still while the lyrics show. Same look, same speed.

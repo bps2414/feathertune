@@ -32,7 +32,15 @@
           "recordAudioAndroid": false
         }
       ],
-      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "extraProguardRules": "-keep class com.google.mlkit.vision.barcode.** { *; }\n-keep class com.google.mlkit.vision.common.** { *; }"
+          }
+        }
+      ]
     ]
   }
 }

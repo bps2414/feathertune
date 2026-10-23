@@ -25,3 +25,6 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 .DS_Store
+
+# The fake PC's key and paired phones (pnpm fake-pc)
+/tools/fake-pc/fake-pc.json

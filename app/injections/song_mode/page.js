@@ -60,8 +60,10 @@ const onMedia = (e) => {
   act();
 };
 
-// Media events do not bubble, but they reach a capturing listener on the document.
-for (const type of ['loadedmetadata', 'playing']) document.addEventListener(type, onMedia, true);
+// Media events do not bubble, but they reach a capturing listener on the document. In a gapless queue
+// the next track starts on the same <video> without the first two: `timeupdate` catches it (a cheap
+// check of the id until it changes).
+for (const type of ['loadedmetadata', 'playing', 'timeupdate']) document.addEventListener(type, onMedia, true);
 
 // The user chose Video: leave it for the rest of this track. Our own click is not trusted.
 document.addEventListener(

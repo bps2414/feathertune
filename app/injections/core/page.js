@@ -6,6 +6,38 @@
 // next track and, when it changed, the queue (at most 200 tracks), read from the site's state on a
 // track change and when the queue's DOM changes (an observer, no polling).
 // One-way: Rust never sends anything back through here.
+// The site plays a queue back to back on one <video> (gapless): the next track is appended after the
+// one playing, so the video's time and duration go on counting from the first track. The player's
+// public API has the track's own; `feathertune.clock` (for every module) turns the video's time into
+// the track's. The offset only changes at a track change, so it moves only by more than a second (the
+// player's time may be a moment behind the video's).
+let trackOffset = 0;
+const offsetOf = (video) => {
+  try {
+    const t = document.querySelector('#movie_player')?.getCurrentTime?.();
+    if (Number.isFinite(t) && Number.isFinite(video.currentTime)) {
+      const o = Math.max(0, video.currentTime - t);
+      if (Math.abs(o - trackOffset) > 1) trackOffset = o < 1 ? 0 : o;
+    }
+  } catch {}
+  return trackOffset;
+};
+feathertune.clock = Object.freeze({
+  // The track's time (s) at the video's time now.
+  time: (video) => video.currentTime - offsetOf(video),
+  // The track's length (s): the player's, else the video's (no queue appended after it).
+  duration: (video) => {
+    try {
+      const d = document.querySelector('#movie_player')?.getDuration?.();
+      if (Number.isFinite(d) && d > 0) return d;
+    } catch {}
+    return video.duration;
+  },
+  // Moves the video to `t` s into the track.
+  seek: (video, t) => {
+    video.currentTime = t + offsetOf(video);
+  },
+});
 if (window.top !== window) return;
 
 const SELECTORS = {
@@ -42,8 +74,8 @@ const read = (video) => {
     artist: m.artist || '',
     album: m.album || '',
     artwork: art,
-    duration: adShowing() ? 0 : num(video.duration),
-    position: num(video.currentTime),
+    duration: adShowing() ? 0 : num(feathertune.clock.duration(video)),
+    position: num(feathertune.clock.time(video)),
     paused: video.paused,
   };
 };

@@ -78,6 +78,7 @@ let sungBg = [];
 let manualUntil = 0;
 const observer = new MutationObserver(() => refresh());
 let centers = null; // middle of each line below the top of the box, measured when needed
+let floor = 0; // the least middle of the view below the top of the box (see `center`)
 let anim = null; // the box's glide along the curve (see `start`), while it follows the song
 let animStart = 0; // the song time (with the lead) at the glide's time 0
 let ownTop = 0; // the tab's scroll while the box glides; anything else moved it by hand
@@ -92,6 +93,8 @@ let due = -1; // the time (with the lead) the timer is set for
 
 const tab = () => document.querySelector(`${TAB}[page-type="${LYRICS_PAGE}"]`) ?? document.querySelector(TAB);
 const isOpen = (t) => t.getAttribute('page-type') === LYRICS_PAGE;
+// The song's time with the lead, on the track's clock (the video's goes on across a gapless queue; core).
+const songMs = (video) => feathertune.clock.time(video) * 1000 + LEAD_MS;
 
 const timed = (l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string';
 const wordList = (w) => w === undefined || w === null || (Array.isArray(w) && w.length <= MAX_WORDS && w.every(timed));
@@ -159,7 +162,7 @@ const build = () => {
     const video = document.querySelector('video');
     if (index < 0 || !lines[index].text || !video) return;
     manualUntil = 0;
-    video.currentTime = lines[index].ms / 1000;
+    feathertune.clock.seek(video, lines[index].ms / 1000);
     sync(video, true);
   });
   spans = [];
@@ -311,16 +314,16 @@ const light = (next) => {
 // Distance from the current line (0 to REACH; farther lines keep the default look). style.css fades the
 // lines up to 4 away and makes every line with a distance a layer of its own, so a line becomes one (and
 // draws its glow) about three lines before it is near enough to fade, mostly off screen, instead of at the
-// switch that brings it on. Only the lines around the old and the new current one are touched.
+// switch that brings it on. Only the lines around the old and the new current one are touched. Before the
+// first line (-1) the distance is from just above it, so the lines to come are lit as the next ones.
 const REACH = 7;
 const fade = (from, to) => {
   const near = new Set();
   for (const center of [from, to]) {
-    if (center < 0) continue;
     for (let i = Math.max(0, center - REACH - 1); i <= Math.min(items.length - 1, center + REACH + 1); i++) near.add(i);
   }
   for (const i of near) {
-    const d = to < 0 ? REACH + 1 : Math.abs(i - to);
+    const d = Math.abs(i - to);
     if (d > REACH) delete items[i].dataset.d;
     else items[i].dataset.d = String(d);
   }
@@ -354,7 +357,7 @@ const arm = (video, ms, force) => {
 
 const sync = (video, force) => {
   if (!lines || !box || box.hidden || !video) return;
-  const ms = video.currentTime * 1000 + LEAD_MS;
+  const ms = songMs(video);
   const index = indexAt(lines, ms);
   light(activeAt(ms, index));
   for (const i of active) singWords(i, ms);
@@ -366,15 +369,19 @@ const sync = (video, force) => {
   current = index;
   fade(before, index);
   arm(video, ms, true);
-  const el = items[index];
-  if (!el) return;
+  // Before the first line (also after a seek back to before it) the view goes to the first one.
+  const shownLine = Math.max(index, 0);
+  if (!items[shownLine]) return;
   const t = tab();
   if (anim || !t || Date.now() < manualUntil) return;
   const top = box.getBoundingClientRect().top - t.getBoundingClientRect().top + t.scrollTop;
-  t.scrollTo({ top: top + center(index) - t.clientHeight / 2, behavior: 'smooth' });
+  t.scrollTo({ top: top + center(shownLine) - t.clientHeight / 2, behavior: 'smooth' });
 };
 
 // Lines scale about their vertical middle and the box moves as a whole, so these hold while either runs.
+// With them goes `floor`: the middle of the view (below the top of the box) with the tab scrolled to its
+// top, which the view never goes above, so the first lines are seen from there instead of centered under
+// an empty half of the tab.
 const center = (i) => {
   if (!centers) {
     const top = box.getBoundingClientRect().top;
@@ -382,6 +389,9 @@ const center = (i) => {
       const r = el.getBoundingClientRect();
       return r.top - top + r.height / 2;
     });
+    const t = box.parentNode;
+    floor =
+      t instanceof Element ? t.clientHeight / 2 - (top - shown() - t.getBoundingClientRect().top + t.scrollTop) : 0;
     smooth = null;
   }
   return centers[i] ?? 0;
@@ -451,7 +461,7 @@ const buildRadii = () => {
   radii = Uint32Array.from(average(widths, ease), (w) => Math.round(w / 2 / SAMPLE_MS));
 };
 
-const keyY = (j) => center(keys[j].i);
+const keyY = (j) => Math.max(center(keys[j].i), floor);
 const secant = (j) => (keyY(j + 1) - keyY(j)) / (keys[j + 1].ms - keys[j].ms);
 // The curve's slope at key j: flat at the ends and where it rests, else a weighted harmonic mean of the
 // two sides (monotone cubic interpolation, so the view never overshoots a line or turns back).
@@ -549,7 +559,7 @@ const start = (v) => {
   if (!viewH) return;
   t.scrollTop = t.scrollTop; // ends a smooth scroll of `sync` still under way
   const rel = box.getBoundingClientRect().top - t.getBoundingClientRect().top;
-  const ms0 = v.currentTime * 1000 + LEAD_MS;
+  const ms0 = songMs(v);
   const onCurve = (ms) => viewH / 2 - rel - goal(ms);
   const gap = from - onCurve(ms0);
   const curveEnd = radii ? sampleStart + (smooth?.length ?? radii.length) * SAMPLE_MS : keys[keys.length - 1].ms;
@@ -572,7 +582,7 @@ const start = (v) => {
 const align = (v) => {
   if (!anim) return;
   if (anim.playbackRate !== v.playbackRate) anim.playbackRate = v.playbackRate;
-  const want = v.currentTime * 1000 + LEAD_MS - animStart;
+  const want = songMs(v) - animStart;
   if (Math.abs((anim.currentTime ?? 0) - want) > DRIFT_MS) anim.currentTime = want;
 };
 
@@ -639,8 +649,14 @@ document.addEventListener(
 
 feathertune.lyrics = Object.freeze({
   set(data) {
+    const was = box?.parentNode;
     clear();
-    if (!valid(data)) return;
+    // The lines went (a new track, game mode): the tab goes back to its top, where the site's own lyrics
+    // and the next lines start, instead of where the glide left it.
+    if (!valid(data)) {
+      if (was instanceof Element) was.scrollTop = 0;
+      return;
+    }
     meta = {
       credit: typeof data.credit === 'string' ? data.credit.slice(0, 160) : '',
       estimated: data.estimated === true,

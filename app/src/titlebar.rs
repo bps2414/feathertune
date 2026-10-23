@@ -113,6 +113,9 @@ const INK_DARK: u32 = 0x120f24;
 const INK_LIGHT: u32 = 0xf1eefb;
 const GLOWS: [(u32, f32); 4] = [(0x6b3bf0, 0.9), (0xf0508a, 0.7), (0x22c3d6, 0.6), (0xf5a85c, 0.45)];
 const CLOSE_HOVER: u32 = 0xe8435f;
+/// The game mode button while it is on, on a dark and on a light strip.
+const GAME_ON_DARK: u32 = 0x4ade80;
+const GAME_ON_LIGHT: u32 = 0x15803d;
 
 /// The track the strip shows and the seed of its shape.
 #[derive(Default)]
@@ -679,11 +682,23 @@ impl TitleBar {
                 let right = left + button_width(button);
                 let r = rect(left, 0.0, right, HEIGHT);
                 let mut glyph = if enabled(button) { text } else { gfx::with_alpha(text, 0.3) };
+                // Game mode on: a green pill (also under the pointer, which is still there after the click),
+                // a green glyph and a dot under it.
                 let lit = button == Button::Game && crate::game_mode::is_on();
-                if lit && hover != Some(button) && pressed != Some(button) {
-                    c.pill(rect(left + 5.0, 4.0, right - 5.0, HEIGHT - 4.0), 7.0, gfx::with_alpha(full, 0.22));
-                }
-                if hover == Some(button) || pressed == Some(button) {
+                if lit {
+                    let on = if dark { GAME_ON_DARK } else { GAME_ON_LIGHT };
+                    let alpha = if pressed == Some(button) {
+                        0.2
+                    } else if hover == Some(button) {
+                        0.38
+                    } else {
+                        0.28
+                    };
+                    c.pill(rect(left + 5.0, 4.0, right - 5.0, HEIGHT - 4.0), 7.0, gfx::rgba(on, alpha));
+                    let mid = (left + right) / 2.0;
+                    c.pill(rect(mid - 1.5, HEIGHT - 7.5, mid + 1.5, HEIGHT - 4.5), 1.5, gfx::rgb(on));
+                    glyph = gfx::rgb(on);
+                } else if hover == Some(button) || pressed == Some(button) {
                     let down = pressed == Some(button);
                     let fill = match button {
                         Button::Close => gfx::rgba(CLOSE_HOVER, if down { 0.8 } else { 1.0 }),

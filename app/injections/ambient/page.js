@@ -104,6 +104,18 @@ for (const type of ['loadedmetadata', 'play']) {
     true,
   );
 }
+// In a gapless queue the next track starts on the same <video> without those events: its cover is
+// checked on the time events (a string compare until it changes).
+document.addEventListener(
+  'timeupdate',
+  () => {
+    if (!off && cover() !== shown) {
+      watch();
+      update();
+    }
+  },
+  true,
+);
 window.addEventListener('resize', () => off || place());
 document.addEventListener('visibilitychange', motion);
 window.addEventListener('focus', motion);

@@ -31,7 +31,7 @@ const check = (id) => {
     timer = setTimeout(() => {
       const video = document.querySelector('video');
       const now = document.querySelector(SELECTORS.player);
-      if (now && trackId(now) === id && video && video.currentTime >= PLAYED_MS / 1000) inARow = 0;
+      if (now && trackId(now) === id && video && feathertune.clock.time(video) >= PLAYED_MS / 1000) inARow = 0;
     }, PLAYED_MS);
     return;
   }
@@ -53,6 +53,8 @@ const onMedia = (e) => {
   timer = setTimeout(() => check(id), READ_DELAY_MS);
 };
 
-for (const type of ['loadedmetadata', 'playing']) document.addEventListener(type, onMedia, true);
+// In a gapless queue the next track starts on the same <video> without either event: `timeupdate`
+// catches it (a cheap check of the id until it changes).
+for (const type of ['loadedmetadata', 'playing', 'timeupdate']) document.addEventListener(type, onMedia, true);
 
 feathertune.skip_disliked = Object.freeze({});

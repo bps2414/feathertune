@@ -143,8 +143,15 @@ pub fn set_suspended(app: &AppHandle, on: bool) {
             if hwnd != 0 {
                 let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
             }
-        } else if SUSPENDED.swap(false, Ordering::Relaxed) {
-            open(&handle);
+        } else if SUSPENDED.swap(false, Ordering::Relaxed)
+            && handle.state::<Live>().plugin("desktop_lyrics")
+            && !is_open()
+        {
+            // Here, not through `open`: its own job would run after a quick second click had turned game
+            // mode on again, and leave the window open during it.
+            if let Err(e) = unsafe { create(&handle) } {
+                eprintln!("floating lyrics unavailable: {e}");
+            }
         }
     });
 }

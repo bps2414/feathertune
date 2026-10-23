@@ -56,8 +56,14 @@ const flashSaved = (input) => {
   setTimeout(() => input.classList.remove('saved'), 900);
 };
 
+// Remote section state (see "Remote" below); declared here because showTab and search use it.
+let remote = null; // the last settings_remote `get`
+let qr = null; // the QR on screen: { size, modules }
+let pairUntil = 0; // when the open pairing window ends (Date.now() ms)
+let pairTimer = 0;
+
 // Tabs.
-const tabs = [...document.querySelectorAll('[role="tab"]')];
+const tabs =[...document.querySelectorAll('[role="tab"]')];
 const panels = [...document.querySelectorAll('[role="tabpanel"]')];
 let currentTab = 'general';
 const showTab = (name) => {
@@ -65,6 +71,7 @@ const showTab = (name) => {
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of panels) p.hidden = p.dataset.panel !== name;
   if (name === 'stats') loadStats();
+  syncPairing();
 };
 for (const t of tabs) {
   t.addEventListener('click', () => {
@@ -98,6 +105,7 @@ const search = () => {
     any ||= shown;
   }
   $('no-results').hidden = any;
+  syncPairing();
 };
 const clearSearch = () => {
   if (!$('search').value) return;
@@ -140,6 +148,7 @@ const buildPlugins = (plugins) => {
     toggle.addEventListener('change', async () => {
       if (!(await set(`plugins.${p.id}`, toggle.checked, null))) toggle.checked = !toggle.checked;
       card.classList.toggle('off', !toggle.checked);
+      if (p.id === 'remote') loadRemote();
     });
     const row = el('div', 'row');
     row.append(body, toggle);
@@ -730,6 +739,168 @@ const renderChangelog = (text, since) => {
   }
 };
 
+// Remote (remote.rs), through settings_remote. The section asks for its state when the window loads and
+// whenever Rust says it changed (the `remote-changed` event, sent by settings_window::remote_changed): no
+// polling. The pairing countdown is the only timer; it runs while a pairing window is open, the section is
+// on screen and the window is visible, and counts from the deadline, so it resumes where it was. The
+// pairing is closed when the section leaves the screen (and by Rust when the window closes).
+// Names and codes come from a phone: shown with textContent only.
+const remoteCall = async (op, arg = {}) => {
+  try {
+    const r = await invoke('settings_remote', { op, arg });
+    if (op !== 'get') showError('');
+    return r ?? true;
+  } catch (e) {
+    showError(String(e));
+    return null;
+  }
+};
+const loadRemote = async () => {
+  const r = await remoteCall('get');
+  if (r && r !== true) renderRemote(r);
+};
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const setText = (id, text) => {
+  if ($(id).textContent !== text) $(id).textContent = text;
+};
+
+// The QR from Rust's modules (`size`² characters of 0 and 1): one path of runs, with a quiet zone of 4.
+// Each module is a whole number of pixels, so its edges stay sharp.
+let drawnQr = null;
+const drawQr = ({ size, modules }) => {
+  let d = '';
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (modules[y * size + x] !== '1') continue;
+      let n = 1;
+      while (x + n < size && modules[y * size + x + n] === '1') n++;
+      d += `M${x} ${y}h${n}v1h-${n}z`;
+      x += n;
+    }
+  }
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `-4 -4 ${size + 8} ${size + 8}`);
+  svg.setAttribute('shape-rendering', 'crispEdges');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', t('QR code for pairing a phone'));
+  const ground = document.createElementNS(NS, 'rect');
+  for (const [name, value] of Object.entries({ x: -4, y: -4, width: size + 8, height: size + 8 })) {
+    ground.setAttribute(name, String(value));
+  }
+  const dark = document.createElementNS(NS, 'path');
+  dark.setAttribute('d', d);
+  svg.append(ground, dark);
+  const side = Math.max(3, Math.floor(264 / (size + 8))) * (size + 8);
+  $('pair-qr').style.setProperty('width', `${side}px`);
+  $('pair-qr').style.setProperty('height', `${side}px`);
+  $('pair-qr').replaceChildren(svg);
+};
+
+// Function declarations: showTab runs at load (a `#tab` in the URL), before the rest of this block.
+function syncTimer() {
+  const run = pairUntil > 0 && $('remote-box').offsetParent !== null && document.visibilityState === 'visible';
+  if (run && !pairTimer) {
+    pairTimer = setInterval(tickPairing, 1000);
+    tickPairing();
+  } else if (!run && pairTimer) {
+    clearInterval(pairTimer);
+    pairTimer = 0;
+  }
+}
+function tickPairing() {
+  const left = Math.max(0, Math.ceil((pairUntil - Date.now()) / 1000));
+  setText('pair-left', tf('Expires in {}', clock(left)));
+  if (left === 0) stopPairing();
+}
+async function stopPairing() {
+  qr = null;
+  pairUntil = 0;
+  syncTimer();
+  await remoteCall('pair_stop');
+  loadRemote();
+}
+// Called when the tab or the search changes what is on screen.
+function syncPairing() {
+  if (remote?.pairing && $('remote-box').offsetParent === null) stopPairing();
+  else syncTimer();
+}
+document.addEventListener('visibilitychange', syncTimer);
+
+const day = (s) => new Date(s * 1000).toLocaleDateString(undefined, { dateStyle: 'medium' });
+const moment = (s) => new Date(s * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const deviceRow = (d) => {
+  const li = el('li');
+  const body = el('div', 'body');
+  const seen = d.connected ? t('Connected now') : d.last_seen ? tf('Last seen {}', moment(d.last_seen)) : t('Not seen since the app started');
+  body.append(el('div', 'title', d.name), el('div', 'detail', [tf('Paired {}', day(d.paired)), seen].join(' · ')));
+  const remove = el('button', 'secondary', t('Remove'));
+  remove.type = 'button';
+  remove.setAttribute('aria-label', tf('Remove {}', d.name));
+  remove.addEventListener('click', async () => {
+    await remoteCall('remove', { key: d.key });
+    loadRemote();
+  });
+  li.append(el('span', d.connected ? 'dot on' : 'dot'), body, remove);
+  return li;
+};
+
+const renderRemote = (r) => {
+  remote = r;
+  const pairing = r.pairing;
+  // A QR is good until a phone scans it; the pairing window ends with its answer.
+  if (!pairing || !pairing.fresh) qr = null;
+  pairUntil = pairing ? Date.now() + pairing.left * 1000 : 0;
+  const stage = r.pending ? 'ask' : pairing && (qr || !pairing.fresh) ? 'open' : 'idle';
+  $('remote-off').hidden = r.listening;
+  $('pair-start').disabled = !r.listening;
+  $('pair-idle').hidden = stage !== 'idle';
+  $('pair-open').hidden = stage !== 'open';
+  $('pair-ask').hidden = stage !== 'ask';
+  if (stage === 'open') {
+    $('pair-qr').hidden = !qr;
+    if (qr && drawnQr !== qr) drawQr((drawnQr = qr));
+    setText('pair-title', t(qr ? 'Scan with the feathertune app' : 'Phone connected'));
+    setText(
+      'pair-hint',
+      t(qr ? 'Open feathertune on your phone and point its camera at this code. The phone and this PC must be on the same network.' : 'Finishing the secure connection…'),
+    );
+  } else {
+    drawnQr = null;
+  }
+  if (stage === 'ask') {
+    setText('pair-ask-title', tf('Allow {} to control feathertune?', r.pending.name));
+    setText('pair-code', `${r.pending.code.slice(0, 3)} ${r.pending.code.slice(3)}`);
+    $('pair-code').setAttribute('aria-label', tf('Code {}', r.pending.code.split('').join(' ')));
+  }
+  $('remote-devices').replaceChildren(...(r.devices.length ? r.devices.map(deviceRow) : [el('li', 'empty', t('No phones paired yet.'))]));
+  $('remote-forget').hidden = !r.devices.length;
+  syncTimer();
+};
+
+$('pair-start').addEventListener('click', async () => {
+  $('pair-start').disabled = true;
+  const r = await remoteCall('pair_start');
+  if (r && r !== true) qr = { size: r.size, modules: r.modules };
+  await loadRemote();
+});
+$('pair-cancel').addEventListener('click', stopPairing);
+const answerPairing = async (allow) => {
+  const code = remote?.pending?.code;
+  if (!code) return;
+  await remoteCall('answer', { allow, code });
+  loadRemote();
+};
+$('pair-allow').addEventListener('click', () => answerPairing(true));
+$('pair-deny').addEventListener('click', () => answerPairing(false));
+$('remote-forget').addEventListener('click', async () => {
+  if (!confirm(t('Forget all paired phones? Each one has to be paired again.'))) return;
+  await remoteCall('forget_all');
+  loadRemote();
+});
+window.addEventListener('remote-changed', loadRemote);
+
 const load = async () => {
   try {
     const s = await invoke('settings_get');
@@ -746,6 +917,7 @@ const load = async () => {
     applyTheme(s.theme);
     renderChangelog(s.changelog, s.updated_from);
     renderPlugins(s.plugins);
+    loadRemote();
     renderLastFm(s.lastfm);
     $('discord-id').textContent = t(
       s.discord.built_in

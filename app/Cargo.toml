@@ -41,6 +41,8 @@ snow = { version = "0.10", default-features = false, features = [
     "use-getrandom",
 ] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# The pairing QR (settings window): the modules are drawn by the page.
+qrcodegen = "1.8"
 toml = "1"
 # The settings window writes config.toml with this, keeping the user's comments (toml drops them).
 toml_edit = "0.25"

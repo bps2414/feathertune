@@ -14,8 +14,8 @@
 //! - Sessions get `hello`, then `state` (on every `player::Event`) and `queue` (on every queue change).
 //!   Commands go to the `controls` injection through main.rs's player functions; all but play and pause are
 //!   refused while an ad plays.
-//! - The managed `Remote` is the API for the settings window: `start_pairing`, `stop_pairing`, `pending`,
-//!   `answer`, `devices`, `remove`, `forget_all` and `on_change`.
+//! - The managed `Remote` is the API for the settings window: `start_pairing`, `stop_pairing`, `pairing`,
+//!   `pending`, `answer`, `devices`, `remove`, `forget_all`, `listening` and `on_change`.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -395,8 +395,8 @@ impl Shared {
         self.inner.lock().unwrap()
     }
 
-    /// Called (from any thread) whenever the pending request, the paired list or a connection changes.
-    #[allow(dead_code)] // the settings window's Remote section (next) calls the pairing API
+    /// Called (from any thread) whenever the pairing window, the pending request, the paired list or a
+    /// connection changes.
     pub fn on_change(&self, f: impl Fn() + Send + Sync + 'static) {
         *self.on_change.lock().unwrap() = Some(Arc::new(f));
     }
@@ -411,7 +411,6 @@ impl Shared {
 
     /// Opens a pairing window of 2 minutes and returns the QR's text (docs/REMOTE.md, Protocol). A new call
     /// replaces the window and its secret.
-    #[allow(dead_code)]
     pub fn start_pairing(&self) -> Result<String, String> {
         let addrs = lan_addresses();
         if addrs.is_empty() {
@@ -434,13 +433,25 @@ impl Shared {
     }
 
     /// Ends the pairing window (the settings screen closed); a phone waiting for an answer is refused.
-    #[allow(dead_code)]
     pub fn stop_pairing(&self) {
         self.lock().pairing = None;
         self.changed();
     }
 
-    #[allow(dead_code)]
+    /// The open pairing window: the seconds left, and whether its QR is still good (a phone that scanned it
+    /// has used the secret).
+    pub fn pairing(&self) -> Option<(u64, bool)> {
+        let inner = self.lock();
+        let pairing = inner.pairing.as_ref()?;
+        let left = pairing.until.checked_duration_since(Instant::now())?;
+        Some((left.as_secs_f64().ceil() as u64, pairing.secret.is_some()))
+    }
+
+    /// The port while listening; `None` when the plugin is off or the port could not be opened.
+    pub fn listening(&self) -> Option<u16> {
+        self.lock().running.as_ref().map(|r| r.port)
+    }
+
     pub fn pending(&self) -> Option<Pending> {
         let inner = self.lock();
         let pairing = inner.pairing.as_ref().filter(|p| p.until > Instant::now())?;
@@ -448,13 +459,11 @@ impl Shared {
     }
 
     /// Allow (store the phone and start its session) or deny the pending phone. False: none was pending.
-    #[allow(dead_code)]
     pub fn answer(&self, allow: bool) -> bool {
         let asking = self.lock().pairing.as_mut().and_then(|p| p.asking.take());
         asking.is_some_and(|a| a.answer.send(allow).is_ok())
     }
 
-    #[allow(dead_code)]
     pub fn devices(&self) -> Vec<DeviceInfo> {
         let inner = self.lock();
         inner
@@ -471,7 +480,6 @@ impl Shared {
     }
 
     /// Forgets one phone and closes its session at once. False: no such phone.
-    #[allow(dead_code)]
     pub fn remove(&self, key: &str) -> bool {
         let found = {
             let mut inner = self.lock();
@@ -489,7 +497,6 @@ impl Shared {
     }
 
     /// Forgets every phone and makes a new PC key, so no old pairing (or a copy of it) works again.
-    #[allow(dead_code)]
     pub fn forget_all(&self) -> Result<(), String> {
         let keys = Keys::generate();
         if self.keyring {
@@ -610,6 +617,8 @@ impl Shared {
             }
             (secret, pairing.until, keys)
         };
+        // The QR on the settings screen is spent from here on.
+        self.changed();
         let mut hs = snow::Builder::new(params(PAIR_PATTERN))
             .local_private_key(&keys.private)
             .and_then(|b| b.psk(2, &secret))
@@ -994,7 +1003,7 @@ fn pairing_code(hash: &[u8]) -> String {
     format!("{:06}", n % 1_000_000)
 }
 
-fn valid_name(name: &str) -> Option<String> {
+pub fn valid_name(name: &str) -> Option<String> {
     let name = name.trim();
     let count = name.chars().count();
     ((1..=MAX_NAME).contains(&count) && !name.chars().any(char::is_control)).then(|| name.to_owned())

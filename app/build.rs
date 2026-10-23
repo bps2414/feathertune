@@ -12,6 +12,7 @@ fn main() {
         "settings_action",
         "settings_stats",
         "settings_mix",
+        "settings_remote",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).expect("tauri-build failed");
 }

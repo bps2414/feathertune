@@ -166,6 +166,7 @@ fn main() {
             settings_window::settings_action,
             settings_window::settings_stats,
             mixes::settings_mix,
+            settings_window::settings_remote,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -243,6 +244,8 @@ fn main() {
             }
             // Managed even when off: the settings window lists the paired phones. No socket until it is on.
             app.manage(remote::Remote::new(app.handle(), &profile));
+            let handle = app.handle().clone();
+            app.state::<remote::Remote>().on_change(move || settings_window::remote_changed(&handle));
             remote::apply(app.handle());
             tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {

@@ -38,6 +38,46 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
+  # The phone remote (mobile/): typecheck, lint and tests (the Noise vectors among them), only when it changed.
+  mobile-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      mobile: ${{ steps.filter.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            mobile:
+              - 'mobile/**'
+              - '.github/workflows/ci.yml'
+
+  mobile:
+    needs: mobile-changes
+    if: needs.mobile-changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
   # Fully optimized exe and the NSIS installer (Tauri CLI, `--profile dist`), downloadable from the
   # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock. On a `v*`
   # tag it also publishes a GitHub release with the installer (the tag must match the app version), its

@@ -5,3 +5,5 @@ data/
 results/
 # Local work plans (pt-BR, not part of the product docs)
 plans/
+# Release build artifacts and APKs
+dist/

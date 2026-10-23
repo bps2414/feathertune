@@ -56,7 +56,7 @@ O Expo dá interface nativa com gestos e animações suaves, câmera (ler QR), K
 - Estado: um store pequeno (`zustand`). Nenhum outro kit de estado ou de interface.
 - Um development build (`expo-dev-client`), não o Expo Go: as permissões de rede local e, depois, o mDNS precisam de configuração nativa.
 
-**PC: um módulo novo `remote.rs` em `app/`**, um plugin (`remote`, Experimental). O `tokio` já é dependência (`sync`, `time`); ganha `net`. Crates novas, cada uma necessária e pequena: `tokio-tungstenite` (servidor WebSocket), `snow` (Noise Protocol), `qrcodegen` (QR do pareamento, desenhado em SVG pela página de configurações). A etapa 2 acrescenta `mdns-sd`. A chave privada do PC fica no cofre de credenciais do Windows pelo `keyring` (já usado pelo Last.fm).
+**PC: um módulo novo `remote.rs` em `app/`**, um plugin (`remote`, Experimental). O `tokio` já é dependência (`sync`, `time`); ganha `net`. Crates novas, cada uma necessária e pequena: `tokio-tungstenite` (servidor WebSocket), `snow` (Noise Protocol; só 25519, ChaChaPoly e SHA256), `futures-util` (os traits `Stream`/`Sink` do socket; já na árvore pelo `tokio-tungstenite`), `qrcodegen` (QR do pareamento, desenhado em SVG pela página de configurações). A etapa 2 acrescenta `mdns-sd`. A chave privada do PC fica no cofre de credenciais do Windows pelo `keyring` (já usado pelo Last.fm).
 
 **Pasta:** `mobile/` na raiz do repo, ao lado de `app/`. É um app separado com seu próprio `package.json`, mas o protocolo precisa mudar junto com o desktop no mesmo pull request, então um repo só. Node pelo `.nvmrc`, pnpm (`node-linker=hoisted` em `mobile/.npmrc`, que o Expo exige).
 
@@ -90,20 +90,65 @@ A seção Segurança do docs/DESIGN.md ganha um parágrafo sobre isso quando ent
 
 ## Protocolo
 
-Depois do handshake, cada mensagem de transporte do Noise é um objeto JSON. Versão 1:
+Tudo o que um controle precisa para falar com o PC (`app/src/remote.rs`; os testes dele rodam um iniciador `snow` por cada passo abaixo). Versão 1.
+
+**Transporte.**
+- WebSocket sobre TCP, `ws://<endereço>:<porta>`, porta padrão **47652** (`[remote] port` no `config.toml`). Não é `wss`: a criptografia é o Noise. Caminhos: `/v1/pair` para parear, `/v1` para toda sessão depois; qualquer outro caminho recebe HTTP 404.
+- Um frame binário é uma mensagem Noise (no máximo 65 535 bytes). Um frame de texto fecha a conexão (`invalid`). Um frame do controle tem no máximo 1 040 bytes (1 024 de JSON mais a tag de 16 bytes); um maior fecha a conexão (`too_big`). Mensagens do PC têm no máximo 65 519 bytes de JSON.
+- O PC descarta, antes do handshake do WebSocket (a conexão TCP só fecha), origens fora de `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `100.64/10`, `::1`, `fc00::/7`, `fe80::/10` (IPv6 mapeado de IPv4 conta como IPv4), e uma sexta conexão do mesmo endereço em um minuto.
+- Cada passo espera no máximo 10 s: o upgrade do WebSocket, a primeira mensagem Noise, o primeiro `ping` de uma sessão.
+- Frames de fechamento vão em claro (são frames do WebSocket, não mensagens Noise); os códigos estão abaixo.
+
+**QR de pareamento.** Uma URI, hex minúsculo:
+
+```
+feathertune://pair?v=1&k=<chave pública estática do PC, 64 hex>&s=<segredo de uso único, 64 hex>&a=<endereços IPv4, separados por vírgula>&p=<porta>
+```
+
+O controle ignora parâmetros que não conhece. `a` traz o endereço da interface do PC na rota padrão (um, hoje). O id do aparelho do PC são os 8 primeiros bytes do SHA-256 dos 32 bytes de `k`, em hex.
+
+**Pareamento, `/v1/pair`.** `Noise_IKpsk2_25519_ChaChaPoly_SHA256`; o celular é o iniciador, a chave estática do respondedor é `k`, a PSK é `s` (posição 2) e o prologue são os 25 bytes ASCII `feathertune-remote/1 pair`.
+1. Celular → PC, mensagem 1 do handshake (`e, es, s, ss`). O payload é o JSON UTF-8 `{"name":"<nome do celular>"}`, só essa chave; o nome tem de 1 a 32 caracteres depois de aparado, sem caracteres de controle.
+2. PC → celular, mensagem 2 do handshake (`e, ee, se, psk`), payload vazio. Um celular que não consegue decifrá-la está falando com algo que não tem o segredo: para.
+3. Os dois calculam o **código de 6 dígitos**: os 4 primeiros bytes do hash do handshake (`h` depois da mensagem 2, o `get_handshake_hash` do snow) como inteiro sem sinal de 32 bits big-endian, módulo 1 000 000, completado com zeros até 6 dígitos. O celular o mostra.
+4. Celular → PC, a primeira mensagem de transporte: `{"t":"pair"}`. Ela prova que o celular usou o segredo (a PSK só entra com a mensagem 2), então só agora o PC mostra "Permitir <nome>?" com o mesmo código.
+5. Permitir: o PC guarda o celular, e a conexão segue como sessão (abaixo), começando pelo `hello`; o celular guarda o PC (`k`, o nome do `hello`, o endereço que usou) quando esse `hello` chega. Negar: fecha com `denied`. Os 2 minutos acabando ou a tela das configurações fechando: `expired`.
+
+O segredo vale uma vez: a primeira mensagem 1 que chega o consome, aconteça o que acontecer depois (um segundo celular, ou o mesmo de novo, recebe `expired`).
+
+**Sessão, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; o celular é o iniciador com o próprio par de chaves e o `k` do PC, e o prologue são os 20 bytes ASCII `feathertune-remote/1`. A mensagem 1 (`e, es, ss`) e a mensagem 2 (`e, ee, se`) têm payload vazio. O PC testa a mensagem 1 contra cada chave pareada; sem nenhuma, fecha com `unknown`, sem responder. Depois da mensagem 2, a primeira mensagem de transporte do celular precisa ser um `ping`; só então o PC manda `hello`, `state`, `queue` e o `pong`, nessa ordem (uma mensagem 1 repetida recebe a mensagem 2 e nada mais). No máximo 4 sessões ao mesmo tempo (`busy`); o mesmo celular conectando de novo substitui a sessão antiga.
+
+Depois do handshake cada mensagem de transporte do Noise é um objeto JSON, lido num formato fixo: campos desconhecidos, tipos errados e valores fora da faixa são recusados.
 
 PC → controle:
 - `{"t":"hello","v":1,"min":1,"name":"<nome do PC>"}` uma vez. Um controle fora de `min`..`v` fecha e diz qual lado atualizar.
-- `{"t":"state","track":{id,title,artist,album,artwork,duration},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: a cada `player::Event` e ao conectar. O controle avança a posição sozinho a partir de `at` (relógio do PC; a diferença é estimada pelo `ping`/`pong`).
-- `{"t":"queue","items":[{id,title,artist}],"current":i}`: ao conectar e quando a fila muda.
-- `{"t":"error","code":"ad"|"unavailable"|"invalid"}` depois de um comando recusado.
+- `{"t":"state","track":{"id","title","artist","album","artwork","duration"},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: a cada `player::Event`, ao conectar (depois que algo tocou) e quando as cores do álbum chegam. `id` (o id de 11 caracteres do vídeo) e `artwork` (uma URL https) podem ser `null`; `duration` em segundos, 0 enquanto desconhecida. `position` em segundos no instante `at` (milissegundos Unix, relógio do PC): o controle avança sozinho enquanto `paused` é falso (a diferença de relógio é estimada pelo `ping`/`pong`). `colors` é `["#destaque","#tinta","#texto no destaque"]` da capa, ou `[]`; depois de uma troca de faixa elas vêm num `state` seguinte.
+- `{"t":"queue","items":[{"id","title","artist"}],"current":i}`: ao conectar e quando a fila muda. No máximo 200 itens, cortados do fim se a mensagem não couber; `current` é `null` quando não se sabe.
+- `{"t":"error","code":"ad"|"unavailable"|"invalid"}` depois de uma mensagem recusada: `ad` enquanto toca um anúncio, `unavailable` quando a página não pôde ser alcançada, `invalid` para qualquer coisa malformada. Um comando que deu certo não tem resposta; o próximo `state` mostra o efeito.
 
 Controle → PC:
 - `{"t":"cmd","c":"play"|"pause"|"next"|"previous"}`
-- `{"t":"cmd","c":"seek","s":segundos}`
+- `{"t":"cmd","c":"seek","s":segundos}`: de 0 a 86 400.
 - `{"t":"cmd","c":"volume","v":0-100}`
-- `{"t":"cmd","c":"play_item","id":"<id do vídeo>","i":índice}`: toca aquela linha da fila (os dois precisam bater, para um índice velho nunca tocar a música errada).
-- `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: a cada 15 s enquanto conectado; o PC fecha uma conexão calada por 45 s.
+- `{"t":"cmd","c":"play_item","id":"<id do vídeo>","i":índice}`: toca aquela linha da fila (os dois precisam bater, para um índice velho nunca tocar a música errada); `i` de 0 a 199.
+- `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: primeira coisa da sessão, depois a cada 15 s; o PC fecha uma conexão calada por 45 s. `n` é um inteiro sem sinal.
+
+Durante um anúncio todo comando exceto `play` e `pause` é recusado com `ad` (pausar não encurta nada).
+
+Códigos de fechamento (o motivo é a palavra entre crases):
+
+| Código | Motivo | Quando | Celular |
+|---|---|---|---|
+| 4000 | `denied` | o usuário apertou Negar | avisa; parear de novo para tentar outra vez |
+| 4001 | `expired` | nenhuma tela de pareamento aberta, os 2 minutos acabaram ou o segredo já foi usado | ler um QR novo |
+| 4002 | `unknown` | `KK` com uma chave que o PC não tem (removida, ou Esquecer todos os aparelhos) | "removido pelo PC": parear de novo |
+| 4003 | `removed` | o usuário removeu este celular (ou esqueceu todos) com ele conectado | "removido pelo PC": parear de novo |
+| 4004 | `busy` | já há 4 sessões abertas | tentar mais tarde |
+| 4005 | `timeout` | 45 s sem mensagem (10 s durante um handshake) | reconectar |
+| 4006 | `invalid` | uma mensagem que não decifra (repetida, fora de ordem, forjada), um frame de texto, um handshake ruim | reconectar; relatar se repetir |
+| 4007 | `too_big` | um frame acima de 1 040 bytes | bug no controle |
+| 4008 | `off` | o plugin foi desligado | "o controle remoto está desligado no PC" |
+| 4009 | `full` | já há 16 celulares pareados | remover um no PC |
 
 Vários controles ao mesmo tempo recebem todo `state`; comandos valem na ordem de chegada (o último vence). A etapa 3 acrescenta `{"t":"cmd","c":"hand_off"}` (o PC A → sua posição pausada e a playlist para o PC B) e `{"t":"cmd","c":"open","id","list","s"}` (o PC B abre), os dois recusados durante anúncio, e o `v` vira 2.
 

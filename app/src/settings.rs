@@ -41,6 +41,10 @@
 //! echo_out = false                 # an echo on the tail of the track that fades out
 //! visualizer = "bars"              # bars, wave
 //!
+//! [remote]                         # the phone remote (Experimental tab)
+//! port = 47652                     # TCP, 1024 to 65535; local network sources only
+//! name = "feathertune"             # what paired phones call this PC (never the Windows name)
+//!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
 //! ```
@@ -63,6 +67,7 @@ pub struct Settings {
     pub browser: Browser,
     pub lyrics: LyricsSettings,
     pub audio: AudioSettings,
+    pub remote: RemoteSettings,
     /// The whole file, for the plugin switches (`plugin`).
     #[serde(skip)]
     raw: toml::Table,
@@ -176,6 +181,21 @@ impl Default for AudioSettings {
             echo_out: false,
             visualizer: "bars".into(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct RemoteSettings {
+    /// Below 1024: the default.
+    pub port: u16,
+    /// Invalid (empty, over 32 characters): the default.
+    pub name: String,
+}
+
+impl Default for RemoteSettings {
+    fn default() -> Self {
+        RemoteSettings { port: crate::remote::DEFAULT_PORT, name: crate::remote::DEFAULT_NAME.into() }
     }
 }
 

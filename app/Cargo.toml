@@ -29,7 +29,18 @@ ureq = { version = "3", default-features = false, features = ["native-tls"] }
 tauri-winrt-notification = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "net"] }
+# Phone remote (remote.rs): the WebSocket server, its Noise handshakes, and the Stream/Sink traits
+# tokio-tungstenite's socket is used through (already in the tree through it).
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# Only 25519, ChaChaPoly and SHA256 (not "std": it would turn on the optional ring dependency).
+snow = { version = "0.10", default-features = false, features = [
+    "use-curve25519",
+    "use-chacha20poly1305",
+    "use-sha2",
+    "use-getrandom",
+] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 toml = "1"
 # The settings window writes config.toml with this, keeping the user's comments (toml drops them).
 toml_edit = "0.25"

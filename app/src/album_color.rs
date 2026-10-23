@@ -9,6 +9,8 @@
 //! dark (white text on it), and the glows' luminance is capped so white text over them keeps its
 //! contrast. A track without a cover, or a failed download, goes back to the default look.
 
+use std::sync::Mutex;
+
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::error::RecvError;
@@ -21,6 +23,14 @@ use crate::player::Player;
 const GLOW_MAX_LUMINANCE: f32 = 0.22;
 /// Saturation under which a color is treated as gray (its hue means nothing) and left gray.
 const GRAY: f32 = 0.12;
+
+/// The current cover's page colors (accent, ink, text on the accent; `#rrggbb`), for the phone remote. Empty
+/// without a cover.
+static COLORS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn colors() -> Vec<String> {
+    COLORS.lock().unwrap().clone()
+}
 
 pub fn start(app: &AppHandle) {
     let app = app.clone();
@@ -62,6 +72,9 @@ fn apply(app: &AppHandle, look: Option<(Theme, Value)>) {
     crate::titlebar::refresh(app);
     crate::miniplayer::refresh();
     crate::injections::send(app, "theme", &page);
+    *COLORS.lock().unwrap() =
+        ["accent", "ink", "onAccent"].iter().filter_map(|k| page.get(k)?.as_str().map(String::from)).collect();
+    crate::remote::refresh(app);
 }
 
 /// The theme and the page data of a cover.

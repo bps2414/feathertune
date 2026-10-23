@@ -279,6 +279,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 "navigation" => crate::titlebar::set_navigation(&app, on),
                 "lyrics_translation" => crate::lyrics::republish(&app),
+                "remote" => crate::remote::apply(&app),
                 id if crate::audio::PLUGINS.contains(&id) => crate::audio::push(&app),
                 _ => {}
             }

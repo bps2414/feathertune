@@ -36,6 +36,7 @@ mod notify;
 mod player;
 mod plugins;
 mod privacy;
+mod remote;
 mod settings;
 mod settings_window;
 mod share_lyrics;
@@ -240,6 +241,9 @@ fn main() {
             if live.plugin("listening_stats") {
                 stats::start(app.handle(), &profile);
             }
+            // Managed even when off: the settings window lists the paired phones. No socket until it is on.
+            app.manage(remote::Remote::new(app.handle(), &profile));
+            remote::apply(app.handle());
             tray(app.handle(), lastfm)?;
             if let Err(e) = smtc::start(app.handle(), &window) {
                 eprintln!("media flyout unavailable: {e}");
@@ -462,7 +466,7 @@ pub(crate) fn player(app: &AppHandle, command: &str) {
 }
 
 /// Evaluates `call` on the `controls` injection; whether it was sent (the page may still refuse it, e.g. during an ad).
-fn player_call(app: &AppHandle, call: &str) -> bool {
+pub(crate) fn player_call(app: &AppHandle, call: &str) -> bool {
     app.get_webview("site").is_some_and(|site| site.eval(format!("window.__feathertune?.controls?.{call}")).is_ok())
 }
 
@@ -484,19 +488,16 @@ fn play_item_call(id: &str, index: usize) -> Option<String> {
 }
 
 /// Seeks the track to `seconds` (finite, >= 0). Refused by the page during an ad.
-#[allow(dead_code)] // the phone remote (remote.rs) calls it
 pub(crate) fn player_seek(app: &AppHandle, seconds: f64) -> bool {
     seek_call(seconds).is_some_and(|call| player_call(app, &call))
 }
 
 /// Sets the player's volume to `percent` (0-100). Refused by the page during an ad.
-#[allow(dead_code)] // the phone remote (remote.rs) calls it
 pub(crate) fn player_set_volume(app: &AppHandle, percent: f64) -> bool {
     volume_call(percent).is_some_and(|call| player_call(app, &call))
 }
 
 /// Plays queue row `index` if its video id is `id`. Refused by the page during an ad.
-#[allow(dead_code)] // the phone remote (remote.rs) calls it
 pub(crate) fn player_play_item(app: &AppHandle, id: &str, index: usize) -> bool {
     play_item_call(id, index).is_some_and(|call| player_call(app, &call))
 }

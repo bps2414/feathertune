@@ -150,12 +150,10 @@ impl Player {
     }
 
     /// The last queue reported (empty until the page reports one).
-    #[allow(dead_code)] // the phone remote (remote.rs) calls it
     pub fn queue(&self) -> Queue {
         self.queue.lock().unwrap().clone()
     }
 
-    #[allow(dead_code)] // the phone remote (remote.rs) calls it
     pub fn subscribe_queue(&self) -> broadcast::Receiver<Queue> {
         self.queue_tx.subscribe()
     }

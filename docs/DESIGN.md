@@ -83,6 +83,7 @@ Cost = the plugin on against off (`measure-plugins.ps1`, window open, 3 runs eac
 | `song_mode` | on | inside the noise on this track (+1.6 points, +1 MB) |
 | `precise_volume` | on | inside the noise (−0.4 points, −2 MB) |
 | `skip_disliked` | on | inside the noise (+1.1 points, −4 MB) |
+| `remote` (phone remote, docs/REMOTE.md) | off (Experimental) | not measured yet; no socket while off |
 | `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (audio graph) | on, neutral (flat, none); crossfade (6 s), track analysis and skip silence off (Experimental) | each inside the noise with the others on (+3.9, +1.2, −1.3, +2.9, +0.9, −1.1 points; −3, −5, −1, −2, −3, −6 MB private); the graph is not measured as a whole, and a visualizer with the player page open and a crossfade in progress were not exercised |
 
 The runs with the floating lyrics or the share window open read 5–6% CPU against 12.9% for `base`, close to the tray row, so their CPU cannot be compared with `base`; why was not found out. Their memory can: +10 MB (floating lyrics) and +26 MB (share window) private against `base`.

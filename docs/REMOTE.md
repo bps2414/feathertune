@@ -56,7 +56,7 @@ Expo gives a native UI with smooth gestures and animations, the camera (QR scan)
 - State: one small store (`zustand`). No other state or UI kit.
 - A development build (`expo-dev-client`), not Expo Go: the local network permissions and, later, mDNS need native config.
 
-**PC: a new module `remote.rs` in `app/`**, a plugin (`remote`, Experimental). `tokio` is already a dependency (`sync`, `time`); it gains `net`. New crates, each needed and small: `tokio-tungstenite` (WebSocket server), `snow` (Noise protocol), `qrcodegen` (pairing QR, drawn by the settings page as SVG). Stage 2 adds `mdns-sd`. The PC's private key goes in the Windows credential store through `keyring` (already used for Last.fm).
+**PC: a new module `remote.rs` in `app/`**, a plugin (`remote`, Experimental). `tokio` is already a dependency (`sync`, `time`); it gains `net`. New crates, each needed and small: `tokio-tungstenite` (WebSocket server), `snow` (Noise protocol; only 25519, ChaChaPoly and SHA256), `futures-util` (the `Stream`/`Sink` traits of the socket; already in the tree through `tokio-tungstenite`), `qrcodegen` (pairing QR, drawn by the settings page as SVG). Stage 2 adds `mdns-sd`. The PC's private key goes in the Windows credential store through `keyring` (already used for Last.fm).
 
 **Folder:** `mobile/` at the repo root, next to `app/`. It is a separate app with its own `package.json`, but the protocol must change with the desktop in the same pull request, so one repo. Node via `.nvmrc`, pnpm (`node-linker=hoisted` in `mobile/.npmrc`, which Expo needs).
 
@@ -90,20 +90,65 @@ The Security section of docs/DESIGN.md gets a paragraph for this when it lands.
 
 ## Protocol
 
-After the handshake, each Noise transport message is one JSON object. Version 1:
+Everything a controller needs to talk to the PC (`app/src/remote.rs`; its tests run a `snow` initiator through every step below). Version 1.
+
+**Transport.**
+- WebSocket over TCP, `ws://<address>:<port>`, default port **47652** (`[remote] port` in `config.toml`). Not `wss`: Noise is the encryption. Paths: `/v1/pair` for pairing, `/v1` for every later session; any other path gets HTTP 404.
+- One binary frame is one Noise message (at most 65 535 bytes). A text frame closes the connection (`invalid`). A frame from the controller is at most 1 040 bytes (1 024 of JSON plus the 16-byte tag); a larger one closes it (`too_big`). Messages from the PC hold at most 65 519 bytes of JSON.
+- The PC drops, before the WebSocket handshake (the TCP connection just closes), sources outside `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `100.64/10`, `::1`, `fc00::/7`, `fe80::/10` (IPv4-mapped IPv6 counts as IPv4), and a sixth connection from one address within a minute.
+- Each step waits at most 10 s: the WebSocket upgrade, the first Noise message, the first `ping` of a session.
+- Close frames travel in clear (they are WebSocket frames, not Noise messages); their codes are listed below.
+
+**Pairing QR.** One URI, lowercase hex:
+
+```
+feathertune://pair?v=1&k=<PC static public key, 64 hex>&s=<one-time secret, 64 hex>&a=<IPv4 addresses, comma-separated>&p=<port>
+```
+
+The controller ignores parameters it does not know. `a` holds the address of the PC's interface on its default route (one today). The PC's device id is the first 8 bytes of SHA-256 of the 32 bytes of `k`, in hex.
+
+**Pairing, `/v1/pair`.** `Noise_IKpsk2_25519_ChaChaPoly_SHA256`; the phone is the initiator, the responder's static key is `k`, the PSK is `s` (position 2), and the prologue is the 25 ASCII bytes `feathertune-remote/1 pair`.
+1. Phone → PC, handshake message 1 (`e, es, s, ss`). Its payload is the UTF-8 JSON `{"name":"<phone name>"}`, that key only; the name is 1 to 32 characters once trimmed, with no control characters.
+2. PC → phone, handshake message 2 (`e, ee, se, psk`), empty payload. A phone that cannot decrypt it is talking to something that does not have the secret: it stops.
+3. Both compute the **6-digit code**: the first 4 bytes of the handshake hash (`h` once message 2 is done, snow's `get_handshake_hash`) as a big-endian unsigned 32-bit number, modulo 1 000 000, padded with zeros to 6 digits. The phone shows it.
+4. Phone → PC, the first transport message: `{"t":"pair"}`. It proves the phone used the secret (the PSK only enters with message 2), so only now does the PC show "Allow <name>?" with the same code.
+5. Allow: the PC stores the phone, and the connection goes on as a session (below), starting with `hello`; the phone stores the PC (`k`, `hello`'s name, the address it used) when that `hello` arrives. Deny: closed with `denied`. The 2 minutes ending or the settings screen closing: `expired`.
+
+The secret is used once: the first message 1 to arrive takes it, whatever follows (a second phone, or the same one again, gets `expired`).
+
+**Session, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; the phone is the initiator with its own key pair and the PC's `k`, and the prologue is the 20 ASCII bytes `feathertune-remote/1`. Message 1 (`e, es, ss`) and message 2 (`e, ee, se`) have empty payloads. The PC tries message 1 against each paired key; with none it closes with `unknown`, without answering. After message 2 the phone's first transport message must be a `ping`; only then does the PC send `hello`, `state`, `queue` and the `pong`, in that order (a replayed message 1 gets message 2 and nothing more). At most 4 sessions at once (`busy`); the same phone connecting again replaces its old session.
+
+After the handshake each Noise transport message is one JSON object, parsed into a fixed shape: unknown fields, wrong types and out-of-range values are refused.
 
 PC → controller:
 - `{"t":"hello","v":1,"min":1,"name":"<PC name>"}` once. A controller outside `min`..`v` closes and says which side to update.
-- `{"t":"state","track":{id,title,artist,album,artwork,duration},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: on every `player::Event` and on connect. The controller moves the position itself from `at` (PC clock; the offset is estimated from `ping`/`pong`).
-- `{"t":"queue","items":[{id,title,artist}],"current":i}`: on connect and when the queue changes.
-- `{"t":"error","code":"ad"|"unavailable"|"invalid"}` after a refused command.
+- `{"t":"state","track":{"id","title","artist","album","artwork","duration"},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: on every `player::Event`, on connect (once something has played) and when the album colors arrive. `id` (the 11-character video id) and `artwork` (an https URL) may be `null`; `duration` is in seconds, 0 while unknown. `position` is in seconds as of `at` (Unix milliseconds, PC clock): the controller moves it on by itself while `paused` is false (the clock offset is estimated from `ping`/`pong`). `colors` is `["#accent","#ink","#text on accent"]` from the cover, or `[]`; after a track change they come in a later `state`.
+- `{"t":"queue","items":[{"id","title","artist"}],"current":i}`: on connect and when the queue changes. At most 200 items, cut from the end if the message would not fit; `current` is `null` when not known.
+- `{"t":"error","code":"ad"|"unavailable"|"invalid"}` after a refused message: `ad` while an ad plays, `unavailable` when the page could not be reached, `invalid` for anything malformed. A command that worked gets no reply; the next `state` shows it.
 
 Controller → PC:
 - `{"t":"cmd","c":"play"|"pause"|"next"|"previous"}`
-- `{"t":"cmd","c":"seek","s":seconds}`
+- `{"t":"cmd","c":"seek","s":seconds}`: 0 to 86 400.
 - `{"t":"cmd","c":"volume","v":0-100}`
-- `{"t":"cmd","c":"play_item","id":"<video id>","i":index}`: plays that queue row (both must match, so a stale index never plays the wrong song).
-- `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: every 15 s while connected; the PC closes a connection silent for 45 s.
+- `{"t":"cmd","c":"play_item","id":"<video id>","i":index}`: plays that queue row (both must match, so a stale index never plays the wrong song); `i` 0 to 199.
+- `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: first thing in a session, then every 15 s; the PC closes a connection silent for 45 s. `n` is an unsigned integer.
+
+During an ad every command but `play` and `pause` is refused with `ad` (pausing shortens nothing).
+
+Close codes (the reason is the word in brackets):
+
+| Code | Reason | When | Phone |
+|---|---|---|---|
+| 4000 | `denied` | the user pressed Deny | says so; pair again to retry |
+| 4001 | `expired` | no pairing screen open, the 2 minutes are over, or the secret was already used | scan a new QR |
+| 4002 | `unknown` | `KK` with a key the PC does not have (removed, or Forget all devices) | "removed by the PC": pair again |
+| 4003 | `removed` | the user removed this phone (or forgot all) while connected | "removed by the PC": pair again |
+| 4004 | `busy` | 4 sessions already open | retry later |
+| 4005 | `timeout` | 45 s without a message (10 s during a handshake) | reconnect |
+| 4006 | `invalid` | a message that does not decrypt (replayed, reordered, forged), a text frame, a bad handshake | reconnect; report if it repeats |
+| 4007 | `too_big` | a frame over 1 040 bytes | a bug in the controller |
+| 4008 | `off` | the plugin was turned off | "the remote is off on the PC" |
+| 4009 | `full` | 16 phones already paired | remove one on the PC |
 
 Several controllers at once all get every `state`; commands apply in arrival order (the last one wins). Stage 3 adds `{"t":"cmd","c":"hand_off"}` (PC A → its paused position and playlist for PC B) and `{"t":"cmd","c":"open","id","list","s"}` (PC B opens it), both refused during an ad, and `v` becomes 2.
 

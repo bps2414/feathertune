@@ -83,6 +83,7 @@ Custo = o plugin ligado contra desligado (`measure-plugins.ps1`, janela aberta, 
 | `song_mode` | ligado | dentro do ruído nesta faixa (+1,6 pontos, +1 MB) |
 | `precise_volume` | ligado | dentro do ruído (−0,4 pontos, −2 MB) |
 | `skip_disliked` | ligado | dentro do ruído (+1,1 pontos, −4 MB) |
+| `remote` (controle pelo celular, docs/REMOTE.pt-BR.md) | desligado (Experimental) | ainda não medido; nenhum socket enquanto desligado |
 | `equalizer`, `compressor`, `crossfade`, `track_analysis`, `skip_silence`, `visualizer` (grafo de áudio) | ligado, neutro (flat, none); crossfade (6 s), análise de faixa e pular silêncio desligados (Experimental) | cada um dentro do ruído com os outros ligados (+3,9, +1,2, −1,3, +2,9, +0,9, −1,1 pontos; −3, −5, −1, −2, −3, −6 MB privados); o grafo não foi medido inteiro, e um visualizador com a página do player aberta e um crossfade em andamento não foram exercitados |
 
 As rodadas com a letra flutuante ou a janela de compartilhar abertas marcam 5–6% de CPU contra 12,9% do `base`, perto da linha da bandeja, então a CPU delas não se compara com o `base`; o motivo não foi apurado. A memória delas se compara: +10 MB (letra flutuante) e +26 MB (janela de compartilhar) privados contra o `base`.

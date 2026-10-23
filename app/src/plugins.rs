@@ -322,6 +322,18 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
+        id: "remote",
+        name: "Phone remote",
+        description: "Lets phones you pair show what plays, the queue and the volume, and control them over the \
+                      local network (never while an ad plays, except pause). Off, no port is open; on, only \
+                      paired phones get anything, through an encrypted channel.",
+        cost: "Not measured yet.",
+        // Experimental: it opens a port, so it starts off.
+        default_on: false,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
         id: "visualizer",
         name: "Visualizer",
         description: "Bars or a wave of the music under the artwork on the expanded player page, in the album's \

@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.4.1 — 2026-10-24
+
+- **Aba Letra habilitada quando letras externas são encontradas.** Quando o YouTube Music indica que a faixa não tem letra (deixando o botão da aba Letra cinza/desabilitado), mas o feathertune encontra letras sincronizadas em fontes externas, o botão da aba agora é habilitado automaticamente e fica clicável para você abrir e acompanhar a letra.
+
 ## 0.4.0 — 2026-10-23
 
 - **Controle remoto pelo celular (prévia altamente experimental).** Controle a reprodução do feathertune no PC pelo celular na rede local (Tocando agora, Fila com toque para tocar, busca no tempo, volume, reproduzir/pausar, próxima/anterior). Criptografia de ponta a ponta com o Noise Protocol (`Noise_IKpsk2` no pareamento por QR code único confirmado no PC, `Noise_KK` nas sessões seguintes). Desligado por padrão na aba Experimental das configurações.

@@ -22,6 +22,8 @@
 // left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
+const PLAYER_PAGE = 'ytmusic-player-page';
+const TAB_BUTTON = 'tp-yt-paper-tab';
 const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MAX_TRANSLATION_CHARS = 600;
@@ -93,6 +95,39 @@ let due = -1; // the time (with the lead) the timer is set for
 
 const tab = () => document.querySelector(`${TAB}[page-type="${LYRICS_PAGE}"]`) ?? document.querySelector(TAB);
 const isOpen = (t) => t.getAttribute('page-type') === LYRICS_PAGE;
+let enabledButton = null;
+const lyricsButton = () => {
+  const tabs = [...document.querySelectorAll(`${PLAYER_PAGE} ${TAB_BUTTON}`)];
+  if (!tabs.length) return null;
+  return (
+    tabs.find((t) =>
+      /lyrics|letra|paroles|songtext|testo|letras|tekst/i.test(t.textContent),
+    ) ?? tabs[1] ?? null
+  );
+};
+// Enables the lyrics tab button when we have external lyrics, so the user can click it.
+const enableTab = () => {
+  if (!lines) return;
+  const btn = lyricsButton();
+  if (!btn) return;
+  if (btn.disabled || btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true') {
+    btn.disabled = false;
+    btn.removeAttribute('disabled');
+    btn.removeAttribute('aria-disabled');
+    btn.classList.remove('iron-disabled');
+    if (btn.style.pointerEvents === 'none') btn.style.pointerEvents = '';
+    enabledButton = btn;
+  }
+};
+// Resets the button if we enabled it for a track whose lyrics are now gone.
+const disableTab = () => {
+  if (enabledButton) {
+    enabledButton.disabled = true;
+    enabledButton.setAttribute('disabled', '');
+    enabledButton.setAttribute('aria-disabled', 'true');
+    enabledButton = null;
+  }
+};
 // The song's time with the lead, on the track's clock (the video's goes on across a gapless queue; core).
 const songMs = (video) => feathertune.clock.time(video) * 1000 + LEAD_MS;
 
@@ -140,6 +175,7 @@ const clear = () => {
   box = null;
   for (const t of document.querySelectorAll('[data-feathertune-lyrics]')) t.removeAttribute('data-feathertune-lyrics');
   document.documentElement.removeAttribute('data-feathertune-lyrics-open');
+  disableTab();
 };
 
 const build = () => {
@@ -219,7 +255,12 @@ const build = () => {
 // Puts the box in the tab renderer and shows it only while the Lyrics tab is the open one.
 const refresh = () => {
   if (!lines) return;
-  observer.observe(document.body, { attributes: true, attributeFilter: ['page-type'], subtree: true });
+  observer.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['page-type', 'player-page-open', 'disabled', 'aria-disabled'],
+    subtree: true,
+  });
+  enableTab();
   const t = tab();
   if (!t) return;
   if (!box) build();

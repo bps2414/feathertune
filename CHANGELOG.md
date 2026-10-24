@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.4.1 — 2026-10-24
+
+- **Enable Lyrics tab when external lyrics are found.** When YouTube Music says a track has no lyrics (the Lyrics tab button is grayed out/disabled), but feathertune finds synchronized lyrics from external sources, the tab button is now automatically enabled and clickable so you can open and view the lyrics.
+
 ## 0.4.0 — 2026-10-23
 
 - **Phone remote control (highly experimental preview).** Control feathertune playback on a paired PC over the local network (Now Playing, Queue with tap to play, seek, volume, play/pause, next/previous). End-to-end encrypted with the Noise Protocol (`Noise_IKpsk2` pairing via one-time QR code confirmed on the PC, `Noise_KK` for later sessions). Off by default in Settings > Experimental.

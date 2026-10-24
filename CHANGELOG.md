@@ -2,6 +2,11 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.4.0 — 2026-10-23
+
+- **Phone remote control (highly experimental preview).** Control feathertune playback on a paired PC over the local network (Now Playing, Queue with tap to play, seek, volume, play/pause, next/previous). End-to-end encrypted with the Noise Protocol (`Noise_IKpsk2` pairing via one-time QR code confirmed on the PC, `Noise_KK` for later sessions). Off by default in Settings > Experimental.
+- **Android remote APK attached.** An early, highly experimental standalone Android build (`feathertune-remote-0.1.0.apk`) is attached to this release for testing and feedback.
+
 ## 0.3.1 — 2026-10-23
 
 - **Synced lyrics on every track of a queue.** When tracks played back to back, the song length and time kept counting from the first track, so lyrics were looked up with the wrong length and often not found, and crossfade, skip silence and track analysis worked only on the first track. Every feature now uses the track's own time.

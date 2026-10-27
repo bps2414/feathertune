@@ -52,7 +52,7 @@ const ARTWORK_HOSTS: &[&str] = &["googleusercontent.com", "ggpht.com", "ytimg.co
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Track {
-    /// Video id (11 chars), when the page URL has one.
+    /// Video id (11 chars): the player's, else the page URL's; `None` when neither has one.
     pub id: Option<String>,
     pub title: String,
     pub artist: String,

@@ -19,15 +19,21 @@
 //!     /api/get` (title, artist, album when known, duration); when it has no synced lyrics, `GET
 //!     /api/search` with the title cleaned of "(Official Video)", "feat. ..." and the like, and the best
 //!     entry whose artist and title match and whose length is within `MAX_DURATION_GAP` s.
-//! - It waits for the duration, which arrives a moment after the title, and for the title, artist and
-//!   duration to stay put for `SETTLE` (at a track change they arrive one after the other, the video
-//!   id with them). A duration that moves by more than `DURATION_CHANGE` is asked again, and a newer
+//! - The song is its title and artist (`track_key`); the video id is not part of it, since it is missing
+//!   while the page is not the player's, and the lines stay when it comes or goes. It waits for the
+//!   duration, which arrives a moment after the title, and for the title, artist and duration to stay
+//!   put for `SETTLE` (at a track change they arrive one after the other). A duration more than
+//!   `MAX_DURATION_GAP` from the one asked is asked again only while no lines are shown, and a newer
 //!   ask makes an older one stale. Each lookup runs on its own thread, so a slow one never holds up
 //!   the next track. Every step goes to the diagnostics log (diag.rs).
-//! - Answers are cached in `lyrics-cache/` in the profile, one small JSON file per track, so a track
-//!   already seen costs no request. Lines with word times are kept while their source is on; lines timed
-//!   as a whole and "not found" for a week, and only for the same list of sources (a source may get
-//!   word times later). Failures (network, server busy) are not retried before the track changes.
+//! - Sources see the title, artist and album without invisible format characters (`plain`). A server
+//!   error (5xx) is asked once more after `RETRY_WAIT`.
+//! - Answers are cached in `lyrics-cache/` in the profile, one small JSON file per title, artist and
+//!   duration, so a track already seen costs no request. Lines with word times are kept while their
+//!   source is on; lines timed as a whole for a week and only for the same list of sources (a source may
+//!   get word times later). A "not found" holds for a week per source that answered, so only the sources
+//!   that failed (network, server busy) are asked again the next time the track plays. Over `MAX_FILES`
+//!   the "not found" entries go first.
 //! - Lines timed only as a whole get estimated word times (`estimate`, `[lyrics] estimate_words`), and
 //!   every time is moved by `[lyrics] offset_ms`. Both are applied to the lines kept from the source,
 //!   so a change in the settings window shows at once (`republish`).
@@ -108,8 +114,11 @@ const KEEP_FILES: usize = 300;
 /// A lookup starts once the track's title, artist and duration stayed put this long (they change one
 /// after the other at a track change).
 const SETTLE: Duration = Duration::from_millis(500);
-/// A duration that moves by more than this (seconds) for the same track is asked again.
-const DURATION_CHANGE: f64 = 2.0;
+/// A source answering with a server error (5xx) is asked once more after this long.
+const RETRY_WAIT: Duration = Duration::from_secs(1);
+/// The first lines wait this long for a source ranked above their own that has not answered yet, so the
+/// page builds its box once instead of at each upgrade.
+const SHOW_HOLD: Duration = Duration::from_millis(300);
 /// Once lines are shown, the translation waits at most this long for a better source.
 const UPGRADE_WAIT: Duration = Duration::from_millis(2500);
 
@@ -249,8 +258,8 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
         let agent = agent();
         // Every ask takes the next number; an ask whose number is no longer the last is stale.
         let generation = Arc::new(AtomicU64::new(0));
-        // The track shown (key, title, artist) and the duration it was asked with.
-        let mut current = (String::new(), String::new(), String::new());
+        // The track shown (`track_key`) and the duration it was asked with.
+        let mut current = String::new();
         let mut asked: Option<f64> = None;
         loop {
             let state = match rx.blocking_recv() {
@@ -259,9 +268,10 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
                 Err(RecvError::Closed) => break,
             };
             let track = &state.track;
-            // At a track change the title, the video id and the duration arrive one after the other.
-            let ident = (track_key(track), track.title.clone(), track.artist.clone());
-            if ident != current {
+            // At a track change the title, the artist and the duration arrive one after the other. The
+            // video id is not part of it: it comes and goes with the page, not with the song.
+            let key = track_key(track);
+            if key != current {
                 crate::diag::log(
                     "lyrics",
                     format_args!(
@@ -269,24 +279,32 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
                         track.title, track.artist, track.id, track.duration
                     ),
                 );
-                current = ident;
+                current = key;
                 asked = None;
                 generation.fetch_add(1, Ordering::SeqCst);
                 *app.state::<Lyrics>().found.lock().unwrap() = None;
                 publish(&app);
             }
-            // The duration arrives after the title; one that moves (an ad's or the previous track's
-            // came first) is asked again.
-            if track.duration <= 0.0 || asked.is_some_and(|d| (d - track.duration).abs() <= DURATION_CHANGE) {
+            // The duration arrives after the title; one that is far from the one asked (an ad's or the
+            // previous track's came first) is asked again, unless lines are already shown for the track.
+            if track.duration <= 0.0 {
                 continue;
             }
             if let Some(d) = asked {
-                crate::diag::log("lyrics", format_args!("duration {d:.1} -> {:.1} s: asked again", track.duration));
+                if (d - track.duration).abs() <= MAX_DURATION_GAP
+                    || app.state::<Lyrics>().found.lock().unwrap().is_some()
+                {
+                    continue;
+                }
+                crate::diag::log(
+                    "lyrics",
+                    format_args!("duration {d:.1} -> {:.1} s: asked again for {:?}", track.duration, track.title),
+                );
             }
             asked = Some(track.duration);
             let mine = generation.fetch_add(1, Ordering::SeqCst) + 1;
             let (app, agent, dir, generation, track, key) =
-                (app.clone(), agent.clone(), dir.clone(), generation.clone(), track.clone(), current.0.clone());
+                (app.clone(), agent.clone(), dir.clone(), generation.clone(), plain(track), current.clone());
             std::thread::spawn(move || {
                 let live = || generation.load(Ordering::SeqCst) == mine;
                 std::thread::sleep(SETTLE);
@@ -561,8 +579,21 @@ fn name(id: &str) -> &'static str {
     PROVIDERS.iter().find(|(p, _)| *p == id).map_or("LRCLIB", |(_, n)| n)
 }
 
+/// The song's identity for lyrics: title and artist, like the player's own `Event::Track`. The video id
+/// is left out because it is missing while the page is not the player's.
 pub fn track_key(t: &Track) -> String {
-    t.id.clone().unwrap_or_else(|| format!("{}\n{}", t.title, t.artist))
+    format!("{}\n{}", t.title, t.artist)
+}
+
+/// The track as the sources should see it: without invisible format characters (a word joiner in front of
+/// a title made two sources miss it).
+fn plain(t: &Track) -> Track {
+    let clean = |s: &str| s.chars().filter(|c| !is_invisible(*c)).collect::<String>().trim().to_owned();
+    Track { title: clean(&t.title), artist: clean(&t.artist), album: clean(&t.album), ..t.clone() }
+}
+
+fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{AD}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}')
 }
 
 /// Finds the synced lines of a track and hands them to `show` with their source's name, from the cache
@@ -572,7 +603,7 @@ fn lookup(
     agent: &ureq::Agent,
     dir: &Path,
     track: &Track,
-    providers: &[&'static str],
+    all: &[&'static str],
     show: impl Fn(Lines, &'static str),
     settle: impl Fn(),
 ) {
@@ -581,21 +612,31 @@ fn lookup(
     // Cached lines older than `ENTRY_REV` are asked again for their line ends; they are shown only if no
     // source answers this time (offline).
     let mut stale: Option<(Lines, &'static str)> = None;
+    // The sources a cached "not found" already holds: only the others are asked.
+    let mut known: Vec<&'static str> = Vec::new();
     if let Some(entry) = read_entry(&file) {
         let source = if entry.source.is_empty() { "lrclib" } else { entry.source.as_str() };
-        let fresh = now().saturating_sub(entry.at) < NOT_FOUND_TTL && entry.tried == providers;
+        let in_time = now().saturating_sub(entry.at) < NOT_FOUND_TTL;
+        let fresh = in_time && entry.tried == all;
         let outdated = entry.rev < ENTRY_REV && entry.lines.as_deref().is_some_and(has_words);
         match entry.lines {
-            Some(lines) if outdated && providers.contains(&source) => stale = Some((lines, name(source))),
-            Some(lines) if providers.contains(&source) && (fresh || has_words(&lines)) => {
+            Some(lines) if outdated && all.contains(&source) => stale = Some((lines, name(source))),
+            Some(lines) if all.contains(&source) && (fresh || has_words(&lines)) => {
                 crate::diag::log("lyrics", format_args!("cache: {source}"));
                 show(lines, name(source));
                 return settle();
             }
-            None if fresh => return crate::diag::log("lyrics", "cache: no source has synced lyrics"),
+            None if in_time => {
+                known = all.iter().copied().filter(|p| entry.tried.iter().any(|t| t.as_str() == *p)).collect();
+                if known.len() == all.len() {
+                    return crate::diag::log("lyrics", "cache: no source has synced lyrics");
+                }
+            }
             _ => {}
         }
     }
+    let providers: Vec<&'static str> = all.iter().copied().filter(|p| !known.contains(p)).collect();
+    let providers = &providers[..];
     crate::diag::log(
         "lyrics",
         format_args!(
@@ -623,10 +664,23 @@ fn lookup(
     let mut deadline: Option<Instant> = None;
     let mut settled = false;
     let entry = |answers: &[Option<Result<Option<Lines>, String>>], shown: Option<usize>| {
-        let tried = providers.iter().zip(answers).filter(|(_, a)| matches!(a, Some(Ok(_)))).map(|(p, _)| p.to_string());
+        // The sources that answered, those of a cached "not found" included, in the list's order.
+        let tried = all.iter().filter(|p| {
+            known.contains(p)
+                || providers.iter().position(|q| q == *p).is_some_and(|i| matches!(answers[i], Some(Ok(_))))
+        });
+        let tried = tried.map(|p| p.to_string());
         let lines = shown.and_then(|b| lines_of(answers, b).cloned());
         let source = shown.map_or(String::new(), |b| providers[b].to_string());
         Entry { at: now(), rev: ENTRY_REV, lines, source, tried: tried.collect(), translations: Vec::new() }
+    };
+    let note = |rank: usize, ms: u128, answer: &Result<Option<Lines>, String>| match answer {
+        Ok(Some(l)) => crate::diag::log(
+            "lyrics",
+            format_args!("{}: {} lines, word times: {} ({ms} ms)", providers[rank], l.len(), has_words(l)),
+        ),
+        Ok(None) => crate::diag::log("lyrics", format_args!("{}: none ({ms} ms)", providers[rank])),
+        Err(e) => crate::diag::log("lyrics", format_args!("{}: {e} ({ms} ms)", providers[rank])),
     };
     loop {
         let next = match deadline.filter(|_| !settled) {
@@ -645,26 +699,31 @@ fn lookup(
             None => rx.recv().ok(),
         };
         let Some((rank, ms, answer)) = next else { break };
-        match &answer {
-            Ok(Some(l)) => crate::diag::log(
-                "lyrics",
-                format_args!("{}: {} lines, word times: {} ({ms} ms)", providers[rank], l.len(), has_words(l)),
-            ),
-            Ok(None) => crate::diag::log("lyrics", format_args!("{}: none ({ms} ms)", providers[rank])),
-            Err(e) => crate::diag::log("lyrics", format_args!("{}: {e} ({ms} ms)", providers[rank])),
-        }
+        note(rank, ms, &answer);
         answers[rank] = Some(answer);
-        let Some(best) = best(&answers) else { continue };
-        if shown != Some(best) {
-            shown = Some(best);
+        let Some(mut top) = best(&answers) else { continue };
+        if shown.is_none() {
+            // Lines from a source with a better one still out: give it a moment, so the lines change once.
+            let until = Instant::now() + SHOW_HOLD;
+            while answers[..top].iter().any(Option::is_none) {
+                let Ok((rank, ms, answer)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) else {
+                    break;
+                };
+                note(rank, ms, &answer);
+                answers[rank] = Some(answer);
+                top = best(&answers).unwrap_or(top);
+            }
+        }
+        if shown != Some(top) {
+            shown = Some(top);
             deadline.get_or_insert_with(|| Instant::now() + UPGRADE_WAIT);
-            show(lines_of(&answers, best).expect("best has lines").clone(), name(providers[best]));
+            show(lines_of(&answers, top).expect("top has lines").clone(), name(providers[top]));
             if settled {
                 settle();
             }
         }
         // Final once no source before it could still answer with word times.
-        if answers[..best].iter().all(Option::is_some) && has_words(lines_of(&answers, best).expect("best")) {
+        if answers[..top].iter().all(Option::is_some) && has_words(lines_of(&answers, top).expect("top")) {
             break;
         }
     }
@@ -708,12 +767,20 @@ fn has_words(lines: &[Line]) -> bool {
     lines.iter().any(|l| !l.words.is_empty())
 }
 
+/// One source's answer; a server error (5xx) is asked once more after `RETRY_WAIT`.
 fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
-    match provider {
+    let once = || match provider {
         "lrclib" => lrclib(agent, track, duration),
         "betterlyrics" => better_lyrics(agent, track, duration),
         "unison" => unison(agent, track, duration),
         _ => lrcmux(agent, track, duration),
+    };
+    match once() {
+        Err(e) if e.contains("http status: 5") => {
+            std::thread::sleep(RETRY_WAIT);
+            once()
+        }
+        answer => answer,
     }
 }
 
@@ -955,8 +1022,10 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
+/// The album is not part of the name: it arrives late or still holds the previous track's, and the
+/// duration already tells recordings apart.
 fn cache_file(dir: &Path, track: &Track, duration: u32) -> PathBuf {
-    let text = format!("{}\0{}\0{}\0{duration}", track.title, track.artist, track.album).to_lowercase();
+    let text = format!("{}\0{}\0{duration}", track.title, track.artist).to_lowercase();
     dir.join(format!("{:x}.json", md5::compute(text)))
 }
 
@@ -978,7 +1047,7 @@ fn write_entry(file: &Path, entry: &Entry) {
     prune(dir);
 }
 
-/// Keeps the cache small: over `MAX_FILES`, the oldest go.
+/// Keeps the cache small: over `MAX_FILES`, the "not found" entries go first, then the oldest.
 fn prune(dir: &Path) {
     let Ok(read) = std::fs::read_dir(dir) else { return };
     let mut files: Vec<_> =
@@ -986,8 +1055,10 @@ fn prune(dir: &Path) {
     if files.len() <= MAX_FILES {
         return;
     }
+    let mut files: Vec<_> =
+        files.drain(..).map(|(at, path)| (read_entry(&path).is_some_and(|e| e.lines.is_some()), at, path)).collect();
     files.sort();
-    for (_, path) in &files[..files.len() - KEEP_FILES] {
+    for (_, _, path) in &files[..files.len() - KEEP_FILES] {
         let _ = std::fs::remove_file(path);
     }
 }

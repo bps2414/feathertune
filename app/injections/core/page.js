@@ -87,12 +87,35 @@ const volumeOf = (video) => {
   return { volume: Math.max(0, Math.min(100, Math.round(volume))), muted };
 };
 
+// The playing video's id: the player's (the URL only has `v=` on the player page), else the URL's.
+const videoId = () => {
+  let id = null;
+  try {
+    id = document.querySelector(SELECTORS.player)?.getVideoData?.()?.video_id;
+  } catch {}
+  return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : new URLSearchParams(location.search).get('v');
+};
+
+// The track's length: the player's. While the player has none (between tracks) it is 0 (unknown) and not
+// the <video>'s, which in a gapless queue counts the tracks appended after it. Without the player's API
+// (the site changed) the <video>'s is all there is.
+const lengthOf = (video) => {
+  try {
+    const p = document.querySelector(SELECTORS.player);
+    if (typeof p?.getDuration === 'function') {
+      const d = p.getDuration();
+      return Number.isFinite(d) && d > 0 ? d : 0;
+    }
+  } catch {}
+  return video.duration;
+};
+
 // While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
 const read = (video) => {
   const m = navigator.mediaSession?.metadata;
   if (!m || !m.title) return null;
   const art = m.artwork?.length ? m.artwork[m.artwork.length - 1].src : null;
-  const id = new URLSearchParams(location.search).get('v');
+  const id = videoId();
   const num = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : 0);
   return {
     ...volumeOf(video),
@@ -102,7 +125,7 @@ const read = (video) => {
     artist: m.artist || '',
     album: m.album || '',
     artwork: art,
-    duration: adShowing() ? 0 : num(feathertune.clock.duration(video)),
+    duration: adShowing() ? 0 : num(lengthOf(video)),
     position: num(feathertune.clock.time(video)),
     paused: video.paused,
   };

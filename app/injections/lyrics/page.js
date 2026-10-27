@@ -20,6 +20,10 @@
 // into the tab renderer showing the Lyrics page (there can be more than one, e.g. with an album page open), checked again when a
 // `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
 // left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
+// Also from Rust: a word `[ms, text, "#rrggbb"]` is named after a color and glows in it (lyric_colors);
+// `voices` (0 first singer, 1 second, 2 group, one per line) lay a duet out; `look` is { size, align,
+// glow, effects } from the settings. With `effects` (lyric_effects), the intro and breaks of at least
+// GAP_MS show dots that fill up over the break (Web Animations on the song's clock).
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const PLAYER_PAGE = 'ytmusic-player-page';
@@ -27,6 +31,10 @@ const TAB_BUTTON = 'tp-yt-paper-tab';
 const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MAX_TRANSLATION_CHARS = 600;
+const HEX = /^#[0-9a-f]{6}$/i;
+const LOOKS = { size: ['small', 'medium', 'large'], align: ['left', 'center'], glow: ['off', 'normal', 'strong'] };
+// A break this long (the intro, the time between a line's end and the next one) shows its dots.
+const GAP_MS = 4000;
 const MANUAL_SCROLL_MS = 4000;
 // Lines and words change this much before their time.
 const LEAD_MS = 250;
@@ -74,7 +82,8 @@ let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at m
 let radii = null; // per sample from `sampleStart`, half the averaging window in samples; null: no fast part
 let sampleStart = 0;
 let smooth = null; // the averaged curve at those samples, built when needed from the measured lines
-let meta = { credit: '', estimated: false };
+let meta = { credit: '', estimated: false, look: null };
+let dots = []; // per line: the dots of a break (or null), and their animations while it is lit
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let spans = []; // per line: { main: [span], bg: [span] }, the word elements
@@ -144,7 +153,15 @@ const disableTab = () => {
 const songMs = (video) => feathertune.clock.time(video) * 1000 + LEAD_MS;
 
 const timed = (l) => Array.isArray(l) && Number.isFinite(l[0]) && l[0] >= 0 && typeof l[1] === 'string';
-const wordList = (w) => w === undefined || w === null || (Array.isArray(w) && w.length <= MAX_WORDS && w.every(timed));
+const word = (w) => timed(w) && (w[2] === undefined || (typeof w[2] === 'string' && HEX.test(w[2])));
+const wordList = (w) => w === undefined || w === null || (Array.isArray(w) && w.length <= MAX_WORDS && w.every(word));
+const perLine = (list, data, ok) => list === undefined || (Array.isArray(list) && list.length === data.lines.length && list.every(ok));
+const looks = (look) =>
+  look === undefined ||
+  (!!look &&
+    typeof look === 'object' &&
+    Object.entries(LOOKS).every(([k, allowed]) => allowed.includes(look[k])) &&
+    typeof look.effects === 'boolean');
 
 const valid = (data) =>
   !!data &&
@@ -158,10 +175,9 @@ const valid = (data) =>
       (l[3] === undefined || (Number.isFinite(l[3]) && l[3] >= 0)) &&
       wordList(l[4]),
   ) &&
-  (data.translation === undefined ||
-    (Array.isArray(data.translation) &&
-      data.translation.length === data.lines.length &&
-      data.translation.every((t) => t === null || (typeof t === 'string' && t.length <= MAX_TRANSLATION_CHARS))));
+  perLine(data.translation, data, (t) => t === null || (typeof t === 'string' && t.length <= MAX_TRANSLATION_CHARS)) &&
+  perLine(data.voices, data, (v) => v === 0 || v === 1 || v === 2) &&
+  looks(data.look);
 
 const clear = () => {
   lines = null;
@@ -174,6 +190,8 @@ const clear = () => {
   sungBg = [];
   spans = [];
   items = [];
+  for (const d of dots) for (const a of d?.anims ?? []) a.cancel();
+  dots = [];
   centers = null;
   clearTimeout(timer);
   timer = 0;
@@ -194,6 +212,9 @@ const build = () => {
   box = document.createElement('div');
   box.id = 'feathertune-lyrics';
   box.classList.toggle('ft-estimated', meta.estimated);
+  const look = meta.look ?? { size: 'medium', align: 'left', glow: 'normal', effects: false };
+  box.classList.add(`ft-size-${look.size}`, `ft-align-${look.align}`, `ft-glow-${look.glow}`);
+  box.classList.toggle('ft-effects', look.effects);
   // The pointer's hover is not updated under content the compositor moves, so while the box glides a line
   // shows it only while the pointer moves (style.css); a still pointer would leave it on a line gliding away.
   const point = () => {
@@ -214,19 +235,27 @@ const build = () => {
     sync(video, true);
   });
   spans = [];
+  dots = lines.map(() => null);
   items = lines.map((l, i) => {
     const el = document.createElement('p');
     el.className = l.text ? 'ft-line' : 'ft-line ft-gap';
+    if (l.voice) el.classList.add(`ft-v${l.voice}`);
     // The glow is a copy of the text on a layer of its own (style.css).
     el.dataset.text = l.text;
     const own = { main: [], bg: [] };
-    // Each word fades in over a share of its own length; the last one ends with the line.
+    // Each word fades in over a share of its own length; the last one ends with the line. A word named
+    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css).
     const wordSpans = (parent, words) =>
       words.map((w, j) => {
         const span = document.createElement('span');
         span.textContent = w.text;
         const end = words[j + 1]?.ms ?? ends[i];
         if (end > w.ms) span.style.setProperty('--ft-word', `${Math.round((end - w.ms) * WORD_FADE)}ms`);
+        if (w.color) {
+          span.classList.add('ft-hue');
+          span.style.setProperty('--ft-hue', w.color);
+          span.dataset.text = w.text.trim();
+        }
         parent.append(span);
         return span;
       });
@@ -234,7 +263,22 @@ const build = () => {
       el.classList.add('ft-words');
       own.main = wordSpans(el, l.words);
     } else {
-      el.textContent = l.text;
+      el.append(l.text);
+    }
+    if (!l.text && look.effects && ends[i] - l.ms >= GAP_MS) {
+      const holder = document.createElement('span');
+      holder.className = 'ft-dots';
+      const list = [0, 1, 2].map(() => holder.appendChild(document.createElement('i')));
+      el.append(holder);
+      dots[i] = { list, anims: null };
+    }
+    // The line's time, shown while the pointer is over it (style.css).
+    if (l.text) {
+      const time = document.createElement('span');
+      time.className = 'ft-time';
+      const s = Math.floor(l.ms / 1000);
+      time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      el.append(time);
     }
     if (l.bg) {
       const bg = document.createElement('span');
@@ -309,10 +353,10 @@ const indexAt = (list, ms) => {
 };
 
 // When line `i` stops being sung: its own end, else when the next one starts (never before its last word).
-const lineEnd = (i) => {
-  const l = lines[i];
+const lineEnd = (i, list = lines) => {
+  const l = list[i];
   const lastWord = Math.max(l.words?.at(-1)?.ms ?? 0, l.bg?.at(-1)?.ms ?? 0);
-  const end = l.end > l.ms ? l.end : (lines[i + 1]?.ms ?? l.ms + 4000);
+  const end = l.end > l.ms ? l.end : (list[i + 1]?.ms ?? l.ms + 4000);
   return Math.max(end, lastWord + 100);
 };
 
@@ -350,7 +394,29 @@ const activeAt = (ms, index) => {
   return out;
 };
 
+// The dots of break `i` fill one after another over it, as Web Animations on the song's clock: started when
+// the break lights, set to the song's time (and paused with it) at each `sync`, cancelled when it dims.
+const DOT_FRAMES = [
+  { opacity: 0.25, transform: 'scale(0.7)' },
+  { opacity: 1, transform: 'scale(1)' },
+];
+const dotsAt = (i, video, ms) => {
+  const d = dots[i];
+  if (!d) return;
+  const third = (ends[i] - lines[i].ms) / 3;
+  d.anims ??= d.list.map((dot, k) => dot.animate(DOT_FRAMES, { duration: third, delay: k * third, fill: 'both' }));
+  const running = !video.paused && video.playbackRate > 0;
+  for (const a of d.anims) {
+    if (running && a.playbackRate !== video.playbackRate) a.playbackRate = video.playbackRate;
+    if (running && a.playState === 'paused') a.play();
+    if (!running && a.playState === 'running') a.pause();
+    if (Math.abs((a.currentTime ?? 0) - (ms - lines[i].ms)) > DRIFT_MS) a.currentTime = ms - lines[i].ms;
+  }
+};
+
 const dim = (i) => {
+  for (const a of dots[i]?.anims ?? []) a.cancel();
+  if (dots[i]) dots[i].anims = null;
   items[i].classList.remove('ft-current');
   toggleWords(spans[i].main, sungMain[i], -1);
   toggleWords(spans[i].bg, sungBg[i], -1);
@@ -413,7 +479,10 @@ const sync = (video, force) => {
   const ms = songMs(video);
   const index = indexAt(lines, ms);
   light(activeAt(ms, index));
-  for (const i of active) singWords(i, ms);
+  for (const i of active) {
+    singWords(i, ms);
+    dotsAt(i, video, ms);
+  }
   if (index === current && !force) {
     arm(video, ms, false);
     return;
@@ -757,8 +826,10 @@ feathertune.lyrics = Object.freeze({
     meta = {
       credit: typeof data.credit === 'string' ? data.credit.slice(0, 160) : '',
       estimated: data.estimated === true,
+      look: data.look ?? null,
     };
-    const toWords = (words) => (words?.length ? words.map(([ms, text]) => ({ ms, text })) : undefined);
+    const toWords = (words) =>
+      words?.length ? words.map(([ms, text, color]) => ({ ms, text, color: color ?? null })) : undefined;
     lines = data.lines.map(([ms, text, words, end, bg], i) => ({
       ms,
       text,
@@ -766,7 +837,20 @@ feathertune.lyrics = Object.freeze({
       end: end ?? 0,
       bg: toWords(bg),
       translation: data.translation?.[i] ?? null,
+      voice: data.voices?.[i] ?? 0,
     }));
+    // With the effects, the intro and each break of at least GAP_MS get an empty line of their own, for
+    // their dots (the view rests on it meanwhile).
+    if (meta.look?.effects) {
+      const out = [];
+      lines.forEach((l, i) => {
+        const from = i === 0 ? 0 : lineEnd(i - 1, lines);
+        if (l.text && l.ms - from >= GAP_MS && (i === 0 || lines[i - 1].text))
+          out.push({ ms: from, text: '', end: l.ms, voice: 0, translation: null });
+        out.push(l);
+      });
+      lines = out;
+    }
     ends = lines.map((_, i) => lineEnd(i));
     buildKeys();
     refresh();

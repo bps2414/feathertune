@@ -106,7 +106,13 @@ fn look(art: &Art) -> (Theme, Value) {
     // Whichever of white and black reads better on the accent.
     let on_accent = if 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 { 0xffffff } else { 0x000000 };
     let hex = |c: u32| format!("#{c:06x}");
-    let page = json!({ "accent": hex(accent), "ink": hex(ink), "onAccent": hex(on_accent) });
+    // The glows, lifted toward the accent's lightness for the lyrics' glow (lyrics/style.css).
+    let page = json!({
+        "accent": hex(accent),
+        "ink": hex(ink),
+        "onAccent": hex(on_accent),
+        "glows": glows.map(|g| { let (h, s, l) = to_hsl(g); hex(from_hsl(h, s, l.max(lightness))) }),
+    });
     (Theme { ink, glows }, page)
 }
 

@@ -46,7 +46,12 @@ struct Text {
     words: bool,
     /// UTF-16 length of the sung words.
     sung: u32,
-    lit: Option<(u32, IDWriteTextLayout)>,
+    /// Words named after a color (plugin `lyric_colors`): UTF-16 start, length and color, lit in it.
+    hues: Vec<(u32, u32, u32)>,
+    /// Made with `lyric_colors` on (a switch makes it again).
+    colored: bool,
+    /// The lit copy and the brushes of its colored words.
+    lit: Option<(u32, IDWriteTextLayout, Vec<ID2D1SolidColorBrush>)>,
 }
 
 /// What is shown: the track, the current line (-1: before the first) and its sung word.
@@ -124,7 +129,7 @@ impl View {
         View { current_format, next_format, width, current_height, next_height, lit: None, shown: None, old: None }
     }
 
-    fn text(&self, line: &Line, word: isize) -> Option<Text> {
+    fn text(&self, line: &Line, word: isize, colors: bool) -> Option<Text> {
         if line.text.is_empty() {
             return None;
         }
@@ -132,12 +137,23 @@ impl View {
         let words = !line.words.is_empty();
         let mut m = DWRITE_TEXT_METRICS::default();
         let _ = unsafe { plain.GetMetrics(&mut m) };
+        let mut hues = Vec::new();
+        let mut at = 0u32;
+        for (_, w) in line.words.iter().filter(|_| colors) {
+            let len = w.encode_utf16().count() as u32;
+            if let Some(c) = crate::lyrics::word_color(w) {
+                hues.push((at, len, c));
+            }
+            at += len;
+        }
         Some(Text {
             text: line.text.clone(),
             plain,
             offset: m.top,
             words,
             sung: if words { sung_len(line, word) } else { 0 },
+            hues,
+            colored: colors,
             lit: None,
         })
     }
@@ -151,6 +167,7 @@ impl View {
     /// cleared, unless `paused_too`.
     pub fn update(&mut self, app: &AppHandle, paused_too: bool) -> Update {
         let wanted = wanted(app);
+        let colors = app.state::<crate::settings::Live>().plugin("lyric_colors");
         let playing = wanted.as_ref().is_some_and(|(s, _)| !s.paused);
         let mut next_ms = None;
         if let Some((state, synced)) = wanted.as_ref().filter(|_| playing || paused_too) {
@@ -160,7 +177,9 @@ impl View {
             if playing {
                 next_ms = next_change(lines, index, ms).map(|at| at - ms);
             }
-            let same_line = self.shown.as_ref().is_some_and(|s| s.key == synced.key && s.index == index);
+            let same_line = self.shown.as_ref().is_some_and(|s| {
+                s.key == synced.key && s.index == index && s.current.as_ref().is_none_or(|t| t.colored == colors)
+            });
             if !same_line {
                 let line = usize::try_from(index).ok().map(|i| &lines[i]);
                 let translated = synced.translated.is_some();
@@ -173,7 +192,7 @@ impl View {
                     key: synced.key.clone(),
                     index,
                     word,
-                    current: line.and_then(|l| self.text(l, word)),
+                    current: line.and_then(|l| self.text(l, word, colors)),
                     next: self.next_layout(next),
                     translated,
                 };
@@ -283,13 +302,16 @@ fn paint(c: &gfx::Canvas, s: &mut Shown, style: &Style, motion: Motion) {
             // Dim, then the sung words over it (the rest of the lit copy is drawn transparent).
             c.layout(&text.plain, origin, with_alpha(style.color, 0.5 * alpha));
             if let Some(brush) = style.lit.filter(|_| text.sung > 0) {
-                if text.lit.as_ref().is_none_or(|(g, _)| *g != c.generation) {
-                    text.lit = lit(text, style.format, brush).map(|l| (c.generation, l));
+                if text.lit.as_ref().is_none_or(|(g, _, _)| *g != c.generation) {
+                    text.lit = lit(c, text, style.format, brush).map(|(l, hues)| (c.generation, l, hues));
                 }
-                if let Some((_, layout)) = &text.lit {
+                if let Some((_, layout, hues)) = &text.lit {
                     unsafe {
                         brush.SetColor(&style.color);
                         brush.SetOpacity(alpha);
+                        for hue in hues {
+                            hue.SetOpacity(alpha);
+                        }
                     }
                     c.layout(layout, origin, rgba(0, 0.0));
                 }
@@ -314,10 +336,29 @@ fn outlined(c: &gfx::Canvas, layout: &IDWriteTextLayout, origin: Vector2, alpha:
     c.layout(layout, point(origin.X, origin.Y + 2.5), rgba(0x000000, 0.35 * alpha));
 }
 
-/// A copy of the line's layout with the sung words in `brush`.
-fn lit(text: &Text, format: &IDWriteTextFormat, brush: &ID2D1SolidColorBrush) -> Option<IDWriteTextLayout> {
+/// A copy of the line's layout with the sung words in `brush`, and a sung word named after a color in
+/// that color (lightened a little, so it reads like the rest), with the brushes made for those.
+fn lit(
+    c: &gfx::Canvas,
+    text: &Text,
+    format: &IDWriteTextFormat,
+    brush: &ID2D1SolidColorBrush,
+) -> Option<(IDWriteTextLayout, Vec<ID2D1SolidColorBrush>)> {
     let (width, height) = unsafe { (text.plain.GetMaxWidth(), text.plain.GetMaxHeight()) };
     let layout = gfx::text_layout(&text.text, format, width, height).ok()?;
     unsafe { layout.SetDrawingEffect(brush, DWRITE_TEXT_RANGE { startPosition: 0, length: text.sung }).ok()? };
-    Some(layout)
+    let mut hues = Vec::new();
+    for &(start, len, color) in text.hues.iter().filter(|(start, len, _)| start + len <= text.sung) {
+        let mix = |shift: u32| {
+            let ch = (color >> shift) & 0xff;
+            (ch + (0xff - ch) * 35 / 100) << shift
+        };
+        if let Some(hue) = c.solid(gfx::rgb(mix(16) | mix(8) | mix(0))) {
+            unsafe {
+                let _ = layout.SetDrawingEffect(&hue, DWRITE_TEXT_RANGE { startPosition: start, length: len });
+            }
+            hues.push(hue);
+        }
+    }
+    Some((layout, hues))
 }

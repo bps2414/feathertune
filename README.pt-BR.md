@@ -82,6 +82,8 @@ animated_title_bar = true     # cores derivando devagar; pausa escondida, minimi
 album_color = true            # barra de título, mini player e site com as cores da capa (uma vez por faixa)
 synced_lyrics = true          # letras sincronizadas na aba Letra, rolando no ritmo; algumas requisições por faixa nova, com cache
 lyrics_translation = true     # uma tradução embaixo de cada linha da letra; uma requisição por faixa nova, com cache
+lyric_colors = true           # uma palavra cantada que é nome de cor (red, azul, verde...) brilha nessa cor
+lyric_effects = true          # pontinhos que se enchem na introdução e nas pausas longas da letra
 ambient_mode = true           # capa desfocada e brilhante atrás do site
 taskbar_controls = true       # botões na miniatura da barra de tarefas, progresso no botão da barra
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
@@ -97,6 +99,7 @@ compressor = true
 crossfade = false             # experimental (desligado por padrão); também os mixes e a voz de transição
 track_analysis = false        # experimental; tempo, tom e contorno de volume em audio-facts/ no perfil
 skip_silence = false          # experimental
+lyric_pulse = false           # experimental; o brilho da linha cantada pulsa na batida (precisa de track_analysis)
 remote = false                # experimental; controle remoto: abre uma porta TCP só para celulares pareados (veja [remote])
 visualizer = true
 
@@ -120,6 +123,10 @@ providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # fontes de letras; 
 estimate_words = true        # estima o tempo das palavras quando a fonte só marca linhas inteiras
 offset_ms = 0                # move a letra no tempo; positivo: mais tarde
 translate_to = "auto"        # idioma da tradução: auto (idioma do Windows), off, pt, en, es, fr, de, it, ja, ko
+romanize = true              # a romanização da fonte (ex.: japonês, coreano) embaixo da linha
+size = "medium"              # texto da aba Letra: small, medium, large
+align = "left"               # left (num dueto, a segunda voz à direita) ou center
+glow = "normal"              # off (mais leve), normal, strong
 
 [audio]                      # a aba Áudio; os mixes ficam em mixes/<playlist>.json no perfil (aba Experimental)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom

@@ -135,7 +135,17 @@ pub struct LyricsSettings {
     pub offset_ms: i32,
     /// "auto" (Windows' language), "off" or a code of `lyrics::TRANSLATION_LANGUAGES`.
     pub translate_to: String,
+    /// Show the source's romanization (Latin letters) under lines in other scripts.
+    pub romanize: bool,
+    /// The Lyrics tab's look: `LYRICS_SIZES`, `LYRICS_ALIGNS`, `LYRICS_GLOWS`.
+    pub size: String,
+    pub align: String,
+    pub glow: String,
 }
+
+pub const LYRICS_SIZES: &[&str] = &["small", "medium", "large"];
+pub const LYRICS_ALIGNS: &[&str] = &["left", "center"];
+pub const LYRICS_GLOWS: &[&str] = &["off", "normal", "strong"];
 
 impl Default for LyricsSettings {
     fn default() -> Self {
@@ -144,6 +154,10 @@ impl Default for LyricsSettings {
             estimate_words: true,
             offset_ms: 0,
             translate_to: "auto".into(),
+            romanize: true,
+            size: "medium".into(),
+            align: "left".into(),
+            glow: "normal".into(),
         }
     }
 }

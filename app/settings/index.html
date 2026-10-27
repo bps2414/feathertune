@@ -81,7 +81,36 @@
           <input type="checkbox" class="switch" data-key="lyrics.estimate_words" aria-label="Estimate word timing">
         </div>
         <label>Timing offset, ms (positive: later) <input data-key="lyrics.offset_ms" type="number" step="50" min="-5000" max="5000"></label>
+        <div class="option">
+          <div class="body">
+            <div class="name small">Romanization</div>
+            <div class="hint">Lines in other scripts (Japanese, Korean, Chinese...) show the source's Latin-letter version under them, when it has one.</div>
+          </div>
+          <input type="checkbox" class="switch" data-key="lyrics.romanize" aria-label="Romanization">
+        </div>
+        <label>Text size
+          <select data-key="lyrics.size">
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </label>
+        <label>Alignment
+          <select data-key="lyrics.align">
+            <option value="left">Left (duets: second singer on the right)</option>
+            <option value="center">Center</option>
+          </select>
+        </label>
+        <label>Glow
+          <select data-key="lyrics.glow">
+            <option value="off">Off (lightest)</option>
+            <option value="normal">Normal</option>
+            <option value="strong">Strong</option>
+          </select>
+        </label>
       </div>
+      <div class="card" data-plugin="lyric_colors"></div>
+      <div class="card" data-plugin="lyric_effects"></div>
       <div class="card" data-plugin="lyrics_translation">
         <label>Translate to
           <select data-key="lyrics.translate_to">
@@ -166,6 +195,7 @@
         <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded.</p>
       </div>
       <div class="card" data-plugin="track_analysis"></div>
+      <div class="card" data-plugin="lyric_pulse"></div>
       <div class="card" data-plugin="skip_silence"></div>
       <div class="card" data-plugin="remote">
         <div id="remote-box">

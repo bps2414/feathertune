@@ -185,3 +185,120 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 #feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-sung {
   transition: color min(0.45s, var(--ft-word, 0.45s)) ease;
 }
+
+/* A word named after a color (`--ft-hue`, lyric_colors) takes a tint of it when sung, and glows in it: a
+   copy of the word (`data-text`) behind it with the glow as its shadow, which only fades in (a layer of
+   its own while its line is sung, like the line's glow). */
+#feathertune-lyrics .ft-hue {
+  position: relative;
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-hue.ft-sung {
+  color: color-mix(in srgb, var(--ft-hue) 45%, #fff);
+}
+
+#feathertune-lyrics .ft-hue::after {
+  content: attr(data-text) / '';
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  color: transparent;
+  text-shadow:
+    0 0 18px var(--ft-hue),
+    0 0 36px color-mix(in srgb, var(--ft-hue) 60%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-hue::after {
+  will-change: opacity;
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-hue.ft-sung::after {
+  opacity: 1;
+  transition: opacity min(0.4s, var(--ft-word, 0.4s)) ease;
+}
+
+/* The look from the settings: text size, alignment and glow. */
+#feathertune-lyrics.ft-size-small .ft-line {
+  font-size: clamp(18px, 1.8vw, 30px);
+}
+
+#feathertune-lyrics.ft-size-large .ft-line {
+  font-size: clamp(30px, 3vw, 52px);
+}
+
+#feathertune-lyrics.ft-align-center .ft-line {
+  text-align: center;
+  transform-origin: center;
+}
+
+#feathertune-lyrics.ft-glow-off .ft-line::before,
+#feathertune-lyrics.ft-glow-off .ft-hue::after {
+  display: none;
+}
+
+#feathertune-lyrics.ft-glow-strong .ft-line::before {
+  text-shadow:
+    0 0 20px color-mix(in srgb, var(--feathertune-accent, #fff) 80%, transparent),
+    0 0 48px color-mix(in srgb, var(--feathertune-accent, #fff) 50%, transparent);
+}
+
+/* A duet (left alignment only): the second singer's lines on the right, the group's in the middle. */
+#feathertune-lyrics.ft-align-left .ft-line.ft-v1 {
+  text-align: right;
+  transform-origin: right center;
+}
+
+#feathertune-lyrics.ft-align-left .ft-line.ft-v2 {
+  text-align: center;
+  transform-origin: center;
+}
+
+/* The dots of a break (lyric_effects): three that fill one after another over it (page.js animates their
+   opacity and scale only). */
+#feathertune-lyrics .ft-dots {
+  display: inline-flex;
+  gap: 0.28em;
+  vertical-align: middle;
+}
+
+#feathertune-lyrics .ft-dots i {
+  width: 0.32em;
+  height: 0.32em;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.25;
+  transform: scale(0.7);
+}
+
+#feathertune-lyrics .ft-line.ft-current .ft-dots i {
+  will-change: transform, opacity;
+}
+
+/* The line's time, at its right while the pointer is over it (the same rule as the line's own hover). */
+#feathertune-lyrics .ft-time {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 0;
+  pointer-events: none;
+}
+
+#feathertune-lyrics.ft-align-left .ft-line.ft-v1 .ft-time {
+  right: auto;
+  left: 0;
+}
+
+#feathertune-lyrics:not(.ft-gliding) .ft-line:hover .ft-time,
+#feathertune-lyrics.ft-pointing .ft-line:hover .ft-time {
+  opacity: 1;
+}

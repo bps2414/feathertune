@@ -107,7 +107,8 @@ const MAX_RESULTS: usize = 20;
 /// A cached "no synced lyrics" is asked again after this long.
 const NOT_FOUND_TTL: u64 = 7 * 24 * 3600;
 /// Entries with word times written before this are asked again once (line ends, background vocals).
-const ENTRY_REV: u32 = 1;
+/// 2: duet voices and romanization.
+const ENTRY_REV: u32 = 2;
 /// The cache holds at most this many files; over it, the oldest are removed down to `KEEP_FILES`.
 const MAX_FILES: usize = 400;
 const KEEP_FILES: usize = 300;
@@ -145,6 +146,12 @@ pub struct Line {
     /// The translation shown with the line (set when shown, never cached with the lines).
     #[serde(skip)]
     pub translation: Option<String>,
+    /// Who sings it in a duet (TTML `ttm:agent`): 0 the first singer, 1 the second, 2 a group.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub voice: u8,
+    /// The line in Latin letters, when the source has it (TTML `<transliteration>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub romanized: Option<String>,
 }
 
 /// The synced lines of the track `key` (`track_key`), as shown: offset, and with estimated word times
@@ -204,6 +211,10 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
+}
+
 /// A line's end when it is after its start, else 0 (unknown).
 fn end_after(end: u32, start: u32) -> u32 {
     if end > start { end } else { 0 }
@@ -211,14 +222,135 @@ fn end_after(end: u32, start: u32) -> u32 {
 
 impl Line {
     /// `[ms, text, words?, end?, bg?]` for the page (`null` words when only the later fields are there).
-    fn to_json(&self) -> Value {
-        let words = if self.words.is_empty() { Value::Null } else { json!(self.words) };
+    /// With `colors`, a word named after a color is `[ms, text, "#rrggbb"]` (`word_color`).
+    fn to_json(&self, colors: bool) -> Value {
+        let list = |words: &Words| -> Value {
+            words
+                .iter()
+                .map(|(ms, text)| match word_color(text).filter(|_| colors) {
+                    Some(c) => json!([ms, text, format!("#{c:06x}")]),
+                    None => json!([ms, text]),
+                })
+                .collect()
+        };
+        let words = if self.words.is_empty() { Value::Null } else { list(&self.words) };
         if self.end == 0 && self.bg.is_empty() {
             if self.words.is_empty() { json!([self.ms, self.text]) } else { json!([self.ms, self.text, words]) }
         } else {
-            json!([self.ms, self.text, words, self.end, self.bg])
+            json!([self.ms, self.text, words, self.end, list(&self.bg)])
         }
     }
+}
+
+/// Words named after a color, in English, Portuguese and Spanish (without accents, singular), and the
+/// color each one glows in on the dark page: bright enough to read as that color under a glow.
+const COLOR_WORDS: &[(&str, u32)] = &[
+    ("red", 0xff3b3b),
+    ("vermelho", 0xff3b3b),
+    ("vermelha", 0xff3b3b),
+    ("rojo", 0xff3b3b),
+    ("roja", 0xff3b3b),
+    ("crimson", 0xf0284a),
+    ("carmesim", 0xf0284a),
+    ("carmesi", 0xf0284a),
+    ("scarlet", 0xff3420),
+    ("escarlate", 0xff3420),
+    ("escarlata", 0xff3420),
+    ("ruby", 0xf0206a),
+    ("rubi", 0xf0206a),
+    ("orange", 0xff8a1f),
+    ("laranja", 0xff8a1f),
+    ("naranja", 0xff8a1f),
+    ("amber", 0xffb000),
+    ("ambar", 0xffb000),
+    ("yellow", 0xffe14a),
+    ("amarelo", 0xffe14a),
+    ("amarela", 0xffe14a),
+    ("amarillo", 0xffe14a),
+    ("amarilla", 0xffe14a),
+    ("gold", 0xffc83d),
+    ("golden", 0xffc83d),
+    ("ouro", 0xffc83d),
+    ("dourado", 0xffc83d),
+    ("dourada", 0xffc83d),
+    ("oro", 0xffc83d),
+    ("dorado", 0xffc83d),
+    ("dorada", 0xffc83d),
+    ("green", 0x3ddc63),
+    ("verde", 0x3ddc63),
+    ("emerald", 0x1fd17a),
+    ("esmeralda", 0x1fd17a),
+    ("jade", 0x2fd38a),
+    ("lime", 0xa6ff3d),
+    ("teal", 0x1fc7b6),
+    ("turquoise", 0x2fe0d0),
+    ("turquesa", 0x2fe0d0),
+    ("cyan", 0x33e6ff),
+    ("ciano", 0x33e6ff),
+    ("cian", 0x33e6ff),
+    ("aqua", 0x33e6ff),
+    ("celeste", 0x7fd4ff),
+    ("blue", 0x3d7bff),
+    ("azul", 0x3d7bff),
+    ("sapphire", 0x3f66ff),
+    ("safira", 0x3f66ff),
+    ("zafiro", 0x3f66ff),
+    ("indigo", 0x6a4cff),
+    ("anil", 0x6a4cff),
+    ("violet", 0xa35cff),
+    ("violeta", 0xa35cff),
+    ("purple", 0x9b4dff),
+    ("roxo", 0x9b4dff),
+    ("roxa", 0x9b4dff),
+    ("morado", 0x9b4dff),
+    ("morada", 0x9b4dff),
+    ("purpura", 0x9b4dff),
+    ("lilac", 0xc49bff),
+    ("lilas", 0xc49bff),
+    ("lila", 0xc49bff),
+    ("lavender", 0xc49bff),
+    ("lavanda", 0xc49bff),
+    ("magenta", 0xff3dd2),
+    ("pink", 0xff6fb5),
+    ("rosa", 0xff6fb5),
+    ("rosado", 0xff6fb5),
+    ("rosada", 0xff6fb5),
+    ("white", 0xffffff),
+    ("branco", 0xffffff),
+    ("branca", 0xffffff),
+    ("blanco", 0xffffff),
+    ("blanca", 0xffffff),
+    ("silver", 0xd8dde6),
+    ("prata", 0xd8dde6),
+    ("prateado", 0xd8dde6),
+    ("prateada", 0xd8dde6),
+    ("plata", 0xd8dde6),
+    ("plateado", 0xd8dde6),
+    ("plateada", 0xd8dde6),
+];
+
+/// The color of a sung word named after one (`COLOR_WORDS`), as `0xrrggbb`: case, accents, the
+/// punctuation around it and a plural (-s, -es) do not matter.
+pub fn word_color(word: &str) -> Option<u32> {
+    let folded: String = word
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            c => c,
+        })
+        .collect();
+    let find = |w: &str| COLOR_WORDS.iter().find(|(name, _)| *name == w).map(|(_, c)| *c);
+    find(&folded)
+        .or_else(|| folded.strip_suffix("es").and_then(find))
+        .or_else(|| folded.strip_suffix('s').and_then(find))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -519,10 +651,24 @@ pub fn set_page_paused(app: &AppHandle, paused: bool) {
 
 /// Applies the settings to the lines found and hands them to the page and the native views.
 fn publish(app: &AppHandle) {
-    let (estimate_words, offset, target) = {
+    let (estimate_words, offset, target, romanize, colors, look, pulse) = {
         let s = app.state::<Live>();
         let s = s.get();
-        (s.lyrics.estimate_words, s.lyrics.offset_ms, translation_target(&s))
+        let look = json!({
+            "size": s.lyrics.size,
+            "align": s.lyrics.align,
+            "glow": s.lyrics.glow,
+            "effects": s.plugin("lyric_effects"),
+        });
+        (
+            s.lyrics.estimate_words,
+            s.lyrics.offset_ms,
+            translation_target(&s),
+            s.lyrics.romanize,
+            s.plugin("lyric_colors"),
+            look,
+            s.plugin("lyric_pulse"),
+        )
     };
     let lyrics = app.state::<Lyrics>();
     let synced = lyrics.found.lock().unwrap().as_ref().map(|f| {
@@ -543,12 +689,24 @@ fn publish(app: &AppHandle) {
     });
     if lyrics.page.load(Ordering::Relaxed) && !lyrics.paused.load(Ordering::Relaxed) {
         let payload = synced.as_ref().map_or(Value::Null, |(id, s)| {
-            let lines: Vec<Value> = s.lines.iter().map(Line::to_json).collect();
+            let lines: Vec<Value> = s.lines.iter().map(|l| l.to_json(colors)).collect();
             let mut credit = crate::i18n::tf("Synced lyrics: {}", &[s.source]);
             if s.estimated {
                 credit = crate::i18n::tf("{} · word timing estimated", &[&credit]);
             }
-            let mut payload = json!({ "id": id, "lines": lines, "estimated": s.estimated });
+            let mut payload = json!({ "id": id, "lines": lines, "estimated": s.estimated, "look": look });
+            if s.lines.iter().any(|l| l.voice != 0) {
+                payload["voices"] = json!(s.lines.iter().map(|l| l.voice).collect::<Vec<_>>());
+            }
+            if romanize && s.lines.iter().any(|l| l.romanized.is_some()) {
+                payload["romanized"] = json!(s.lines.iter().map(|l| l.romanized.as_deref()).collect::<Vec<_>>());
+            }
+            // The glow pulses on the beat when the track was measured (track analysis).
+            let facts =
+                id.as_deref().filter(|_| pulse).and_then(|id| app.state::<crate::audio_facts::Store>().load(id));
+            if let Some((bpm, first)) = facts.and_then(|f| Some((f.bpm?, f.beat_offset_ms?))) {
+                payload["beat"] = json!({ "bpm": bpm, "first_ms": first });
+            }
             if let Some(source) = s.translated {
                 let translation: Vec<Option<&str>> = s.lines.iter().map(|l| l.translation.as_deref()).collect();
                 payload["translation"] = json!(translation);
@@ -1224,6 +1382,8 @@ fn parse_ttml(xml: &str) -> Lines {
     let mut lines: Lines = Vec::new();
     // The key of each line, for its translations.
     let mut keys: Vec<Option<&str>> = Vec::new();
+    // The singer of each line (`ttm:agent`).
+    let mut singers: Vec<Option<&str>> = Vec::new();
     let mut rest = xml;
     while let Some(i) = rest.find("<p ").or_else(|| rest.find("<p>")) {
         rest = &rest[i..];
@@ -1232,6 +1392,7 @@ fn parse_ttml(xml: &str) -> Lines {
         let begin = attr(rest, "begin").and_then(parse_clock);
         let p_end = attr(rest, "end").and_then(parse_clock).unwrap_or(0);
         let key = attr(rest, "itunes:key").or_else(|| attr(rest, "lrc:key"));
+        let singer = attr(rest, "ttm:agent");
         let inner = &rest[open_end + 1..close.max(open_end + 1)];
         rest = &rest[close + 4..];
         let Some(begin) = begin else { continue };
@@ -1298,9 +1459,34 @@ fn parse_ttml(xml: &str) -> Lines {
         if !text.is_empty() {
             lines.push(Line { ms: begin, text, words, end: end_after(last_end, begin), bg, ..Default::default() });
             keys.push(key);
+            singers.push(singer);
         }
         if lines.len() >= MAX_LINES {
             break;
+        }
+    }
+    voices(xml, &mut lines, &singers);
+    let mut transliterations = xml;
+    while let Some(i) = transliterations.find("<transliteration ") {
+        transliterations = &transliterations[i..];
+        let end = transliterations.find("</transliteration>").unwrap_or(transliterations.len());
+        let block = &transliterations[..end];
+        transliterations = &transliterations[end..];
+        let mut texts = block;
+        while let Some(j) = texts.find("<text ") {
+            texts = &texts[j..];
+            let Some(open_end) = texts.find('>') else { break };
+            let close = texts.find("</text>").unwrap_or(texts.len()).max(open_end + 1);
+            let key = attr(texts, "for");
+            let text = clean_text(&plain_text(&texts[open_end + 1..close]));
+            texts = &texts[close..];
+            if let Some(i) = key.and_then(|k| keys.iter().position(|l| *l == Some(k)))
+                && !text.is_empty()
+                && !text.eq_ignore_ascii_case(&lines[i].text)
+                && lines[i].romanized.is_none()
+            {
+                lines[i].romanized = Some(text);
+            }
         }
     }
     let mut languages = 0;
@@ -1333,6 +1519,29 @@ fn parse_ttml(xml: &str) -> Lines {
     }
     lines.sort_by_key(|l| l.ms);
     lines
+}
+
+/// Sets each line's `voice` from its singer (`singers`, one per line): the agents the head declares
+/// (`<ttm:agent type="person|group" xml:id>`) as 2 for a group, else 0 for the first person heard and 1
+/// for any other. One person, or none, leaves every line at 0.
+fn voices(xml: &str, lines: &mut [Line], singers: &[Option<&str>]) {
+    let mut groups = Vec::new();
+    let mut rest = xml;
+    while let Some(i) = rest.find("<ttm:agent ") {
+        rest = &rest[i..];
+        if let (Some(id), Some("group")) = (attr(rest, "xml:id"), attr(rest, "type")) {
+            groups.push(id);
+        }
+        rest = &rest[1..];
+    }
+    let first = singers.iter().flatten().find(|s| !groups.contains(s));
+    for (line, singer) in lines.iter_mut().zip(singers) {
+        line.voice = match singer {
+            Some(s) if groups.contains(s) => 2,
+            Some(s) if Some(s) != first => 1,
+            _ => 0,
+        };
+    }
 }
 
 /// The text of TTML markup without its tags and without background vocals.
@@ -1518,7 +1727,7 @@ mod tests {
         assert_eq!(lines[0].end, 5000);
         assert_eq!(lines[0].bg, vec![(2500, "oh ".to_owned()), (3000, "no".to_owned())]);
         assert_eq!((lines[1].text.as_str(), lines[1].words.len(), lines[1].bg.len()), ("only echo", 1, 0));
-        assert_eq!(lines[1].to_json()[3], 7000);
+        assert_eq!(lines[1].to_json(false)[3], 7000);
     }
 
     #[test]

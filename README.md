@@ -82,6 +82,8 @@ animated_title_bar = true     # slow color drift; pauses when hidden, minimized 
 album_color = true            # title bar, mini player and site take the cover's colors (once per track)
 synced_lyrics = true          # time-synced lyrics in the Lyrics tab, scrolling in time; a few requests per new track, cached
 lyrics_translation = true     # a translation under each lyric line; one request per new track, cached
+lyric_colors = true           # a sung word named after a color (red, azul, verde...) glows in that color
+lyric_effects = true          # dots that fill up over the intro and long breaks of the lyrics
 ambient_mode = true           # blurred, glowing cover behind the site
 taskbar_controls = true       # buttons on the taskbar thumbnail, progress on the taskbar button
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
@@ -97,6 +99,7 @@ compressor = true
 crossfade = false             # experimental (off by default); also the mixes and the transition voice
 track_analysis = false        # experimental; tempo, key and loudness outline in audio-facts/ in the profile
 skip_silence = false          # experimental
+lyric_pulse = false           # experimental; the sung line's glow breathes on the beat (needs track_analysis)
 remote = false                # experimental; phone remote: opens a TCP port for paired phones only (see [remote])
 visualizer = true
 
@@ -120,6 +123,10 @@ providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # synced lyrics sour
 estimate_words = true        # guess word times when a source times whole lines only
 offset_ms = 0                # moves the lyrics in time; positive: later
 translate_to = "auto"        # translation language: auto (Windows' language), off, pt, en, es, fr, de, it, ja, ko
+romanize = true              # the source's romanization (e.g. Japanese, Korean) under its line
+size = "medium"              # Lyrics tab text: small, medium, large
+align = "left"               # left (a duet's second singer on the right) or center
+glow = "normal"              # off (lightest), normal, strong
 
 [audio]                      # the Audio tab; mixes are in mixes/<playlist>.json in the profile (Experimental tab)
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom

@@ -211,6 +211,28 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
+        id: "lyric_colors",
+        name: "Lyric colors",
+        description: "A sung word named after a color (red, azul, violeta...) glows in that color, in the Lyrics \
+                      tab, the floating lyrics and the mini player, and each verse of the Lyrics tab glows in one \
+                      of the album's colors (with Album color on).",
+        cost: "Not measured yet. A color word's glow is a layer of its own that only fades, like the line's.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "lyric_effects",
+        name: "Lyric effects",
+        description: "In the Lyrics tab: dots that fill up during the intro and instrumental breaks, and a word \
+                      held for a second or more rises a little while it is sung.",
+        cost: "Not measured yet. Both are transform and opacity animations the compositor runs, only while on \
+               screen.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
         id: "ambient_mode",
         name: "Ambient mode",
         description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \
@@ -306,6 +328,18 @@ pub const PLUGINS: &[Plugin] = &[
         cost: "Inside the noise: +2.9 points of CPU and -2 MB private against off (3 runs); the first minute of a \
                track not measured yet is not isolated.",
         // Experimental, like the crossfade.
+        default_on: false,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "lyric_pulse",
+        name: "Lyrics on the beat",
+        description: "The glow of the line being sung pulses softly on the beat, in the Lyrics tab, once the \
+                      track analysis has measured the track's tempo (from its second play). Off while paused.",
+        cost: "Not measured yet. While it pulses the compositor draws every frame, which the resting lyrics \
+               otherwise avoid.",
+        // Experimental: it needs the track analysis, and it keeps the compositor busy.
         default_on: false,
         live: true,
         legacy: None,

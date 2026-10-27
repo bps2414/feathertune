@@ -69,6 +69,8 @@ const UNISON_TRANSLATE: &str = "https://unison.boidu.dev/translate";
 const LRCMUX: &str = "https://api.lrcmux.dev/get";
 /// Unison translates at most this many lines a request.
 const TRANSLATE_CHUNK: usize = 200;
+/// A translation request that gets a 5xx is sent again after each of these waits.
+const TRANSLATE_RETRY_WAITS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
 /// Translations kept per line from a TTML source.
 const MAX_TRANSLATIONS: usize = 4;
 /// The languages lyrics can be translated to (`[lyrics] translate_to`), by ISO 639-1 code, with their
@@ -417,13 +419,23 @@ fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &
 
 /// `POST /translate` on Unison, `TRANSLATE_CHUNK` lines at a time: one entry per line, `None` where the
 /// line needs no translation (blank, or already in `lang`). A 400 (nothing to translate, or the language
-/// not found) is no translation.
+/// not found) is no translation; a 5xx is sent again after `TRANSLATE_RETRY_WAITS`.
 fn unison_translate(agent: &ureq::Agent, lines: &[Line], lang: &str) -> Result<Vec<Option<String>>, String> {
     let mut out = Vec::with_capacity(lines.len());
     for chunk in lines.chunks(TRANSLATE_CHUNK) {
         let texts: Vec<&str> = chunk.iter().map(|l| l.text.as_str()).collect();
         let body = json!({ "lines": texts, "to": lang }).to_string();
-        let answer: Value = match agent.post(UNISON_TRANSLATE).header("content-type", "application/json").send(body) {
+        let mut waits = TRANSLATE_RETRY_WAITS.iter();
+        let sent = loop {
+            match agent.post(UNISON_TRANSLATE).header("content-type", "application/json").send(body.as_str()) {
+                Err(ureq::Error::StatusCode(code)) if code >= 500 => match waits.next() {
+                    Some(wait) => std::thread::sleep(*wait),
+                    None => break Err(ureq::Error::StatusCode(code)),
+                },
+                other => break other,
+            }
+        };
+        let answer: Value = match sent {
             Ok(mut response) => {
                 let bytes =
                     response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(|e| e.to_string())?;

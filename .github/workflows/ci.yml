@@ -121,12 +121,13 @@ jobs:
           if [ ! -s notes.md ]; then echo "no CHANGELOG.md section for $version"; exit 1; fi
           gh release create "$TAG" target/dist/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md
 
-  # The phone remote's Android APK, attached to the release that `dist` created (only on a `v*` tag). Signed
-  # with the debug key of Expo's template, the one every earlier APK used, so a new one installs over the old;
-  # the hash check stops the job if the template ever ships another key.
+  # The phone remote's Android APK, attached to the release that `dist` creates (only on a `v*` tag). It builds
+  # alongside `dist` and waits for the release only to upload. arm64-v8a only (every current phone): the native
+  # code builds once instead of four times. The Gradle cache is written on tags too, since this job never runs
+  # on main. Signed with the debug key of Expo's template, the one every earlier APK used, so a new one
+  # installs over the old; the hash check stops the job if the template ever ships another key.
   android:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: dist
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -151,7 +152,9 @@ jobs:
       - run: pnpm exec expo prebuild --platform android --clean --no-install
       - run: echo "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58  android/app/debug.keystore" | sha256sum -c -
       - uses: gradle/actions/setup-gradle@v5
-      - run: ./gradlew assembleRelease --no-daemon
+        with:
+          cache-read-only: false
+      - run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache --parallel
         working-directory: mobile/android
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -159,4 +162,6 @@ jobs:
         run: |
           version=$(node -p "require('./app.json').expo.version")
           cp android/app/build/outputs/apk/release/app-release.apk "feathertune-remote-$version.apk"
+          # `dist` creates the release; wait for it (up to 40 minutes).
+          for i in $(seq 120); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 20; done
           gh release upload "$TAG" "feathertune-remote-$version.apk" --clobber

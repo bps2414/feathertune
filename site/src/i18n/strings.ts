@@ -45,6 +45,7 @@ const en = {
     pick: 'Pick a record',
     by: 'by',
     mini: 'Mini player, always on top',
+    tabs: ['Up next', 'Lyrics', 'Related'],
   },
   lyrics: {
     title: 'Lyrics that light up as they’re sung',
@@ -150,6 +151,7 @@ const ptBr: Strings = {
     pick: 'Escolha um disco',
     by: 'de',
     mini: 'Mini player, sempre por cima',
+    tabs: ['A seguir', 'Letra', 'Relacionados'],
   },
   lyrics: {
     title: 'Letras que acendem enquanto são cantadas',
@@ -226,18 +228,39 @@ export const records = [
     id: 'a',
     title: 'Lanterns on the Water',
     artist: 'Mira Holt',
-    lines: ['we let the lanterns go', 'and watched the river carry them', 'past the bridge, past the light'],
+    lines: [
+      'we let the lanterns go',
+      'and watched the river carry them',
+      'past the bridge, past the light',
+      'little flames on borrowed time',
+      'every one a word we never said',
+      'floating home without us',
+    ],
   },
   {
     id: 'b',
     title: 'Low Tide Radio',
     artist: 'The Quiet Engines',
-    lines: ['static on the low tide station', 'someone plays our song again', 'and the harbor hums along'],
+    lines: [
+      'static on the low tide station',
+      'someone plays our song again',
+      'and the harbor hums along',
+      'gulls are keeping time tonight',
+      'the dial is drifting out to sea',
+      'leave it on, leave it on',
+    ],
   },
   {
     id: 'c',
     title: 'Honey in the Cracks',
     artist: 'Saul Ambrose',
-    lines: ['sun gets in through every crack', 'honey on the windowsill', 'slow as Sunday, sweet and still'],
+    lines: [
+      'sun gets in through every crack',
+      'honey on the windowsill',
+      'slow as Sunday, sweet and still',
+      'the kettle sings a half a tone too low',
+      'nobody here is in a hurry',
+      'let the afternoon run over',
+    ],
   },
 ] as const;

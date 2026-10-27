@@ -125,19 +125,20 @@ const song = records[0];
     translate: 1.6rem 0.4rem;
     rotate: 5deg;
     background:
-      repeating-linear-gradient(0deg, transparent 0 9%, rgb(143 211 199 / 0.35) 9% 11%),
+      radial-gradient(circle at 70% 25%, rgb(143 211 199 / 0.7), transparent 45%),
       linear-gradient(160deg, #0f4c5c, #072a33 70%);
     opacity: 0.85;
   }
 
+  /* The cover's colors, blurred, as the card's background. */
   .card-art {
     position: absolute;
-    inset: 0 0 auto;
-    aspect-ratio: 1;
+    inset: -20%;
     background:
-      radial-gradient(circle at 68% 38%, #f2a65a 0 15%, rgb(242 166 90 / 0.25) 15.5% 24%, transparent 32%),
-      linear-gradient(180deg, #3b2a5c 0 58%, #6d4c8f 58% 63%, #241a3a 63% 100%);
-    mask-image: linear-gradient(180deg, #000 55%, transparent);
+      radial-gradient(circle at 72% 30%, #f2a65a, transparent 32%),
+      radial-gradient(circle at 25% 55%, #6d4c8f, transparent 45%);
+    filter: blur(36px);
+    opacity: 0.75;
   }
 
   .card-lines {

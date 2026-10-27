@@ -1,5 +1,4 @@
 ---
-import FeatherMark from './FeatherMark.astro';
 import { records, strings, type Locale } from '../i18n/strings';
 
 interface Props {
@@ -20,10 +19,7 @@ const s = strings[Astro.props.locale].records;
         records.map((r, i) => (
           <label class={`pick pick-${r.id}`}>
             <input type="radio" name="record" value={r.id} id={`rec-${r.id}`} checked={i === 0} />
-            <span class="sleeve" aria-hidden="true">
-              <span class="disc" />
-              <span class={`cover cover-${r.id}`} />
-            </span>
+            <span class="swatch" aria-hidden="true" />
             <span class="pick-text">
               <span class="pick-title">{r.title}</span>
               <span class="pick-artist">
@@ -36,60 +32,180 @@ const s = strings[Astro.props.locale].records;
     </fieldset>
   </div>
 
-  <div class="stage" aria-hidden="true">
+  <div class="stage" aria-hidden="true" data-stage>
     <div class="win">
       <div class="bar">
-        <FeatherMark size={16} />
-        <span class="app">feathertune</span>
-        {
-          records.map((r) => (
-            <span class="track" data-rec={r.id}>
-              {r.title} - {r.artist}
-            </span>
-          ))
-        }
-        <span class="tools">
-          <i class="ico ico-share"></i><i class="ico ico-game"></i><i class="ico ico-mini"></i><i class="ico ico-gear"></i>
+        <span class="nav">
+          <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"></path></svg>
         </span>
-        <span class="caption"><i>&#8211;</i><i>&#9633;</i><i>&#215;</i></span>
+        <span class="app">feathertune</span>
+        <span class="playing">
+          {
+            records.map((r) => (
+              <span data-rec={r.id}>
+                <b>{r.title}</b> {r.artist}
+              </span>
+            ))
+          }
+        </span>
+        <span class="tools">
+          <svg viewBox="0 0 16 16"><path d="M8 10V2M5 5l3-3 3 3M3 8v5h10V8"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M5 5h6a3 3 0 0 1 3 3v1a2 2 0 0 1-3.6 1.2L9.5 9h-3l-.9 1.2A2 2 0 0 1 2 9V8a3 3 0 0 1 3-3z"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M2 3h12v10H2zM8 8h5v4H8z"></path></svg>
+          <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"></circle><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"></path></svg>
+        </span>
+        <span class="caption">
+          <svg viewBox="0 0 16 16"><path d="M4 8h8"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M4.5 4.5h7v7h-7z"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"></path></svg>
+        </span>
       </div>
+
       <div class="page">
-        {
-          records.map((r) => (
-            <div class={`ambient cover-${r.id}`} data-rec={r.id} />
-          ))
-        }
-        {
-          records.map((r) => (
-            <div class="lyrics" data-rec={r.id}>
-              <p class="past">{r.lines[0]}</p>
-              <p class="now">{r.lines[1]}</p>
-              <p class="soon">{r.lines[2]}</p>
-            </div>
-          ))
-        }
-        <div class="seek"><span></span></div>
+        {records.map((r) => <div class={`ambient amb-${r.id}`} data-rec={r.id} />)}
+        <p class="tabs">
+          {s.tabs.map((tab, i) => <span class={i === 1 ? 'on' : undefined}>{tab}</span>)}
+        </p>
+        <div class="view" data-view>
+          {
+            records.map((r) => (
+              <ol class="lines" data-rec={r.id}>
+                {r.lines.map((line) => (
+                  <li>
+                    {line.split(' ').map((word) => (
+                      <span>{word} </span>
+                    ))}
+                  </li>
+                ))}
+              </ol>
+            ))
+          }
+        </div>
+      </div>
+
+      <div class="player">
+        <span class="controls">
+          <svg viewBox="0 0 16 16"><path d="M4 3v10M13 3 6 8l7 5z"></path></svg>
+          <svg viewBox="0 0 16 16" class="big"><path d="M4 2.5v11l9.5-5.5z"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M12 3v10M3 3l7 5-7 5z"></path></svg>
+        </span>
+        <span class="time">1:12 / 3:41</span>
+        <span class="player-track">
+          {
+            records.map((r) => (
+              <span data-rec={r.id}>
+                <b>{r.title}</b>
+                {r.artist}
+              </span>
+            ))
+          }
+        </span>
+        <span class="seek"><span data-seek></span></span>
       </div>
     </div>
 
     <figure class="mini">
-      {records.map((r) => <div class={`mini-cover cover-${r.id}`} data-rec={r.id} />)}
       <div class="mini-body">
         {
           records.map((r) => (
             <div data-rec={r.id}>
               <p class="mini-title">{r.title}</p>
               <p class="mini-artist">{r.artist}</p>
-              <p class="mini-line">{r.lines[1]}</p>
             </div>
           ))
         }
-        <p class="mini-controls"><i>&#9664;&#9664;</i><i>&#10074;&#10074;</i><i>&#9654;&#9654;</i></p>
+        <p class="mini-line" data-mini-line>{records[0].lines[0]}</p>
+        <p class="mini-controls">
+          <svg viewBox="0 0 16 16"><path d="M4 3v10M13 3 6 8l7 5z"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M4 2.5v11l9.5-5.5z"></path></svg>
+          <svg viewBox="0 0 16 16"><path d="M12 3v10M3 3l7 5-7 5z"></path></svg>
+        </p>
       </div>
       <figcaption>{s.mini}</figcaption>
     </figure>
   </div>
 </section>
+
+<script>
+  // The Lyrics tab playing: words light up in turn and the lines glide up, like the app. ~2.5 steps a
+  // second, only while it is on screen and the tab is visible; one still frame for reduced motion.
+  const stage = document.querySelector<HTMLElement>('[data-stage]');
+  const section = stage?.closest('section');
+  if (stage && section) {
+    const view = stage.querySelector<HTMLElement>('[data-view]')!;
+    const seek = stage.querySelector<HTMLElement>('[data-seek]')!;
+    const miniLine = stage.querySelector<HTMLElement>('[data-mini-line]')!;
+    const still = matchMedia('(prefers-reduced-motion: reduce)');
+    let line = 0;
+    let word = 0;
+    let rest = 0;
+
+    const lines = () => {
+      const id = section.querySelector<HTMLInputElement>('input[name="record"]:checked')?.value ?? 'a';
+      return [...view.querySelectorAll<HTMLElement>(`.lines[data-rec="${id}"] li`)];
+    };
+
+    const draw = () => {
+      const all = lines();
+      const current = all[line];
+      if (!current) return;
+      all.forEach((li, i) => {
+        li.classList.toggle('on', i === line);
+        li.dataset.d = String(Math.min(Math.abs(i - line), 3));
+        [...li.children].forEach((w, j) => w.classList.toggle('sung', i < line || (i === line && j < word)));
+      });
+      current.parentElement!.style.transform = `translateY(${view.clientHeight * 0.32 - current.offsetTop}px)`;
+      miniLine.textContent = current.textContent;
+      const words = current.children.length;
+      seek.style.width = `${((line + Math.min(word, words) / words) / all.length) * 100}%`;
+    };
+
+    const step = () => {
+      const all = lines();
+      const words = all[line]?.children.length ?? 0;
+      if (word < words) word++;
+      else if (++rest > 2) {
+        rest = 0;
+        word = 0;
+        line = (line + 1) % all.length;
+      }
+      draw();
+    };
+
+    let timer = 0;
+    let seen = false;
+    const sync = () => {
+      const run = seen && !document.hidden && !still.matches;
+      if (run && !timer) timer = window.setInterval(step, 380);
+      if (!run && timer) {
+        clearInterval(timer);
+        timer = 0;
+      }
+      if (still.matches) {
+        line = 1;
+        word = 99;
+        draw();
+      }
+    };
+
+    section.addEventListener('change', () => {
+      line = 0;
+      word = 0;
+      rest = 0;
+      draw();
+      sync();
+    });
+    new IntersectionObserver(([entry]) => {
+      seen = entry.isIntersecting;
+      sync();
+    }).observe(stage);
+    document.addEventListener('visibilitychange', sync);
+    still.addEventListener('change', sync);
+    draw();
+    sync();
+  }
+</script>
 
 <style>
   /* Each record sets the colors the app would take from its cover. */
@@ -139,56 +255,58 @@ const s = strings[Astro.props.locale].records;
     align-content: start;
   }
 
-  .cover-a {
-    background:
-      radial-gradient(circle at 68% 34%, #f2a65a 0 16%, transparent 17%),
-      linear-gradient(180deg, #3b2a5c 0 55%, #6d4c8f 55% 62%, #241a3a 62% 100%);
-  }
-
-  .cover-b {
-    background:
-      repeating-linear-gradient(0deg, transparent 0 9%, rgb(143 211 199 / 0.55) 9% 11%),
-      linear-gradient(160deg, #0f4c5c, #0a2f3a 70%);
-  }
-
-  .cover-c {
-    background:
-      conic-gradient(from 210deg at 30% 70%, #f4c95d 0 22%, transparent 22% 100%),
-      linear-gradient(135deg, #6b2d2a, #3f1816);
-  }
-
-  /* A crate of three sleeves: the chosen record slides out of its sleeve. */
   .picker {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: clamp(0.75rem, 0.4rem + 1.5vw, 1.25rem);
+    gap: 0.25rem;
     margin: 1rem 0 0;
-    padding: clamp(2.5rem, 2rem + 2vw, 3.25rem) 0 0;
+    padding: 0;
     border: 0;
   }
 
   legend {
+    margin-bottom: 0.75rem;
     padding: 0;
     font-weight: 700;
   }
 
-  .pick {
-    position: relative;
-    display: grid;
-    gap: 0.7rem;
-    cursor: pointer;
-  }
-
+  /* A record is shown by the colors the app takes from its cover. */
   .pick-a {
-    --label: #f2a65a;
+    --s1: #3b2a5c;
+    --s2: #f2a65a;
+    --s3: #6d4c8f;
   }
 
   .pick-b {
-    --label: #8fd3c7;
+    --s1: #0f4c5c;
+    --s2: #8fd3c7;
+    --s3: #072a33;
   }
 
   .pick-c {
-    --label: #f4c95d;
+    --s1: #6b2d2a;
+    --s2: #f4c95d;
+    --s3: #2e1311;
+  }
+
+  .pick {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+
+  .pick:hover,
+  .pick:has(input:checked) {
+    background: var(--paper-deep);
+  }
+
+  .pick:has(input:focus-visible) {
+    outline: 3px solid var(--feather);
+    outline-offset: 2px;
   }
 
   .pick input {
@@ -197,211 +315,296 @@ const s = strings[Astro.props.locale].records;
     pointer-events: none;
   }
 
-  .sleeve {
-    position: relative;
-    display: block;
+  .swatch {
+    flex: none;
+    width: 2.25rem;
     aspect-ratio: 1;
-    border-radius: 0.35rem;
-  }
-
-  .pick .cover {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow:
-      inset 0 0 0 1px rgb(255 255 255 / 0.08),
-      0 0.9rem 1.6rem -0.8rem rgb(23 20 58 / 0.55);
-  }
-
-  .disc {
-    position: absolute;
-    inset: 5%;
     border-radius: 50%;
-    background:
-      radial-gradient(circle, #120f22 0 3%, var(--label) 3.5% 30%, #120f22 31% 33%, transparent 33.5%),
-      repeating-radial-gradient(circle, #19152e 0 1px, #2a2348 1px 2.5px);
-    box-shadow: 0 0.4rem 1rem -0.3rem rgb(0 0 0 / 0.5);
-    transition: translate 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+    background: conic-gradient(var(--s1) 0 40%, var(--s2) 40% 70%, var(--s3) 70% 100%);
+    transition: box-shadow 0.2s ease;
   }
 
-  .pick:hover .disc {
-    translate: 0 -10%;
-  }
-
-  .pick:has(input:checked) .disc {
-    translate: 0 -38%;
-  }
-
-  .pick:has(input:focus-visible) .sleeve {
-    outline: 3px solid var(--feather);
-    outline-offset: 4px;
+  .pick:has(input:checked) .swatch {
+    box-shadow:
+      0 0 0 3px var(--paper-deep),
+      0 0 0 5px var(--s2);
   }
 
   .pick-text {
     display: grid;
-    line-height: 1.25;
+    line-height: 1.3;
   }
 
   .pick-title {
-    color: var(--ink-soft);
-    font-size: var(--step--1);
     font-weight: 700;
-    transition: color 0.2s ease;
-  }
-
-  .pick:has(input:checked) .pick-title {
-    color: var(--ink);
   }
 
   .pick-artist {
     color: var(--ink-soft);
-    font-size: 0.8rem;
+    font-size: var(--step--1);
   }
 
-  /* The window: a title bar in the record's colors over the site with ambient mode and lyrics. */
+  /* The window, as the app shows the site's Lyrics tab: the title bar in the record's colors, ambient
+     mode behind the page, the synced lyrics and the site's player bar. */
   .stage {
     position: relative;
-    isolation: isolate;
-    padding-bottom: clamp(3rem, 2rem + 6vw, 7rem);
-  }
-
-  /* The record's color spills onto the page around the window. */
-  .stage::before {
-    content: '';
-    position: absolute;
-    inset: -8% -6% 12%;
-    z-index: -1;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 30%, transparent), transparent);
-    filter: blur(30px);
+    padding-bottom: clamp(3rem, 2rem + 6vw, 6rem);
   }
 
   .win {
     overflow: hidden;
-    border-radius: 0.75rem;
+    border-radius: 0.6rem;
     background: var(--deep);
+    color: #fff;
     box-shadow:
       0 0 0 1px rgb(255 255 255 / 0.06),
       0 2.5rem 5rem -2rem rgb(23 20 58 / 0.55);
     transition: background-color 0.5s ease;
   }
 
+  svg {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .bar {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    height: 2.25rem;
-    padding-left: 0.75rem;
+    gap: 0.75rem;
+    height: 2.1rem;
+    padding-left: 0.6rem;
     background: var(--bar);
     color: var(--bar-ink);
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     white-space: nowrap;
     transition: background-color 0.5s ease, color 0.5s ease;
+  }
+
+  .nav {
+    display: flex;
+    gap: 0.35rem;
+    opacity: 0.55;
   }
 
   .app {
     font-weight: 700;
   }
 
-  .track {
+  .playing {
+    flex: 1;
     overflow: hidden;
     min-width: 0;
-    opacity: 0.8;
+    text-align: center;
     text-overflow: ellipsis;
+  }
+
+  .playing span {
+    color: color-mix(in srgb, var(--bar-ink) 65%, transparent);
+  }
+
+  .playing b {
+    margin-right: 0.35rem;
+    color: var(--bar-ink);
   }
 
   .tools {
     display: flex;
-    gap: 0.7rem;
-    margin-left: auto;
+    gap: 0.85rem;
+    opacity: 0.8;
   }
 
-  .ico {
-    width: 0.8rem;
-    height: 0.8rem;
-    border: 1.5px solid currentColor;
-    border-radius: 0.2rem;
-    opacity: 0.75;
-  }
-
-  .ico-game {
-    border-radius: 0.5rem;
-  }
-
-  .ico-gear {
-    border-radius: 50%;
-    border-style: dotted;
+  .tools svg {
+    width: 0.9rem;
+    height: 0.9rem;
   }
 
   .caption {
     display: flex;
   }
 
-  .caption i {
-    display: grid;
-    place-items: center;
-    width: 2.6rem;
-    height: 2.25rem;
-    font-style: normal;
-    opacity: 0.8;
+  .caption svg {
+    box-sizing: content-box;
+    width: 0.75rem;
+    height: 0.75rem;
+    padding: 0.67rem 0.95rem;
+    stroke-width: 1.1;
   }
 
   .page {
     position: relative;
     isolation: isolate;
     display: grid;
-    min-height: clamp(15rem, 10rem + 18vw, 24rem);
-    padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
+    grid-template-rows: auto 1fr;
+    height: clamp(17rem, 12rem + 16vw, 24rem);
+    padding: 0.9rem clamp(1.25rem, 0.5rem + 3vw, 3rem) 0;
     overflow: hidden;
   }
 
   .ambient {
     position: absolute;
-    inset: -20%;
+    inset: -15%;
     z-index: -1;
-    filter: blur(48px) saturate(1.3);
-    opacity: 0.8;
+    filter: blur(40px);
+    opacity: 0.6;
   }
 
-  .lyrics {
-    align-self: center;
-    font-family: var(--display);
-    font-size: clamp(1.1rem, 0.8rem + 1.2vw, 1.7rem);
-    font-stretch: 108%;
-    font-weight: 650;
-    line-height: 1.2;
+  .amb-a {
+    background:
+      radial-gradient(circle at 78% 28%, #f2a65a, transparent 38%),
+      radial-gradient(circle at 18% 85%, #6d4c8f, transparent 50%);
   }
 
-  .lyrics p + p {
-    margin-top: 0.6em;
+  .amb-b {
+    background:
+      radial-gradient(circle at 75% 25%, #8fd3c7, transparent 36%),
+      radial-gradient(circle at 20% 80%, #0f4c5c, transparent 55%);
   }
 
-  .past,
-  .soon {
-    color: rgb(255 255 255 / 0.36);
-    font-size: 0.82em;
+  .amb-c {
+    background:
+      radial-gradient(circle at 76% 30%, #f4c95d, transparent 36%),
+      radial-gradient(circle at 15% 80%, #a3473f, transparent 50%);
   }
 
-  .now {
+  .tabs {
+    display: flex;
+    gap: 1.75rem;
+    border-bottom: 1px solid rgb(255 255 255 / 0.12);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .tabs span {
+    padding-bottom: 0.55rem;
+    opacity: 0.55;
+  }
+
+  .tabs .on {
+    border-bottom: 2px solid #fff;
+    opacity: 1;
+  }
+
+  .view {
+    position: relative;
+    overflow: hidden;
+    mask-image: linear-gradient(180deg, transparent, #000 18%, #000 70%, transparent);
+  }
+
+  /* The lines, styled like the app's synced lyrics: they fade with their distance from the one being
+     sung, which is full size and glows in the record's accent, word by word. */
+  .lines {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .lines li {
+    padding: 0.4rem 0;
+    font-size: clamp(1.15rem, 0.85rem + 1.1vw, 1.75rem);
+    font-weight: 800;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    opacity: 0.28;
+    transform: scale(0.94);
+    transform-origin: left center;
+    transition:
+      opacity 0.9s ease,
+      transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .lines li[data-d='2'] {
+    opacity: 0.36;
+  }
+
+  .lines li[data-d='1'] {
+    opacity: 0.5;
+  }
+
+  .lines li.on {
+    color: rgb(255 255 255 / 0.5);
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .lines li.on .sung {
     color: #fff;
-    font-size: 1.15em;
-    filter: drop-shadow(0 0 0.35em color-mix(in srgb, var(--accent) 70%, transparent));
+    text-shadow: 0 0 0.7em color-mix(in srgb, var(--accent) 70%, transparent);
+    transition: color 0.25s ease;
+  }
+
+  .player {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    height: 3.25rem;
+    padding: 0 1rem;
+    background: rgb(0 0 0 / 0.35);
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+  }
+
+  .controls svg,
+  .mini-controls svg {
+    fill: currentColor;
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+
+  .controls .big {
+    width: 1.3rem;
+    height: 1.3rem;
+  }
+
+  .time {
+    opacity: 0.6;
+  }
+
+  .player-track {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+  }
+
+  .player-track span {
+    color: rgb(255 255 255 / 0.65);
+  }
+
+  .player-track b {
+    margin-right: 0.4rem;
+    color: #fff;
   }
 
   .seek {
     position: absolute;
+    top: 0;
     right: 0;
-    bottom: 0;
     left: 0;
-    height: 3px;
-    background: rgb(255 255 255 / 0.12);
+    height: 2px;
+    background: rgb(255 255 255 / 0.15);
   }
 
   .seek span {
     display: block;
-    width: 42%;
+    width: 0;
     height: 100%;
     background: var(--accent);
-    transition: background-color 0.5s ease;
+    transition: width 0.38s linear, background-color 0.5s ease;
   }
 
   /* The mini player overlaps the window's corner, as it floats over everything. */
@@ -409,23 +612,14 @@ const s = strings[Astro.props.locale].records;
     position: absolute;
     right: clamp(0.5rem, -1rem + 4vw, 2rem);
     bottom: 0;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.8rem;
-    width: min(20rem, 82%);
+    width: min(17rem, 78%);
     margin: 0;
-    padding: 0.75rem;
-    border-radius: 0.9rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 0.75rem;
     background: var(--bar);
     color: var(--bar-ink);
     box-shadow: 0 1.5rem 3rem -1rem rgb(23 20 58 / 0.6);
     transition: background-color 0.5s ease, color 0.5s ease;
-  }
-
-  .mini-cover {
-    width: 4.5rem;
-    aspect-ratio: 1;
-    border-radius: 0.45rem;
   }
 
   .mini-body {
@@ -446,7 +640,7 @@ const s = strings[Astro.props.locale].records;
   }
 
   .mini-line {
-    margin-top: 0.35rem;
+    margin-top: 0.4rem;
     overflow: hidden;
     color: var(--accent);
     font-weight: 700;
@@ -457,14 +651,7 @@ const s = strings[Astro.props.locale].records;
   .mini-controls {
     display: flex;
     gap: 0.9rem;
-    margin-top: 0.35rem;
-    font-size: 0.75rem;
-  }
-
-  .mini-controls i {
-    font-style: normal;
-    font-variant-emoji: text;
-    letter-spacing: -0.2em;
+    margin-top: 0.45rem;
   }
 
   .mini figcaption {
@@ -479,7 +666,9 @@ const s = strings[Astro.props.locale].records;
 
   @media (max-width: 34rem) {
     .tools,
-    .track {
+    .nav,
+    .time,
+    .player-track {
       display: none !important;
     }
   }
@@ -488,8 +677,10 @@ const s = strings[Astro.props.locale].records;
     .win,
     .bar,
     .mini,
-    .disc,
-    .pick-title,
+    .pick,
+    .swatch,
+    .lines,
+    .lines li,
     .seek span {
       transition: none;
     }

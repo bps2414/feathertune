@@ -21,9 +21,10 @@
 // `page-type` changes anywhere and on the video's time events. With no data the site's own lyrics are
 // left alone. The page fetches nothing and calls nothing; lines are shown with textContent only.
 // Also from Rust: a word `[ms, text, "#rrggbb"]` is named after a color and glows in it (lyric_colors);
-// `voices` (0 first singer, 1 second, 2 group, one per line) lay a duet out; `look` is { size, align,
-// glow, effects } from the settings. With `effects` (lyric_effects), the intro and breaks of at least
-// GAP_MS show dots that fill up over the break (Web Animations on the song's clock) and held words rise.
+// `voices` (0 first singer, 1 second, 2 group, one per line) name the singers; `look` is { size, align,
+// glow, duets, effects, colors } from the settings. With `effects` (lyric_effects), the intro and breaks of at least
+// GAP_MS show dots that fill up over the break (Web Animations on the song's clock). With `duets`, a duet
+// is laid out by singer.
 // `colors` (lyric_colors) also glows each verse in one of the album's colors. `romanized` has one text (or
 // null) per line, shown under it like the translation; `beat` { bpm, first_ms } (lyric_pulse, from the
 // track analysis) makes the sung line's glow breathe on the beat.
@@ -35,12 +36,15 @@ const MAX_LINES = 2000;
 const MAX_WORDS = 100;
 const MAX_TRANSLATION_CHARS = 600;
 const HEX = /^#[0-9a-f]{6}$/i;
-const LOOKS = { size: ['small', 'medium', 'large'], align: ['left', 'center'], glow: ['off', 'normal', 'strong'] };
+const LOOKS = {
+  size: ['small', 'medium', 'large'],
+  align: ['left', 'center', 'right'],
+  glow: ['off', 'normal', 'strong'],
+};
 // A break this long (the intro, the time between a line's end and the next one) shows its dots.
 const GAP_MS = 4000;
-// A new verse starts after a break this long (lyric_colors); a word sung this long is held (lyric_effects).
+// A new verse starts after a break this long (lyric_colors).
 const VERSE_GAP_MS = 2000;
-const HELD_MS = 1000;
 // The glow's pulse waits this long after its line lights, so the line's own fade-in shows first.
 const PULSE_AFTER_MS = 600;
 const MANUAL_SCROLL_MS = 4000;
@@ -171,7 +175,8 @@ const looks = (look) =>
     typeof look === 'object' &&
     Object.entries(LOOKS).every(([k, allowed]) => allowed.includes(look[k])) &&
     typeof look.effects === 'boolean' &&
-    typeof look.colors === 'boolean');
+    typeof look.colors === 'boolean' &&
+    typeof look.duets === 'boolean');
 const beats = (b) =>
   b === undefined ||
   (!!b && Number.isFinite(b.bpm) && b.bpm >= 40 && b.bpm <= 260 && Number.isFinite(b.first_ms) && b.first_ms >= 0);
@@ -230,9 +235,16 @@ const build = () => {
   box = document.createElement('div');
   box.id = 'feathertune-lyrics';
   box.classList.toggle('ft-estimated', meta.estimated);
-  const look = meta.look ?? { size: 'medium', align: 'left', glow: 'normal', effects: false, colors: false };
+  const look = meta.look ?? {
+    size: 'medium',
+    align: 'left',
+    glow: 'normal',
+    duets: false,
+    effects: false,
+    colors: false,
+  };
   box.classList.add(`ft-size-${look.size}`, `ft-align-${look.align}`, `ft-glow-${look.glow}`);
-  box.classList.toggle('ft-effects', look.effects);
+  box.classList.toggle('ft-duets', look.duets && lines.some((l) => l.voice));
   // With the colors, each verse (lines between two breaks of at least VERSE_GAP_MS) glows in the next of the
   // album's colors (`data-s`, 1 to 4; theme/page.js sets them).
   let verse = 1;
@@ -270,28 +282,19 @@ const build = () => {
     el.dataset.text = l.text;
     const own = { main: [], bg: [] };
     // Each word fades in over a share of its own length; the last one ends with the line. A word named
-    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css). With the
-    // effects, a word held for HELD_MS or more rises a little over its length (`ft-held`, a box of its
-    // own, so its trailing space goes after it).
+    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css).
     const wordSpans = (parent, words) =>
       words.map((w, j) => {
         const span = document.createElement('span');
+        span.textContent = w.text;
         const end = words[j + 1]?.ms ?? ends[i];
-        const held = look.effects && end - w.ms >= HELD_MS;
-        const trail = held ? w.text.match(/\s*$/)[0] : '';
-        span.textContent = trail ? w.text.slice(0, -trail.length) : w.text;
         if (end > w.ms) span.style.setProperty('--ft-word', `${Math.round((end - w.ms) * WORD_FADE)}ms`);
-        if (held) {
-          span.classList.add('ft-held');
-          span.style.setProperty('--ft-held', `${Math.round(end - w.ms)}ms`);
-        }
         if (w.color) {
           span.classList.add('ft-hue');
           span.style.setProperty('--ft-hue', w.color);
           span.dataset.text = w.text.trim();
         }
         parent.append(span);
-        if (trail) parent.append(trail);
         return span;
       });
     if (l.words) {

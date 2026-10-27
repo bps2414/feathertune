@@ -97,10 +97,18 @@
         </label>
         <label>Alignment
           <select data-key="lyrics.align">
-            <option value="left">Left (duets: second singer on the right)</option>
+            <option value="left">Left</option>
             <option value="center">Center</option>
+            <option value="right">Right</option>
           </select>
         </label>
+        <div class="option">
+          <div class="body">
+            <div class="name small">Duet layout</div>
+            <div class="hint">When the source names the singers: the first one's lines on the left, the second one's on the right, sung together in the middle.</div>
+          </div>
+          <input type="checkbox" class="switch" data-key="lyrics.duets" aria-label="Duet layout">
+        </div>
         <label>Glow
           <select data-key="lyrics.glow">
             <option value="off">Off (lightest)</option>
@@ -109,7 +117,6 @@
           </select>
         </label>
       </div>
-      <div class="card" data-plugin="lyric_colors"></div>
       <div class="card" data-plugin="lyric_effects"></div>
       <div class="card" data-plugin="lyrics_translation">
         <label>Translate to
@@ -195,6 +202,7 @@
         <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded.</p>
       </div>
       <div class="card" data-plugin="track_analysis"></div>
+      <div class="card" data-plugin="lyric_colors"></div>
       <div class="card" data-plugin="lyric_pulse"></div>
       <div class="card" data-plugin="skip_silence"></div>
       <div class="card" data-plugin="remote">

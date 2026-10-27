@@ -239,24 +239,6 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   transition: opacity min(0.4s, var(--ft-word, 0.4s)) ease;
 }
 
-/* A held word (lyric_effects) rises a little over its length (`--ft-held`) while it is sung, and settles
-   when its line leaves; a layer of its own only while its line is sung. */
-#feathertune-lyrics .ft-held {
-  display: inline-block;
-  transition: transform 0.6s ease;
-}
-
-#feathertune-lyrics .ft-line.ft-current .ft-held {
-  will-change: transform;
-}
-
-#feathertune-lyrics .ft-line.ft-current .ft-held.ft-sung {
-  transform: translateY(-0.06em) scale(1.04);
-  transition:
-    color min(0.25s, var(--ft-word, 0.25s)) ease,
-    transform var(--ft-held, 1s) cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
 /* The look from the settings: text size, alignment and glow. */
 #feathertune-lyrics.ft-size-small .ft-line {
   font-size: clamp(18px, 1.8vw, 30px);
@@ -282,13 +264,28 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
     0 0 48px color-mix(in srgb, var(--ft-glow) 50%, transparent);
 }
 
-/* A duet (left alignment only): the second singer's lines on the right, the group's in the middle. */
-#feathertune-lyrics.ft-align-left .ft-line.ft-v1 {
+#feathertune-lyrics.ft-align-right .ft-line {
   text-align: right;
   transform-origin: right center;
 }
 
-#feathertune-lyrics.ft-align-left .ft-line.ft-v2 {
+/* A duet (`[lyrics] duets`), whatever the alignment: each singer keeps a narrower column on their own
+   side, the first on the left and the second on the right, and the group's lines sit in the middle, so
+   the turns read as a conversation instead of ragged lines. */
+#feathertune-lyrics.ft-duets .ft-line {
+  max-width: 78%;
+  text-align: left;
+  transform-origin: left center;
+}
+
+#feathertune-lyrics.ft-duets .ft-line.ft-v1 {
+  margin-left: auto;
+  text-align: right;
+  transform-origin: right center;
+}
+
+#feathertune-lyrics.ft-duets .ft-line.ft-v2 {
+  margin-inline: auto;
   text-align: center;
   transform-origin: center;
 }
@@ -328,7 +325,8 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   pointer-events: none;
 }
 
-#feathertune-lyrics.ft-align-left .ft-line.ft-v1 .ft-time {
+#feathertune-lyrics.ft-align-right:not(.ft-duets) .ft-time,
+#feathertune-lyrics.ft-duets .ft-line.ft-v1 .ft-time {
   right: auto;
   left: 0;
 }

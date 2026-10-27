@@ -211,23 +211,11 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
-        id: "lyric_colors",
-        name: "Lyric colors",
-        description: "A sung word named after a color (red, azul, violeta...) glows in that color, in the Lyrics \
-                      tab, the floating lyrics and the mini player, and each verse of the Lyrics tab glows in one \
-                      of the album's colors (with Album color on).",
-        cost: "Not measured yet. A color word's glow is a layer of its own that only fades, like the line's.",
-        default_on: true,
-        live: true,
-        legacy: None,
-    },
-    Plugin {
         id: "lyric_effects",
         name: "Lyric effects",
-        description: "In the Lyrics tab: dots that fill up during the intro and instrumental breaks, and a word \
-                      held for a second or more rises a little while it is sung.",
-        cost: "Not measured yet. Both are transform and opacity animations the compositor runs, only while on \
-               screen.",
+        description: "In the Lyrics tab: dots that fill up during the intro and instrumental breaks.",
+        cost: "Not measured yet. The dots are transform and opacity animations the compositor runs, only while \
+               a break is lit.",
         default_on: true,
         live: true,
         legacy: None,
@@ -328,6 +316,18 @@ pub const PLUGINS: &[Plugin] = &[
         cost: "Inside the noise: +2.9 points of CPU and -2 MB private against off (3 runs); the first minute of a \
                track not measured yet is not isolated.",
         // Experimental, like the crossfade.
+        default_on: false,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "lyric_colors",
+        name: "Lyric colors",
+        description: "A sung word named after a color (red, azul, violeta...) glows in that color, in the Lyrics \
+                      tab, the floating lyrics and the mini player, and each verse of the Lyrics tab glows in one \
+                      of the album's colors (with Album color on).",
+        cost: "Not measured yet. A color word's glow is a layer of its own that only fades, like the line's.",
+        // Experimental: a matter of taste, so it is opt-in.
         default_on: false,
         live: true,
         legacy: None,

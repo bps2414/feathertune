@@ -658,6 +658,7 @@ fn publish(app: &AppHandle) {
             "size": s.lyrics.size,
             "align": s.lyrics.align,
             "glow": s.lyrics.glow,
+            "duets": s.lyrics.duets,
             "effects": s.plugin("lyric_effects"),
             "colors": s.plugin("lyric_colors"),
         });

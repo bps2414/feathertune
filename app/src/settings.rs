@@ -141,10 +141,12 @@ pub struct LyricsSettings {
     pub size: String,
     pub align: String,
     pub glow: String,
+    /// Lay a duet out: the first singer's lines on the left, the others' on the right, a group's centered.
+    pub duets: bool,
 }
 
 pub const LYRICS_SIZES: &[&str] = &["small", "medium", "large"];
-pub const LYRICS_ALIGNS: &[&str] = &["left", "center"];
+pub const LYRICS_ALIGNS: &[&str] = &["left", "center", "right"];
 pub const LYRICS_GLOWS: &[&str] = &["off", "normal", "strong"];
 
 impl Default for LyricsSettings {
@@ -154,10 +156,11 @@ impl Default for LyricsSettings {
             estimate_words: true,
             offset_ms: 0,
             translate_to: "auto".into(),
-            romanize: true,
+            romanize: false,
             size: "medium".into(),
             align: "left".into(),
             glow: "normal".into(),
+            duets: false,
         }
     }
 }

@@ -2,6 +2,13 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.5.3 — 2026-10-27
+
+- **A letra não some mais e volta quando a página muda.** Ir da Home ou da Biblioteca para a página do player com a mesma música tocando apagava as linhas e buscava de novo, com as linhas trocando até três vezes. Agora uma música é o título e o artista, não o id do vídeo.
+- **Menos faixas sem letra.** Uma fonte que responde com erro de servidor (503) é consultada mais uma vez após 1 s, e um "não encontrado" guardado de antes consulta de novo só as fontes que falharam. Uma duração que oscila entre faixas não cancela mais uma busca em andamento, e um título com caractere invisível (um word joiner) acha a letra.
+- **As primeiras linhas esperam 0,3 s por uma fonte melhor**, então a letra é montada uma vez em vez de mudar duas ou três vezes conforme cada fonte responde.
+- **O cache de letras para de encher de "não encontrado".** Agora é por título, artista e duração (não por álbum), e os "não encontrado" são os primeiros a sair quando ele enche. As letras que já estavam no cache são buscadas de novo uma vez.
+
 ## 0.5.2 — 2026-10-27
 
 - **A tradução da letra tenta de novo quando o servidor falha.** Quando o serviço de tradução respondia com erro de servidor (503), a faixa ficava sem tradução até a próxima; agora o pedido é enviado de novo após 1 s e após 3 s.

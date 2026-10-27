@@ -2,6 +2,13 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.5.3 — 2026-10-27
+
+- **The lyrics no longer vanish and come back when the page changes.** Going from Home or the Library to the player page with the same song playing wiped the lines and looked them up again, with the lines swapping up to three times. A song is now its title and artist, not its video id.
+- **Fewer tracks left without lyrics.** A source answering with a server error (503) is asked once more after 1 s, and a "not found" kept from before asks again only the sources that failed. A length that wobbles between tracks no longer cancels a lookup under way, and a title with an invisible character (a word joiner) finds its lyrics.
+- **The first lines wait 0.3 s for a better source**, so the lyrics are built once instead of changing two or three times as each source answers.
+- **The lyrics cache stops filling with misses.** It is now per title, artist and length (not album), and the "not found" entries are the first removed when it is full. Lyrics already cached are looked up again once.
+
 ## 0.5.2 — 2026-10-27
 
 - **Lyrics translation tries again when the server fails.** When the translation service answered with a server error (503), the track stayed untranslated until the next one; the request is now sent again after 1 s and after 3 s.

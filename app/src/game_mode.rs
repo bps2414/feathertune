@@ -14,7 +14,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde_json::json;
 use tauri::AppHandle;
 
 static ON: AtomicBool = AtomicBool::new(false);
@@ -28,7 +27,7 @@ pub fn toggle(app: &AppHandle) {
     let on = !ON.fetch_xor(true, Ordering::Relaxed);
     crate::diag::log("game mode", if on { "on" } else { "off" });
     crate::lyrics::set_page_paused(app, on);
-    crate::injections::send(app, "ambient", &json!({ "off": on }));
+    crate::ambient::set_off(app, on);
     crate::desktop_lyrics::set_suspended(app, on);
     if on {
         crate::share_lyrics::close(app);

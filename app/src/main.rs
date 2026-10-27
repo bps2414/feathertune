@@ -16,6 +16,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod album_color;
+mod ambient;
 mod artwork;
 mod audio;
 mod audio_facts;
@@ -231,6 +232,9 @@ fn main() {
             }
             if live.plugin("album_color") {
                 album_color::start(app.handle());
+            }
+            if live.plugin("ambient_mode") {
+                ambient::start(app.handle());
             }
             let page_lyrics = live.plugin("synced_lyrics");
             if page_lyrics || live.plugin("desktop_lyrics") || live.plugin("share_lyrics") {

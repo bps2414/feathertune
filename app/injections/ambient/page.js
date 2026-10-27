@@ -1,12 +1,16 @@
 // Ambient mode: a blurred, glowing copy of the cover behind the site, plus a halo of it right behind the
-// cover on the player page so the picture melts into the background (style.css draws both). The cover
-// is the one in the site's own media session metadata, the URL the player bar already shows, so it is
-// already loaded; nothing else is fetched. Presentation only: it never touches the player or the ads.
-// The drift (style.css) pauses while the window is hidden or minimized (page visibility) or in the
-// background (no focus). Plugin `ambient_mode`.
+// cover on the player page so the picture melts into the background (style.css draws both). The
+// background is a soft field of the cover's colors that Rust makes (ambient.rs) and sends as data, a
+// small PNG in a `data:` URL, so it needs no blur. The halo's cover is the one in the site's own media
+// session metadata, the URL the player bar already shows, so it is already loaded; nothing else is
+// fetched. Presentation only: it never touches the player or the ads. The drift (style.css) pauses while
+// the window is hidden or minimized (page visibility) or in the background (no focus). Rust sends
+// `{ off, field }`. Plugin `ambient_mode`.
 const HOSTS = ['googleusercontent.com', 'ggpht.com', 'ytimg.com'];
 // The halo is this much bigger than the cover it sits behind.
 const HALO_SCALE = 1.7;
+const FIELD = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
+const MAX_FIELD = 100000;
 
 const wrap = document.createElement('div');
 wrap.id = 'feathertune-ambient';
@@ -27,6 +31,7 @@ const scrim = document.createElement('div');
 scrim.className = 'ft-scrim';
 wrap.append(background.el, scrim, halo.el);
 let shown = null;
+let field = null; // the background from Rust
 
 const cover = () => {
   const art = navigator.mediaSession?.metadata?.artwork;
@@ -70,12 +75,15 @@ const update = () => {
     shown = href;
     if (!wrap.isConnected && document.body) document.body.prepend(wrap);
     document.documentElement.toggleAttribute('data-feathertune-ambient', !!href);
-    if (href) {
-      show(background, href);
-      show(halo, href);
-    }
+    if (href) show(halo, href);
   }
   place();
+};
+
+// The background follows Rust's field (none: only the dark base shows).
+const paint = () => {
+  if (field) show(background, field);
+  else for (const layer of background.layers) layer.classList.remove('ft-show');
 };
 
 const motion = () => {
@@ -125,6 +133,12 @@ motion();
 feathertune.ambient = Object.freeze({
   set(data) {
     const next = data?.off === true;
+    const given = data?.field;
+    const f = typeof given === 'string' && given.length <= MAX_FIELD && FIELD.test(given) ? given : null;
+    if (f !== field) {
+      field = f;
+      if (!off && !next) paint();
+    }
     if (next === off) return;
     off = next;
     if (off) {
@@ -136,6 +150,7 @@ feathertune.ambient = Object.freeze({
     } else {
       watch();
       update();
+      paint();
     }
   },
 });

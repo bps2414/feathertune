@@ -25,8 +25,9 @@
 //!   the new one in `MORPH`; the glows' colors come from the artwork when `album_color` is on, and flow
 //!   from the old theme to the new one the same way (the old and the new set of brushes are drawn at
 //!   partial opacity, so nothing is rebuilt per frame).
-//! - With the `animated_title_bar` plugin the glows also drift slowly. Performance rules: one 30 fps
-//!   timer that runs only while there is something to move (a track change, or the drift while the
+//! - With the `animated_title_bar` plugin the glows also drift slowly. Performance rules: one timer
+//!   (30 fps while a theme or shape flows, 20 fps for the drift alone) that runs only while there is
+//!   something to move (a track change, or the drift while the
 //!   window is visible, not minimized and in front; Windows animation effects do not stop it); the clock
 //!   stops while paused, so it resumes where it was; only the strip is invalidated; brushes and the
 //!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
@@ -87,8 +88,10 @@ const WM_RELAYOUT: u32 = WM_APP + 4;
 /// Posted when the history changed: repaint the navigation buttons.
 const WM_NAV: u32 = WM_APP + 5;
 const TIMER: usize = 0xfea8;
-/// 30 fps: smooth for slow drift, half the repaints of 60.
+/// 30 fps while a theme or shape flows: smooth, half the repaints of 60.
 const FRAME_MS: u32 = 33;
+/// 20 fps for the drift alone: it is slow enough that the steps do not show.
+const DRIFT_FRAME_MS: u32 = 50;
 const MORPH: Duration = Duration::from_millis(700);
 /// The `animated_title_bar` plugin switch.
 static ANIMATED: AtomicBool = AtomicBool::new(false);
@@ -271,7 +274,8 @@ struct TitleBar {
     /// Seconds of drift so far; advances only while the timer runs.
     time: f32,
     last_frame: Option<Instant>,
-    ticking: bool,
+    /// The frame timer's interval while it runs.
+    ticking: Option<u32>,
     brushes: Option<Brushes>,
     /// The glow brushes of the themes on screen.
     glows: gfx::GlowSets,
@@ -338,7 +342,7 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             morph: None,
             time: 0.0,
             last_frame: None,
-            ticking: false,
+            ticking: None,
             brushes: None,
             glows: gfx::GlowSets::default(),
             brushes_id: 0,
@@ -578,15 +582,23 @@ impl TitleBar {
         let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() }
             && !FULLSCREEN.load(Ordering::Relaxed);
         let drifting = ANIMATED.load(Ordering::Relaxed) && self.active && on_screen;
-        let run = ((self.morph.is_some() || gfx::fading()) && on_screen) || drifting;
+        let flowing = (self.morph.is_some() || gfx::fading()) && on_screen;
+        let run = match (flowing, drifting) {
+            (true, _) => Some(FRAME_MS),
+            (false, true) => Some(DRIFT_FRAME_MS),
+            _ => None,
+        };
         if run == self.ticking {
             return;
         }
+        let was = self.ticking;
         self.ticking = run;
         unsafe {
-            if run {
-                SetTimer(Some(hwnd), TIMER, FRAME_MS, None);
-                self.last_frame = Some(Instant::now());
+            if let Some(ms) = run {
+                SetTimer(Some(hwnd), TIMER, ms, None);
+                if was.is_none() {
+                    self.last_frame = Some(Instant::now());
+                }
             } else {
                 let _ = KillTimer(Some(hwnd), TIMER);
                 self.last_frame = None;

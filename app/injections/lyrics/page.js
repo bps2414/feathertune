@@ -44,6 +44,11 @@ const FOLLOW_S = 0.25;
 // (CSS px) from the curve. Its clock is set back to the song's when they drift apart by more than DRIFT_MS.
 const GLIDE_TOLERANCE_PX = 0.2;
 const DRIFT_MS = 50;
+// Where the view stays put for at least REST_MS (a line it rests on, the end of the song), the glide
+// ends and holds its place, so the compositor makes no frames meanwhile; it starts again WAKE_MS before
+// the view moves on.
+const REST_MS = 500;
+const WAKE_MS = 150;
 // The move from one line to the next takes this share of the line that ends (at most the cap) and this
 // share of the line that starts, so when a line ends the view is still a little short of the middle
 // between the two. A line left with less rest than PARK_MIN_MS is passed through without stopping.
@@ -78,11 +83,18 @@ let active = []; // the lines lit now: the latest and those before it not yet ov
 let sungMain = []; // per line, the last word whose time has come (-1: none)
 let sungBg = [];
 let manualUntil = 0;
-const observer = new MutationObserver(() => refresh());
+// The site flips `disabled` on many buttons (the player bar's among them): only the tab buttons count.
+const counts = (r) =>
+  (r.attributeName !== 'disabled' && r.attributeName !== 'aria-disabled') || r.target.matches?.(TAB_BUTTON);
+const observer = new MutationObserver((records) => {
+  if (records.some(counts)) refresh();
+});
 let centers = null; // middle of each line below the top of the box, measured when needed
 let floor = 0; // the least middle of the view below the top of the box (see `center`)
 let anim = null; // the box's glide along the curve (see `start`), while it follows the song
 let animStart = 0; // the song time (with the lead) at the glide's time 0
+let wakeAt = Infinity; // the song time (with the lead) the held glide starts again (see `start`)
+let waking = 0; // its timer
 let ownTop = 0; // the tab's scroll while the box glides; anything else moved it by hand
 let pointing = 0; // timer: the pointer stopped moving over the box (see `build`)
 const POINTER_IDLE_MS = 800;
@@ -579,17 +591,33 @@ const corners = (ys) => {
   return out;
 };
 
+// The first stretch of the samples `ys` that stays within GLIDE_TOLERANCE_PX of one place for at least
+// REST_MS: { from, to } (sample indices; `to` is null when it lasts to the end), or null.
+const restIn = (ys) => {
+  const least = Math.ceil(REST_MS / SAMPLE_MS);
+  let a = 0;
+  for (let k = 1; k < ys.length; k++) {
+    if (Math.abs(ys[k] - ys[a]) > GLIDE_TOLERANCE_PX) {
+      if (k - a > least) return { from: a, to: k - 1 };
+      a = k;
+    }
+  }
+  return ys.length - 1 - a >= least ? { from: a, to: null } : null;
+};
+
 // How far the box is moved now (its glide, or none).
 const shown = () => {
   const m = getComputedStyle(box).transform;
   return m && m !== 'none' ? new DOMMatrixReadOnly(m).m42 : 0;
 };
 
-// The box glides along the curve as a transform animation from the song's time now to its end, so the
-// compositor moves it on its own clock: a busy page no longer drops its frames, and the tab's scroll (and
-// the site's scroll listeners) stay still meanwhile. It starts where the box is now and eases onto the
-// curve (FOLLOW_S), and its clock follows the song's (rate, drift; see `align`). Started again after a
-// seek, a resize or a manual scroll.
+// The box glides along the curve as a transform animation from the song's time now to where the view
+// next rests (or the song's end), so the compositor moves it on its own clock: a busy page no longer
+// drops its frames, and the tab's scroll (and the site's scroll listeners) stay still meanwhile. While
+// the view rests the glide holds its last place and nothing runs; it is started again just before the
+// view moves on (`wake`). It starts where the box is now and eases onto the curve (FOLLOW_S), and its
+// clock follows the song's (rate, drift; see `align`). Started again after a seek, a resize or a manual
+// scroll.
 const start = (v) => {
   const t = tab();
   if (!t || !canRun(v)) return;
@@ -610,26 +638,54 @@ const start = (v) => {
     const ms = ms0 + s * SAMPLE_MS;
     return onCurve(ms) + gap * Math.exp(-(ms - ms0) / (FOLLOW_S * 1000));
   });
-  const frames = corners(ys).map((s) => ({ offset: s / (count - 1), transform: `translateY(${ys[s].toFixed(2)}px)` }));
-  anim = box.animate(frames, { duration: (count - 1) * SAMPLE_MS, fill: 'forwards' });
+  // Up to where the view first rests, which the glide then holds (fill) until `wake`.
+  const rest = restIn(ys);
+  const last = Math.max(1, rest ? rest.from : count - 1);
+  const frames = corners(ys.subarray(0, last + 1)).map((s) => ({
+    offset: s / last,
+    transform: `translateY(${ys[s].toFixed(2)}px)`,
+  }));
+  anim = box.animate(frames, { duration: last * SAMPLE_MS, fill: 'forwards' });
   box.classList.add('ft-gliding');
   anim.playbackRate = v.playbackRate;
   animStart = ms0;
+  wakeAt = rest?.to != null ? ms0 + rest.to * SAMPLE_MS - WAKE_MS : Infinity;
+  wake(v);
   ownTop = t.scrollTop;
   anim.ready.then(() => align(v)).catch(() => {});
 };
 
+// Starts the held glide again at `wakeAt` (on the song's clock and rate).
+const wake = (v) => {
+  clearTimeout(waking);
+  waking = 0;
+  if (!Number.isFinite(wakeAt) || !(v.playbackRate > 0)) return;
+  waking = setTimeout(
+    () => {
+      waking = 0;
+      if (anim) start(v);
+    },
+    Math.max(0, wakeAt - songMs(v)) / v.playbackRate,
+  );
+};
+
 // Sets the glide's clock back to the song's when they drift apart (the rate follows the song's too).
+// Past its end it holds its place, so only a clock behind that is set.
 const align = (v) => {
   if (!anim) return;
-  if (anim.playbackRate !== v.playbackRate) anim.playbackRate = v.playbackRate;
-  const want = songMs(v) - animStart;
+  if (anim.playbackRate !== v.playbackRate) {
+    anim.playbackRate = v.playbackRate;
+    wake(v);
+  }
+  const want = Math.min(songMs(v) - animStart, anim.effect.getComputedTiming().endTime);
   if (Math.abs((anim.currentTime ?? 0) - want) > DRIFT_MS) anim.currentTime = want;
 };
 
 // Ends the glide, leaving the view where it is: what the box was moved goes into the tab's scroll (the
 // tab keeps it as if the box had been scrolled, also when the box then hides or is rebuilt).
 const stop = () => {
+  clearTimeout(waking);
+  waking = 0;
   if (!anim) return;
   const moved = shown();
   anim.cancel();

@@ -8,7 +8,7 @@
 //!   DIPs: on screen scaled into the preview, and into a `gfx::Offscreen` at 3× for the picture
 //!   (1080 px wide). It is opaque, so the clipboard's DIB (no alpha) and the PNG look the same.
 //! - Looks: Cover (a soft field of the cover's colors: the cover cut to its center square, shrunk to
-//!   5×5 and blown up again with a cubic filter, on a worker thread), Ink (the album theme's ink and
+//!   5×5 and blown up again with a cubic filter (artwork::field), on a worker thread), Ink (the album theme's ink and
 //!   glows, as the mini player), Dark, and Paper (light, tinted by the album's glows).
 //!   On every look: the album's dominant color as an accent (quote mark, bar beside the lines, skip
 //!   dots, the note), a drop shadow under the lines, a vignette on Ink and Dark, and a fixed film grain.
@@ -41,15 +41,6 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFOHEADER, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
     MonitorFromWindow, ScreenToClient,
 };
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_ContainerFormatPng, GUID_WICPixelFormat32bppBGRA, GUID_WICPixelFormat32bppPBGRA,
-    IWICImagingFactory, WICBitmapEncoderNoCache, WICBitmapInterpolationModeFant,
-    WICBitmapInterpolationModeHighQualityCubic, WICRect,
-};
-use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STATFLAG_NONAME, STATSTG,
-    STREAM_SEEK_SET,
-};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
@@ -58,7 +49,6 @@ use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, Glo
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_CONTROL, VK_ESCAPE, VK_SHIFT,
 };
-use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, ICON_BIG, ICON_SMALL, IDC_ARROW, IDC_HAND, KillTimer,
@@ -415,51 +405,13 @@ fn load_media(hwnd: isize, url: String, media: Arc<Mutex<Option<Arc<Media>>>>) {
                 return;
             }
         };
-        let field = color_field(&art).map_err(|e| eprintln!("share lyrics: no color field: {e}")).ok();
+        let field =
+            artwork::field(&art, 5, FIELD, 1.3, 1.0).map_err(|e| eprintln!("share lyrics: no color field: {e}")).ok();
         *media.lock().unwrap() = Some(Arc::new(Media { url, art, field }));
         unsafe {
             let _ = PostMessageW(Some(HWND(hwnd as _)), WM_UPDATE, WPARAM(0), LPARAM(0));
         }
     });
-}
-
-/// The cover's center square shrunk to 5×5 and blown up to `FIELD` with a cubic filter: a soft field
-/// of its colors, a little more saturated.
-fn color_field(art: &Art) -> Result<Vec<u8>> {
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let source = wic.CreateBitmapFromMemory(
-            art.width,
-            art.height,
-            &GUID_WICPixelFormat32bppPBGRA,
-            art.width * 4,
-            &art.pixels,
-        )?;
-        let side = art.width.min(art.height);
-        let square = WICRect {
-            X: ((art.width - side) / 2) as i32,
-            Y: ((art.height - side) / 2) as i32,
-            Width: side as i32,
-            Height: side as i32,
-        };
-        let clipper = wic.CreateBitmapClipper()?;
-        clipper.Initialize(&source, &square)?;
-        let small = wic.CreateBitmapScaler()?;
-        small.Initialize(&clipper, 5, 5, WICBitmapInterpolationModeFant)?;
-        let big = wic.CreateBitmapScaler()?;
-        big.Initialize(&small, FIELD, FIELD, WICBitmapInterpolationModeHighQualityCubic)?;
-        let mut pixels = vec![0u8; (FIELD * FIELD * 4) as usize];
-        big.CopyPixels(std::ptr::null(), FIELD * 4, &mut pixels)?;
-        for px in pixels.as_chunks_mut::<4>().0 {
-            let gray = (u32::from(px[0]) + u32::from(px[1]) + u32::from(px[2])) as f32 / 3.0;
-            let alpha = f32::from(px[3]);
-            for c in &mut px[..3] {
-                *c = (gray + (f32::from(*c) - gray) * 1.3).clamp(0.0, alpha) as u8;
-            }
-        }
-        Ok(pixels)
-    }
 }
 
 /// A brush of BGRA premultiplied pixels, smoothly scaled.
@@ -919,7 +871,7 @@ impl Share {
 
     fn copy(&mut self, hwnd: HWND) -> std::result::Result<(), String> {
         let (pixels, w, h) = self.render().map_err(|e| e.to_string())?;
-        let png = png(&pixels, w, h).map_err(|e| e.to_string())?;
+        let png = artwork::png(&pixels, w, h).map_err(|e| e.to_string())?;
         // CF_DIB: a header and the rows bottom-up.
         let header = BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -954,7 +906,7 @@ impl Share {
 
     fn save(&mut self) -> std::result::Result<std::path::PathBuf, String> {
         let (pixels, w, h) = self.render().map_err(|e| e.to_string())?;
-        let png = png(&pixels, w, h).map_err(|e| e.to_string())?;
+        let png = artwork::png(&pixels, w, h).map_err(|e| e.to_string())?;
         let dir = crate::settings_window::downloads()?;
         let base = file_name(&self.snapshot.artist, &self.snapshot.title);
         let mut file = dir.join(format!("{base}.png"));
@@ -1110,37 +1062,6 @@ fn file_name(artist: &str, title: &str) -> String {
         raw.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).take(80).collect();
     let clean = clean.trim().trim_end_matches('.');
     if clean.is_empty() { "lyrics".into() } else { format!("{clean} (lyrics)") }
-}
-
-/// Encodes opaque top-down BGRA pixels as PNG.
-fn png(pixels: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
-    unsafe {
-        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let stream = SHCreateMemStream(None).ok_or_else(|| Error::from_hresult(E_FAIL))?;
-        let encoder = wic.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
-        encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
-        let (mut frame, mut options) = (None, None);
-        encoder.CreateNewFrame(&mut frame, &mut options)?;
-        let frame = frame.ok_or_else(|| Error::from_hresult(E_FAIL))?;
-        frame.Initialize(options.as_ref())?;
-        frame.SetSize(w, h)?;
-        let mut format = GUID_WICPixelFormat32bppBGRA;
-        frame.SetPixelFormat(&mut format)?;
-        if format != GUID_WICPixelFormat32bppBGRA {
-            return Err(Error::from_hresult(E_FAIL));
-        }
-        frame.WritePixels(h, w * 4, pixels)?;
-        frame.Commit()?;
-        encoder.Commit()?;
-        let mut stat = STATSTG::default();
-        stream.Stat(&mut stat, STATFLAG_NONAME)?;
-        stream.Seek(0, STREAM_SEEK_SET, None)?;
-        let mut bytes = vec![0u8; stat.cbSize as usize];
-        let mut read = 0u32;
-        stream.Read(bytes.as_mut_ptr().cast(), bytes.len() as u32, Some(&mut read)).ok()?;
-        bytes.truncate(read as usize);
-        Ok(bytes)
-    }
 }
 
 /// Puts `bytes` on the open clipboard as `format`.

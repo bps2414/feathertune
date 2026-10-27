@@ -2,7 +2,7 @@
    halo of it right behind the cover on the player page that fades out in every direction, so the picture
    seems to go on forever. The site's page backgrounds turn transparent while it is on, so the glow
    shows through, and a dark scrim keeps the site's white text readable. The slow drift of the
-   background steps at about 10 frames a second (the blur is the costly part); it pauses while the window
+   background steps at about 10 frames a second (fewer frames to compose); it pauses while the window
    is hidden, minimized or in the background (`ft-still`). The halo does not move on its own. */
 #feathertune-ambient {
   position: fixed;
@@ -25,9 +25,10 @@
   opacity: 1;
 }
 
+/* The background is Rust's soft field of the cover, already saturated and darkened: no filter, so the
+   drift only moves a picture the compositor already has. */
 #feathertune-ambient .ft-bg .ft-layer {
   inset: -20%;
-  filter: blur(60px) saturate(1.7) brightness(0.65);
   transform: scale(1.2);
 }
 
@@ -148,8 +149,8 @@ html[data-feathertune-ambient] #player-bar-background {
   animation: ft-drift 90s steps(900) infinite alternate;
 }
 
-/* It also pauses while our synced lyrics show (lyrics/page.js sets the attribute): each step blurs the
-   whole background again on the GPU, which the lyrics' glide competes with. */
+/* It also pauses while our synced lyrics show (lyrics/page.js sets the attribute): each step composes the
+   whole window again, which the lyrics' glide competes with. */
 #feathertune-ambient.ft-still .ft-bg .ft-layer,
 html[data-feathertune-lyrics-open] #feathertune-ambient .ft-bg .ft-layer {
   animation-play-state: paused;

@@ -110,6 +110,19 @@ const lengthOf = (video) => {
   return video.duration;
 };
 
+// The playing queue entry's own length ("3:56" is 236), read with the queue in `where`. The player's
+// getDuration sometimes answers only what is loaded so far (20 s, then 38 s, then 50 s...), which makes the
+// lyrics sources miss the track; when the two are far apart for the same video, the queue's wins.
+let queueLength = { id: null, secs: 0 };
+const lengthSeconds = (r) => {
+  const t = r?.lengthText?.simpleText ?? (r?.lengthText?.runs || []).map((x) => x.text).join('');
+  const parts = String(t || '').split(':').map(Number);
+  if (parts.length > 3 || parts.some((n) => !Number.isInteger(n) || n < 0)) return 0;
+  return parts.reduce((total, n) => total * 60 + n, 0);
+};
+const trusted = (secs, id) =>
+  secs > 0 && queueLength.id === id && queueLength.secs > 0 && Math.abs(secs - queueLength.secs) > 3 ? queueLength.secs : secs;
+
 // While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
 const read = (video) => {
   const m = navigator.mediaSession?.metadata;
@@ -125,7 +138,7 @@ const read = (video) => {
     artist: m.artist || '',
     album: m.album || '',
     artwork: art,
-    duration: adShowing() ? 0 : num(lengthOf(video)),
+    duration: adShowing() ? 0 : num(trusted(lengthOf(video), id)),
     position: num(feathertune.clock.time(video)),
     paused: video.paused,
   };
@@ -153,6 +166,8 @@ const where = () => {
   out.queue = items.filter(Boolean).slice(0, MAX_QUEUE);
   const i = q.selectedItemIndex;
   if (Number.isInteger(i)) {
+    const r = q.items[i]?.playlistPanelVideoRenderer || q.items[i]?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
+    queueLength = { id: r?.videoId ?? null, secs: lengthSeconds(r) };
     // An index into the list without the entries that could not be read.
     if (items[i]) {
       const at = items.slice(0, i).filter(Boolean).length;
@@ -178,6 +193,7 @@ const send = (video, force, queueChanged = false) => {
   if (key === lastKey && !due && !queueChanged) return;
   // The site's state is only read here: on a change, not on every timeupdate.
   const w = where();
+  s.duration = Math.round(trusted(s.duration, s.id) * 10) / 10;
   const whereKey = [w.list, w.next?.id, w.current].join('\u0000');
   if (key === lastKey && !due && whereKey === lastWhere && w.queue.map((x) => x.id).join(',') === lastQueue) return;
   lastKey = key;

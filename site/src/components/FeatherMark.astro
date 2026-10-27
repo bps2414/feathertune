@@ -5,11 +5,12 @@ interface Props {
 const { size = 28 } = Astro.props;
 ---
 
+<!-- A feather drawn as a waveform: the bars follow a feather's outline along a quill. -->
 <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-  <circle cx="32" cy="32" r="32" fill="#5A4BDA"></circle>
-  <path
-    d="M48 12c-10 1-19 7-24 16l-3 8 6-2c-2 2-3 4-5 5l7-1c-2 2-4 3-6 4 10 1 19-6 23-15 3-6 3-11 2-15z"
-    fill="#fff"></path>
-  <path d="M44 18 28 38" stroke="#5A4BDA" stroke-width="2" stroke-linecap="round"></path>
-  <path d="M27 40 17 52" stroke="#fff" stroke-width="3.4" stroke-linecap="round"></path>
+  <rect width="64" height="64" rx="18" fill="#5A4BDA"></rect>
+  <g transform="rotate(-42 32 32)" stroke-linecap="round" fill="none">
+    <path d="M7 38H20" stroke="#fff" stroke-width="3.2"></path>
+    <path d="M22 33v8M29 28v11M36 24v13M43 25v11M50 30v6" stroke="#fff" stroke-width="4.6"></path>
+    <path d="M57 33h0" stroke="#FFC56B" stroke-width="4.6"></path>
+  </g>
 </svg>

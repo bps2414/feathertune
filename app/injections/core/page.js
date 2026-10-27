@@ -7,6 +7,8 @@
 // playlist (`list=` of the URL, for the mixes), the next track and, when it changed, the queue (at most
 // 200 tracks, with or without a playlist: radio and autoplay too) and the playing track's index in it,
 // read from the site's state on a track change and when the queue's DOM changes (an observer, no polling).
+// The playlists of the library (id and title, as the sidebar lists them, at most 100) go alone, for the phone
+// remote: when the sidebar's DOM changes (an observer), so also before anything plays.
 // One-way: Rust never sends anything back through here.
 // The site plays a queue back to back on one <video> (gapless): the next track is appended after the
 // one playing, so the video's time and duration go on counting from the first track. The player's
@@ -48,7 +50,15 @@ const SELECTORS = {
   // Its getState() is the site's state: `queue.items`, `selectedItemIndex`, `automixItems`, `repeatMode`.
   playerBar: 'ytmusic-player-bar',
   queue: '#queue',
+  // The sidebar, and its entries (a playlist's `data` browses to `VL<list>`; else its link has `list=`).
+  guide: 'ytmusic-guide-renderer',
+  guideEntries: 'ytmusic-guide-entry-renderer',
+  guideLink: 'a[href*="list="], a[href*="browse/VL"]',
 };
+const MAX_LIBRARY = 100;
+const LIBRARY_SETTLE_MS = 1000;
+// Tries to find the sidebar after load (it renders late); no polling once it is found or after the last try.
+const GUIDE_TRIES_MS = [1000, 3000, 8000, 20000];
 const REFRESH_MS = 15000;
 const MAX_QUEUE = 200;
 const QUEUE_SETTLE_MS = 500;
@@ -176,6 +186,53 @@ const watchQueue = () => {
   watched = queue;
 };
 
+// A sidebar entry as { list, title }, or null when it is not a playlist.
+const playlist = (entry) => {
+  const browse = entry.data?.navigationEndpoint?.browseEndpoint?.browseId;
+  let list = typeof browse === 'string' && browse.startsWith('VL') ? browse.slice(2) : null;
+  if (!list) {
+    const href = entry.querySelector(SELECTORS.guideLink)?.getAttribute('href') || '';
+    list = new URLSearchParams(href.split('?')[1] || '').get('list') || (href.match(/browse\/VL([A-Za-z0-9_-]+)/) || [])[1];
+  }
+  const runs = entry.data?.formattedTitle?.runs;
+  const title = (Array.isArray(runs) ? runs.map((r) => r.text).join('') : entry.querySelector('.title')?.textContent || '')
+    .trim()
+    .slice(0, 200);
+  return list && /^[A-Za-z0-9_-]{1,64}$/.test(list) && title ? { list, title } : null;
+};
+let lastLibrary = '';
+const sendLibrary = () => {
+  const seen = new Set();
+  const library = [];
+  for (const entry of document.querySelectorAll(`${SELECTORS.guide} ${SELECTORS.guideEntries}`)) {
+    const p = playlist(entry);
+    if (p && !seen.has(p.list) && library.length < MAX_LIBRARY) {
+      seen.add(p.list);
+      library.push(p);
+    }
+  }
+  const key = JSON.stringify(library);
+  if (key === lastLibrary) return;
+  lastLibrary = key;
+  window.__TAURI_INTERNALS__?.invoke('player_state', { state: JSON.stringify({ library }) }).catch(() => {});
+};
+let librarySettle = 0;
+let watchedGuide = null;
+const guideObserver = new MutationObserver(() => {
+  clearTimeout(librarySettle);
+  librarySettle = setTimeout(sendLibrary, LIBRARY_SETTLE_MS);
+});
+const watchGuide = () => {
+  const guide = document.querySelector(SELECTORS.guide);
+  if (!guide || guide === watchedGuide) return !!guide;
+  guideObserver.disconnect();
+  guideObserver.observe(guide, { childList: true, subtree: true });
+  watchedGuide = guide;
+  sendLibrary();
+  return true;
+};
+for (const ms of GUIDE_TRIES_MS) setTimeout(() => watchedGuide?.isConnected || watchGuide(), ms);
+
 // An ad starts or ends: the player's classes change (the media events may not say so by themselves).
 const adObserver = new MutationObserver(() => {
   if (video && adShowing() !== lastAd) send(video, true);
@@ -197,6 +254,7 @@ const onMedia = (e) => {
   if (e.type === 'loadedmetadata') {
     watchQueue();
     watchPlayer();
+    watchGuide();
   }
   if (e.type === 'volumechange') {
     clearTimeout(volumeSettle);

@@ -29,13 +29,22 @@ const TRACKS: Track[] = [
   colors: colors as Track['colors'],
 }));
 
+/** The made-up library: each playlist is the tracks in its own order (`order` indexes TRACKS). */
+const LIBRARY = [
+  { list: 'LM', title: 'Liked music', order: [0, 1, 2, 3, 4, 5, 6, 7] },
+  { list: 'PLfakeRoadTrip01', title: 'Road trip', order: [5, 3, 1, 7] },
+  { list: 'PLfakeQuietHours', title: 'Quiet hours', order: [6, 0, 4, 2] },
+];
+
 /** The colors of a new track arrive a little after the track itself (docs/REMOTE.md, `state`). */
 const COLORS_DELAY_MS = 600;
 /** Like the site: Previous past this restarts the track instead of leaving it. */
 const RESTART_AFTER = 3;
 
 export class Playback {
-  readonly tracks = TRACKS;
+  /** The queue, which the queue actions reorder and shorten. */
+  tracks: Track[] = [...TRACKS];
+  readonly library = LIBRARY.map(({ list, title }) => ({ list, title }));
   index = 0;
   paused = false;
   ad = false;
@@ -103,13 +112,52 @@ export class Playback {
     if (value > 0) this.muted = false;
   }
 
-  /** Plays the queue row `index` if it holds `id`, else the row of `id` closest to it (like the page). */
-  playItem(id: string, index: number): void {
+  /** The queue row `index` if it holds `id`, else the row of `id` closest to it (like the page); -1: none. */
+  private row(id: string, index: number): number {
     let best = -1;
     this.tracks.forEach((t, i) => {
       if (t.id === id && (best < 0 || Math.abs(i - index) < Math.abs(best - index))) best = i;
     });
-    if (best >= 0) this.go(best);
+    return best;
+  }
+
+  playItem(id: string, index: number): void {
+    const row = this.row(id, index);
+    if (row >= 0) this.go(row);
+  }
+
+  /** Moves a row to `to`, the playing track staying the one that plays. */
+  queueMove(id: string, index: number, to: number): void {
+    const from = this.row(id, index);
+    if (from < 0 || from === this.index) return;
+    const playing = this.track;
+    const [moved] = this.tracks.splice(from, 1);
+    this.tracks.splice(Math.min(to, this.tracks.length), 0, moved);
+    this.index = this.tracks.indexOf(playing);
+  }
+
+  /** Right after the playing track (the menu's "play next"). */
+  queueNext(id: string, index: number): void {
+    const from = this.row(id, index);
+    if (from >= 0) this.queueMove(id, from, from < this.index ? this.index : this.index + 1);
+  }
+
+  /** Out of the queue; the playing track cannot be removed (the site's menu does not offer it). */
+  queueRemove(id: string, index: number): void {
+    const from = this.row(id, index);
+    if (from < 0 || from === this.index) return;
+    const playing = this.track;
+    this.tracks.splice(from, 1);
+    this.index = this.tracks.indexOf(playing);
+  }
+
+  /** Plays a playlist of the library from its first track; an unknown id changes nothing. */
+  openPlaylist(list: string): void {
+    const playlist = LIBRARY.find((p) => p.list === list);
+    if (!playlist) return;
+    this.tracks = playlist.order.map((i) => TRACKS[i]);
+    this.go(0);
+    this.paused = false;
   }
 
   setAd(on: boolean): void {
@@ -152,5 +200,9 @@ export class Playback {
       items: this.tracks.map(({ id, title, artist }) => ({ id, title, artist })),
       current: this.index,
     };
+  }
+
+  libraryMessage() {
+    return { t: 'library', items: this.library };
   }
 }

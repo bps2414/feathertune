@@ -2,6 +2,14 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.5.0 — 2026-10-26
+
+- **Phone remote: a new look.** The player sits on a gradient from the album's colors, with an "up next" bar, a Player and a Library tab, and the queue in a sheet. The app now has its own icon (the PC app's feather) and a start screen.
+- **Live volume from the phone.** The PC's volume follows the slider while you drag it, not only when you let go.
+- **Reorder the queue from the phone.** Drag a track by its handle, or use a track's menu for Play next and Remove.
+- **Play a playlist of your library from the phone.** The Library tab lists the playlists of the site's sidebar; tap one to play it on the PC.
+- The remote protocol is now version 2. The 0.1.0 phone app still works with this PC; the new phone app hides queue editing and the library on an older PC and asks to update it. Android APK: `feathertune-remote-0.2.0.apk`, attached to this release; it installs over 0.1.0.
+
 ## 0.4.1 — 2026-10-24
 
 - **Enable Lyrics tab when external lyrics are found.** When YouTube Music says a track has no lyrics (the Lyrics tab button is grayed out/disabled), but feathertune finds synchronized lyrics from external sources, the tab button is now automatically enabled and clickable so you can open and view the lyrics.

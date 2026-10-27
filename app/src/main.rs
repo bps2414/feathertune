@@ -486,8 +486,18 @@ fn volume_call(percent: f64) -> Option<String> {
     (0.0..=100.0).contains(&percent).then(|| format!("setVolume({percent})"))
 }
 
-fn play_item_call(id: &str, index: usize) -> Option<String> {
-    (player::valid_id(id) && index < MAX_QUEUE_ROWS).then(|| format!("playItem(\"{id}\",{index})"))
+/// `method` on queue row `index` of track `id` (`playItem`, `queueNext`, `queueRemove`).
+fn row_call(method: &str, id: &str, index: usize) -> Option<String> {
+    (player::valid_id(id) && index < MAX_QUEUE_ROWS).then(|| format!("{method}(\"{id}\",{index})"))
+}
+
+fn queue_move_call(id: &str, index: usize, to: usize) -> Option<String> {
+    (player::valid_id(id) && index < MAX_QUEUE_ROWS && to < MAX_QUEUE_ROWS && to != index)
+        .then(|| format!("queueMove(\"{id}\",{index},{to})"))
+}
+
+fn open_playlist_call(list: &str) -> Option<String> {
+    player::valid_list(list).then(|| format!("openPlaylist(\"{list}\")"))
 }
 
 /// Seeks the track to `seconds` (finite, >= 0). Refused by the page during an ad.
@@ -502,7 +512,27 @@ pub(crate) fn player_set_volume(app: &AppHandle, percent: f64) -> bool {
 
 /// Plays queue row `index` if its video id is `id`. Refused by the page during an ad.
 pub(crate) fn player_play_item(app: &AppHandle, id: &str, index: usize) -> bool {
-    play_item_call(id, index).is_some_and(|call| player_call(app, &call))
+    row_call("playItem", id, index).is_some_and(|call| player_call(app, &call))
+}
+
+/// Moves queue row `index` (track `id`) right after the playing track. Refused by the page during an ad.
+pub(crate) fn player_queue_next(app: &AppHandle, id: &str, index: usize) -> bool {
+    row_call("queueNext", id, index).is_some_and(|call| player_call(app, &call))
+}
+
+/// Removes queue row `index` (track `id`) from the queue. Refused by the page during an ad.
+pub(crate) fn player_queue_remove(app: &AppHandle, id: &str, index: usize) -> bool {
+    row_call("queueRemove", id, index).is_some_and(|call| player_call(app, &call))
+}
+
+/// Moves queue row `index` (track `id`) to row `to`. Refused by the page during an ad.
+pub(crate) fn player_queue_move(app: &AppHandle, id: &str, index: usize, to: usize) -> bool {
+    queue_move_call(id, index, to).is_some_and(|call| player_call(app, &call))
+}
+
+/// Plays playlist `list` (a `list=` id). Refused by the page during an ad.
+pub(crate) fn player_open_playlist(app: &AppHandle, list: &str) -> bool {
+    open_playlist_call(list).is_some_and(|call| player_call(app, &call))
 }
 
 /// Hidden: window off, WebView2 not visible and MemoryUsageTargetLevel=Low (page memory goes to
@@ -701,12 +731,24 @@ mod tests {
     }
 
     #[test]
-    fn play_item_needs_a_video_id_and_a_row_below_200() {
-        assert_eq!(play_item_call("dQw4w9WgXcQ", 0).as_deref(), Some(r#"playItem("dQw4w9WgXcQ",0)"#));
-        assert!(play_item_call("dQw4w9WgXcQ", 199).is_some());
-        assert_eq!(play_item_call("dQw4w9WgXcQ", 200), None);
+    fn row_calls_need_a_video_id_and_a_row_below_200() {
+        assert_eq!(row_call("playItem", "dQw4w9WgXcQ", 0).as_deref(), Some(r#"playItem("dQw4w9WgXcQ",0)"#));
+        assert!(row_call("playItem", "dQw4w9WgXcQ", 199).is_some());
+        assert_eq!(row_call("playItem", "dQw4w9WgXcQ", 200), None);
         for bad in ["", "short", "dQw4w9WgXcQx", "dQw4w9WgXc\"", "dQw4w9WgXc;", "dQw4w9WgXc "] {
-            assert_eq!(play_item_call(bad, 0), None, "{bad:?}");
+            assert_eq!(row_call("queueRemove", bad, 0), None, "{bad:?}");
+        }
+        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 0).as_deref(), Some(r#"queueMove("dQw4w9WgXcQ",3,0)"#));
+        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 3), None);
+        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 200), None);
+        assert_eq!(queue_move_call("bad", 3, 1), None);
+    }
+
+    #[test]
+    fn open_playlist_needs_a_list_id() {
+        assert_eq!(open_playlist_call("PLx_1-2").as_deref(), Some(r#"openPlaylist("PLx_1-2")"#));
+        for bad in ["", "a\"b", "../x", "a b", &"a".repeat(65)] {
+            assert_eq!(open_playlist_call(bad), None, "{bad:?}");
         }
     }
 }

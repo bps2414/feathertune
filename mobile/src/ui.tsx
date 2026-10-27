@@ -512,6 +512,33 @@ export function Glyph({ name, size, color }: { name: GlyphName; size: number; co
         </View>
       );
       break;
+    case 'handle':
+      body = (
+        <View style={{ gap: s * 0.16 }}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={bar(s * 0.62, s * 0.09)} />
+          ))}
+        </View>
+      );
+      break;
+    case 'more':
+      body = (
+        <View style={[styles.row, { gap: s * 0.14 }]}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={bar(s * 0.15, s * 0.15)} />
+          ))}
+        </View>
+      );
+      break;
+    case 'library':
+      body = (
+        <View style={[styles.row, { alignItems: 'flex-end', gap: s * 0.1 }]}>
+          <View style={bar(s * 0.13, s * 0.7)} />
+          <View style={bar(s * 0.13, s * 0.7)} />
+          <View style={[bar(s * 0.13, s * 0.72), { transform: [{ rotate: '-18deg' }], marginLeft: s * 0.06 }]} />
+        </View>
+      );
+      break;
     case 'playing':
       body = (
         <View style={[styles.row, { alignItems: 'flex-end', gap: s * 0.12, height: s * 0.8 }]}>
@@ -529,7 +556,18 @@ export function Glyph({ name, size, color }: { name: GlyphName; size: number; co
   );
 }
 
-export type GlyphName = 'play' | 'pause' | 'next' | 'previous' | 'queue' | 'down' | 'speaker' | 'playing';
+export type GlyphName =
+  | 'play'
+  | 'pause'
+  | 'next'
+  | 'previous'
+  | 'queue'
+  | 'down'
+  | 'speaker'
+  | 'playing'
+  | 'handle'
+  | 'more'
+  | 'library';
 
 /** A round button holding a glyph; `size` is its diameter (at least 48, the touch target). */
 export function IconButton(props: {

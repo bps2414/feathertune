@@ -11,9 +11,9 @@
 //!   first `ping` (which a replayed handshake cannot produce).
 //! - The PC's static key is in the Windows credential store (keyring); the paired phones (name, public key,
 //!   when) are in `remote-devices.json` in the profile.
-//! - Sessions get `hello`, then `state` (on every `player::Event`) and `queue` (on every queue change).
-//!   Commands go to the `controls` injection through main.rs's player functions; all but play and pause are
-//!   refused while an ad plays.
+//! - Sessions get `hello`, then `state` (on every `player::Event`), `queue` (on every queue change) and
+//!   `library` (the library's playlists, on every change). Commands go to the `controls` injection through
+//!   main.rs's player functions; all but play and pause are refused while an ad plays.
 //! - The managed `Remote` is the API for the settings window: `start_pairing`, `stop_pairing`, `pairing`,
 //!   `pending`, `answer`, `devices`, `remove`, `forget_all`, `listening` and `on_change`.
 
@@ -41,14 +41,17 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{self, Message, http};
 
-use crate::player::{Event, Player, Queue, State};
+use crate::player::{Event, Player, Playlist, Queue, State};
 use crate::settings::Live;
 
 pub const DEFAULT_PORT: u16 = 47652;
 pub const DEFAULT_NAME: &str = "feathertune";
 /// Protocol version (`hello`'s `v`) and the oldest one this PC still speaks (`min`).
-const VERSION: u32 = 1;
+/// 2 added the queue actions, `open_playlist` and `library`; a version 1 phone just never sends them.
+const VERSION: u32 = 2;
 const MIN_VERSION: u32 = 1;
+/// The pairing QR's own format (its `v`), which version 2 did not change.
+const QR_VERSION: u32 = 1;
 const PAIR_PATTERN: &str = "Noise_IKpsk2_25519_ChaChaPoly_SHA256";
 const KK_PATTERN: &str = "Noise_KK_25519_ChaChaPoly_SHA256";
 const PAIR_PROLOGUE: &[u8] = b"feathertune-remote/1 pair";
@@ -122,6 +125,8 @@ trait Host: Send + Sync + 'static {
     fn queue(&self) -> Queue;
     fn subscribe(&self) -> broadcast::Receiver<Event>;
     fn subscribe_queue(&self) -> broadcast::Receiver<Queue>;
+    fn library(&self) -> Vec<Playlist>;
+    fn subscribe_library(&self) -> broadcast::Receiver<Vec<Playlist>>;
     fn colors(&self) -> Vec<String>;
     /// Sends a validated command to the page; false when there was no page to send it to.
     fn run(&self, command: &Command) -> bool;
@@ -146,6 +151,14 @@ impl Host for AppHost {
         self.0.state::<Player>().subscribe_queue()
     }
 
+    fn library(&self) -> Vec<Playlist> {
+        self.0.state::<Player>().library()
+    }
+
+    fn subscribe_library(&self) -> broadcast::Receiver<Vec<Playlist>> {
+        self.0.state::<Player>().subscribe_library()
+    }
+
     fn colors(&self) -> Vec<String> {
         crate::album_color::colors()
     }
@@ -160,6 +173,10 @@ impl Host for AppHost {
             Command::Seek { s } => crate::player_seek(app, *s),
             Command::Volume { v } => crate::player_set_volume(app, *v),
             Command::PlayItem { id, i } => crate::player_play_item(app, id, *i),
+            Command::QueueNext { id, i } => crate::player_queue_next(app, id, *i),
+            Command::QueueRemove { id, i } => crate::player_queue_remove(app, id, *i),
+            Command::QueueMove { id, i, to } => crate::player_queue_move(app, id, *i, *to),
+            Command::OpenPlaylist { list } => crate::player_open_playlist(app, list),
         }
     }
 }
@@ -182,14 +199,21 @@ enum Command {
     Seek { s: f64 },
     Volume { v: f64 },
     PlayItem { id: String, i: usize },
+    QueueNext { id: String, i: usize },
+    QueueRemove { id: String, i: usize },
+    QueueMove { id: String, i: usize, to: usize },
+    OpenPlaylist { list: String },
 }
 
 impl Command {
     fn valid(&self) -> bool {
+        let row = |id: &str, i: usize| crate::player::valid_id(id) && i < MAX_QUEUE;
         match self {
             Command::Seek { s } => s.is_finite() && (0.0..=MAX_SECONDS).contains(s),
             Command::Volume { v } => v.is_finite() && (0.0..=100.0).contains(v),
-            Command::PlayItem { id, i } => crate::player::valid_id(id) && *i < MAX_QUEUE,
+            Command::PlayItem { id, i } | Command::QueueNext { id, i } | Command::QueueRemove { id, i } => row(id, *i),
+            Command::QueueMove { id, i, to } => row(id, *i) && *to < MAX_QUEUE && to != i,
+            Command::OpenPlaylist { list } => crate::player::valid_list(list),
             _ => true,
         }
     }
@@ -543,11 +567,13 @@ impl Shared {
             }
         }
         let port = listeners[0].local_addr().map_err(|e| e.to_string())?.port();
-        let (events, queues) = (self.host.subscribe(), self.host.subscribe_queue());
+        let (events, queues, library) =
+            (self.host.subscribe(), self.host.subscribe_queue(), self.host.subscribe_library());
         let mut tasks: Vec<JoinHandle<()>> =
             listeners.into_iter().map(|l| async_runtime::spawn(accept(self.clone(), l))).collect();
         tasks.push(async_runtime::spawn(forward_states(self.clone(), events)));
         tasks.push(async_runtime::spawn(forward_queues(self.clone(), queues)));
+        tasks.push(async_runtime::spawn(forward_library(self.clone(), library)));
         self.lock().running = Some(Running { port, tasks });
         Ok(port)
     }
@@ -731,9 +757,13 @@ impl Shared {
             return Err(Close::Busy);
         }
         let hello = json!({ "t": "hello", "v": VERSION, "min": MIN_VERSION, "name": inner.name });
-        for message in
-            [Some(hello), state_json(&*self.host), Some(queue_json(&self.host.queue()))].into_iter().flatten()
-        {
+        let intro = [
+            Some(hello),
+            state_json(&*self.host),
+            Some(queue_json(&self.host.queue())),
+            Some(library_json(&self.host.library())),
+        ];
+        for message in intro.into_iter().flatten() {
             let _ = tx.try_send(Out::Json(message));
         }
         inner.next_session += 1;
@@ -888,6 +918,16 @@ async fn forward_queues(shared: Arc<Shared>, mut rx: broadcast::Receiver<Queue>)
     }
 }
 
+async fn forward_library(shared: Arc<Shared>, mut rx: broadcast::Receiver<Vec<Playlist>>) {
+    loop {
+        match rx.recv().await {
+            Ok(library) => shared.broadcast(library_json(&library)),
+            Err(RecvError::Lagged(_)) => shared.broadcast(library_json(&shared.host.library())),
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
+
 /// The bytes of a binary frame; `None` for a control frame, which is skipped.
 fn frame(next: Option<Result<Message, tungstenite::Error>>) -> Result<Option<Vec<u8>>, Close> {
     match next {
@@ -966,6 +1006,11 @@ fn queue_json(queue: &Queue) -> Value {
     }
 }
 
+/// The library message: at most 100 playlists of 200 characters, so it always fits.
+fn library_json(library: &[Playlist]) -> Value {
+    json!({ "t": "library", "items": library })
+}
+
 fn error(code: &str) -> Value {
     json!({ "t": "error", "code": code })
 }
@@ -1001,7 +1046,7 @@ fn lan_addresses() -> Vec<IpAddr> {
 
 fn pairing_uri(addrs: &[IpAddr], port: u16, key: &[u8; 32], secret: &[u8; 32]) -> String {
     let addrs: Vec<String> = addrs.iter().map(IpAddr::to_string).collect();
-    format!("feathertune://pair?v={VERSION}&k={}&s={}&a={}&p={port}", hex(key), hex(secret), addrs.join(","))
+    format!("feathertune://pair?v={QR_VERSION}&k={}&s={}&a={}&p={port}", hex(key), hex(secret), addrs.join(","))
 }
 
 /// The 6 digits both screens show: the first 4 bytes of the handshake hash, big-endian, modulo 1 000 000.
@@ -1106,6 +1151,7 @@ mod tests {
         state: Mutex<Option<State>>,
         events: broadcast::Sender<Event>,
         queues: broadcast::Sender<Queue>,
+        libraries: broadcast::Sender<Vec<Playlist>>,
         ran: Mutex<Vec<String>>,
     }
 
@@ -1138,6 +1184,14 @@ mod tests {
 
         fn subscribe_queue(&self) -> broadcast::Receiver<Queue> {
             self.queues.subscribe()
+        }
+
+        fn library(&self) -> Vec<Playlist> {
+            vec![Playlist { list: "LM".into(), title: "Liked".into() }]
+        }
+
+        fn subscribe_library(&self) -> broadcast::Receiver<Vec<Playlist>> {
+            self.libraries.subscribe()
         }
 
         fn colors(&self) -> Vec<String> {
@@ -1175,6 +1229,7 @@ mod tests {
             state: Mutex::new(None),
             events: broadcast::channel(8).0,
             queues: broadcast::channel(8).0,
+            libraries: broadcast::channel(4).0,
             ran: Mutex::new(Vec::new()),
         });
         let dir = std::env::temp_dir().join(format!(
@@ -1236,7 +1291,7 @@ mod tests {
         /// Reads `hello`, `state` (when one is set), `queue` and, after a knock, the pong to its first ping.
         async fn intro(&mut self) -> Vec<Value> {
             let mut out = Vec::new();
-            let last = if self.knocked { "pong" } else { "queue" };
+            let last = if self.knocked { "pong" } else { "library" };
             loop {
                 let m = self.recv().await.unwrap();
                 let done = m["t"] == last;
@@ -1350,8 +1405,9 @@ mod tests {
             assert_eq!(phone.code.len(), 6);
             assert!(shared.answer(true));
             let intro = phone.intro().await;
-            assert_eq!(intro[0], json!({ "t": "hello", "v": 1, "min": 1, "name": "feathertune" }));
-            assert_eq!(intro.last().unwrap()["items"][0]["id"], "aaaaaaaaaaa");
+            assert_eq!(intro[0], json!({ "t": "hello", "v": 2, "min": 1, "name": "feathertune" }));
+            assert_eq!(intro[intro.len() - 2]["items"][0]["id"], "aaaaaaaaaaa");
+            assert_eq!(intro.last().unwrap()["items"][0]["list"], "LM");
             let devices = shared.devices();
             assert_eq!(devices.len(), 1);
             assert_eq!((devices[0].name.as_str(), devices[0].key.clone()), ("Pixel 9", hex(&keys.public)));
@@ -1450,7 +1506,7 @@ mod tests {
             let intro = phone.intro().await;
             assert_eq!(
                 intro.iter().map(|m| m["t"].as_str().unwrap()).collect::<Vec<_>>(),
-                ["hello", "state", "queue", "pong"]
+                ["hello", "state", "queue", "library", "pong"]
             );
             let s = &intro[1];
             assert_eq!(
@@ -1465,9 +1521,61 @@ mod tests {
             let pong = phone.recv().await.unwrap();
             assert_eq!((pong["t"].as_str(), pong["n"].as_u64()), (Some("pong"), Some(7)));
             assert_eq!(host.ran(), ["Next", "Seek { s: 12.5 }", r#"PlayItem { id: "aaaaaaaaaaa", i: 0 }"#]);
+            assert_eq!(intro[3], json!({ "t": "library", "items": [{ "list": "LM", "title": "Liked" }] }));
             // A player event reaches the session.
             host.set_state(State { volume: 55, ..state(false) });
             assert_eq!(phone.recv().await.unwrap()["volume"], 55);
+        });
+    }
+
+    #[test]
+    fn queue_actions_and_playlists_are_checked_then_reach_the_player() {
+        block_on(async {
+            let (shared, host, addr) = server();
+            let keys = paired(&shared, addr).await;
+            host.set_state(state(false));
+            let mut phone = knock(addr, &pc_key(&shared), &keys).await.unwrap();
+            phone.intro().await;
+            for bad in [
+                r#""c":"queue_move","id":"aaaaaaaaaaa","i":2,"to":2"#,
+                r#""c":"queue_move","id":"aaaaaaaaaaa","i":2,"to":200"#,
+                r#""c":"queue_next","id":"short","i":0"#,
+                r#""c":"queue_remove","id":"aaaaaaaaaaa","i":200"#,
+                r#""c":"open_playlist","list":"../x""#,
+                r#""c":"open_playlist","list":"LM","extra":1"#,
+            ] {
+                phone.send(&format!(r#"{{"t":"cmd",{bad}}}"#)).await;
+                assert_eq!(phone.recv().await.unwrap(), json!({ "t": "error", "code": "invalid" }), "{bad}");
+            }
+            phone.send(r#"{"t":"cmd","c":"queue_move","id":"aaaaaaaaaaa","i":3,"to":0}"#).await;
+            phone.send(r#"{"t":"cmd","c":"queue_next","id":"aaaaaaaaaaa","i":1}"#).await;
+            phone.send(r#"{"t":"cmd","c":"queue_remove","id":"aaaaaaaaaaa","i":1}"#).await;
+            phone.send(r#"{"t":"cmd","c":"open_playlist","list":"PLx_1-2"}"#).await;
+            phone.send(r#"{"t":"ping","n":2}"#).await;
+            assert_eq!(phone.recv().await.unwrap()["t"], "pong");
+            assert_eq!(
+                host.ran(),
+                [
+                    r#"QueueMove { id: "aaaaaaaaaaa", i: 3, to: 0 }"#,
+                    r#"QueueNext { id: "aaaaaaaaaaa", i: 1 }"#,
+                    r#"QueueRemove { id: "aaaaaaaaaaa", i: 1 }"#,
+                    r#"OpenPlaylist { list: "PLx_1-2" }"#,
+                ]
+            );
+            // A library change reaches the session.
+            let _ = host.libraries.send(vec![]);
+            assert_eq!(phone.recv().await.unwrap(), json!({ "t": "library", "items": [] }));
+
+            host.set_state(state(true));
+            assert_eq!(phone.recv().await.unwrap()["ad"], true);
+            for c in [
+                r#""c":"queue_next","id":"aaaaaaaaaaa","i":1"#,
+                r#""c":"queue_move","id":"aaaaaaaaaaa","i":3,"to":0"#,
+                r#""c":"open_playlist","list":"LM""#,
+            ] {
+                phone.send(&format!(r#"{{"t":"cmd",{c}}}"#)).await;
+                assert_eq!(phone.recv().await.unwrap(), json!({ "t": "error", "code": "ad" }), "{c}");
+            }
         });
     }
 

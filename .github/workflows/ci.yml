@@ -120,3 +120,43 @@ jobs:
           awk -v v="$version" '/^## /{on = ($2 == v); next} on' ../CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "no CHANGELOG.md section for $version"; exit 1; fi
           gh release create "$TAG" target/dist/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md
+
+  # The phone remote's Android APK, attached to the release that `dist` created (only on a `v*` tag). Signed
+  # with the debug key of Expo's template, the one every earlier APK used, so a new one installs over the old;
+  # the hash check stops the job if the template ever ships another key.
+  android:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: dist
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec expo prebuild --platform android --clean --no-install
+      - run: echo "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58  android/app/debug.keystore" | sha256sum -c -
+      - uses: gradle/actions/setup-gradle@v5
+      - run: ./gradlew assembleRelease --no-daemon
+        working-directory: mobile/android
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(node -p "require('./app.json').expo.version")
+          cp android/app/build/outputs/apk/release/app-release.apk "feathertune-remote-$version.apk"
+          gh release upload "$TAG" "feathertune-remote-$version.apk" --clobber

@@ -2,10 +2,11 @@
   "expo": {
     "name": "feathertune remote",
     "slug": "feathertune-remote",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "scheme": "feathertune-remote",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
     "ios": {
       "bundleIdentifier": "dev.feathertune.remote",
       "infoPlist": {
@@ -16,6 +17,12 @@
     },
     "android": {
       "package": "dev.feathertune.remote",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/monochrome-icon.png",
+        "backgroundColor": "#5b4bdb"
+      },
       "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.CAMERA"],
       "blockedPermissions": ["android.permission.RECORD_AUDIO"]
     },
@@ -24,6 +31,15 @@
       "expo-localization",
       "expo-status-bar",
       "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 140,
+          "backgroundColor": "#f3f4f8",
+          "dark": { "image": "./assets/splash-icon.png", "backgroundColor": "#171a22" }
+        }
+      ],
       [
         "expo-camera",
         {

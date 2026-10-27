@@ -216,7 +216,7 @@ async function paired(pc: FakePc, port: number, name = 'Phone'): Promise<KeyPair
 async function session(port: number, pc: FakePc, keys: KeyPair): Promise<Phone> {
   const phone = await knock(port, pc.publicKey, keys);
   if (typeof phone === 'number') throw new Error(`session closed ${phone}`);
-  for (const t of ['hello', 'state', 'queue', 'pong']) expect((await phone.recv()).t).toBe(t);
+  for (const t of ['hello', 'state', 'queue', 'library', 'pong']) expect((await phone.recv()).t).toBe(t);
   return phone;
 }
 
@@ -234,12 +234,13 @@ describe('pairing and a session', () => {
     expect(phone.code).toMatch(/^\d{6}$/);
     expect(pc.answer(true)).toBe(true);
 
-    expect(await phone.recv()).toEqual({ t: 'hello', v: 1, min: 1, name: 'feathertune' });
+    expect(await phone.recv()).toEqual({ t: 'hello', v: 2, min: 1, name: 'feathertune' });
     const state = await phone.recv();
     expect(state).toMatchObject({ t: 'state', paused: false, ad: false, volume: 70, track: { id: 'fakeTrk0001', artwork: null } });
     expect(state.colors).toHaveLength(3);
     const queue = await phone.recv();
     expect([queue.t, queue.items.length, queue.current]).toEqual(['queue', 8, 0]);
+    expect(await phone.recv()).toEqual({ t: 'library', items: [{ list: 'LM', title: 'Liked music' }, { list: 'PLfakeRoadTrip01', title: 'Road trip' }, { list: 'PLfakeQuietHours', title: 'Quiet hours' }] });
     expect(Object.keys(queue.items[0])).toEqual(['id', 'title', 'artist']);
     expect(pc.getDevices()).toEqual([{ key: bytesToHex(keys.publicKey), name: 'Pixel 9', paired: 1_700_000_000, connected: true }]);
     expect(JSON.parse(readFileSync(join(dir, 'fake-pc.json'), 'utf8')).devices[0].name).toBe('Pixel 9');
@@ -253,6 +254,7 @@ describe('pairing and a session', () => {
     expect((await quiet.recv()).t).toBe('hello');
     expect((await quiet.recv()).t).toBe('state');
     expect((await quiet.recv()).t).toBe('queue');
+    expect((await quiet.recv()).t).toBe('library');
     expect(await quiet.recv()).toMatchObject({ t: 'pong', n: 41, at: clock.now });
     quiet.link.ws.terminate();
 

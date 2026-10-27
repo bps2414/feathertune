@@ -4,8 +4,10 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
-/** The protocol version this app speaks; a PC's `hello` must have it within `min`..`v`. */
-export const PROTOCOL = 1;
+/** The newest protocol version this app speaks (a PC's `min` must not be above it) and the oldest PC it still
+ * talks to. Version 2 added the queue actions, `open_playlist` and `library`; with a version 1 PC they are hidden. */
+export const PROTOCOL = 2;
+export const OLDEST_PC = 1;
 export const DEFAULT_PORT = 47652;
 export const PAIR_PROLOGUE = new TextEncoder().encode('feathertune-remote/1 pair');
 export const KK_PROLOGUE = new TextEncoder().encode('feathertune-remote/1');
@@ -165,10 +167,17 @@ export interface QueueState {
   current: number | null;
 }
 
+/** A playlist of the PC's library: its id (`list=`) and title. */
+export interface Playlist {
+  list: string;
+  title: string;
+}
+
 export type PcMessage =
   | ({ t: 'hello' } & Hello)
   | ({ t: 'state' } & PlayerState)
   | ({ t: 'queue' } & QueueState)
+  | { t: 'library'; items: Playlist[] }
   | { t: 'error'; code: 'ad' | 'unavailable' | 'invalid' }
   | { t: 'pong'; n: number; at: number };
 
@@ -176,7 +185,14 @@ export type Command =
   | { c: 'play' | 'pause' | 'next' | 'previous' }
   | { c: 'seek'; s: number }
   | { c: 'volume'; v: number }
-  | { c: 'play_item'; id: string; i: number };
+  | { c: 'play_item' | 'queue_next' | 'queue_remove'; id: string; i: number }
+  | { c: 'queue_move'; id: string; i: number; to: number }
+  | { c: 'open_playlist'; list: string };
+
+/** True when the PC knows the version 2 commands and sends `library`. */
+export function hasQueueActions(hello: Hello | null): boolean {
+  return (hello?.v ?? 0) >= 2;
+}
 
 type Json = Record<string, unknown>;
 
@@ -186,6 +202,7 @@ const bool = (v: unknown): v is boolean => typeof v === 'boolean';
 const obj = (v: unknown): v is Json => v !== null && typeof v === 'object' && !Array.isArray(v);
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const COLOR = /^#[0-9a-fA-F]{6}$/;
+const LIST = /^[A-Za-z0-9_-]{1,64}$/;
 
 function track(v: unknown): Track | null {
   if (!obj(v) || !str(v.title) || !str(v.artist) || !str(v.album) || !num(v.duration) || v.duration < 0) return null;
@@ -227,6 +244,15 @@ export function parsePcMessage(bytes: Uint8Array): PcMessage | null {
       const current = Number.isInteger(m.current) && (m.current as number) >= 0 && (m.current as number) < items.length ? (m.current as number) : null;
       return { t: 'queue', items, current };
     }
+    case 'library': {
+      if (!Array.isArray(m.items)) return null;
+      const items: Playlist[] = [];
+      for (const item of m.items.slice(0, 100)) {
+        if (!obj(item) || !str(item.list) || !LIST.test(item.list) || !str(item.title)) return null;
+        items.push({ list: item.list, title: item.title.trim().slice(0, 200) || item.list });
+      }
+      return { t: 'library', items };
+    }
     case 'error':
       return m.code === 'ad' || m.code === 'unavailable' || m.code === 'invalid' ? { t: 'error', code: m.code } : null;
     case 'pong':
@@ -239,6 +265,6 @@ export function parsePcMessage(bytes: Uint8Array): PcMessage | null {
 /** Null when this app and the PC share a version; otherwise which side to update. */
 export function versionProblem(hello: Hello): 'update_app' | 'update_pc' | null {
   if (PROTOCOL < hello.min) return 'update_app';
-  if (PROTOCOL > hello.v) return 'update_pc';
+  if (hello.v < OLDEST_PC) return 'update_pc';
   return null;
 }

@@ -74,7 +74,7 @@ describe('pairing', () => {
     await pairWith(first, pc, true);
     const state = await until(first, (s) => s.status === 'connected' && s.queue !== null);
     expect(state.pairing.status).toBe('done');
-    expect(state.hello).toEqual({ v: 1, min: 1, name: 'feathertune' });
+    expect(state.hello).toEqual({ v: 2, min: 1, name: 'feathertune' });
     expect(state.pcs).toEqual([
       expect.objectContaining({ name: 'feathertune', key: pc.publicKey, addresses: ['127.0.0.2', '127.0.0.1'], port, lastAddress: '127.0.0.1' }),
     ]);
@@ -171,7 +171,7 @@ describe('the connection', () => {
   });
 
   it('refuses a PC outside its version range and says which side to update', async () => {
-    const newer = await start({ version: { v: 3, min: 2 } });
+    const newer = await start({ version: { v: 4, min: 3 } });
     const app = phone();
     await pairWith(app, newer.pc, true);
     await until(app, (s) => s.status === 'failed' && s.problem === 'update_app');
@@ -247,5 +247,66 @@ describe('the connection', () => {
     // Leave ad
     pc.setAd(false);
     await until(client, (s) => s.player?.ad === false);
+  });
+
+  it('follows a stream of volume commands, as a slider being dragged sends them', async () => {
+    const { pc } = await start();
+    const client = phone();
+    await pairWith(client, pc, true);
+    await until(client, (s) => s.status === 'connected' && s.player !== null);
+    for (const v of [60, 52, 41, 33, 20]) client.command({ c: 'volume', v });
+    await until(client, (s) => s.player?.volume === 20);
+    expect(pc.playback.volume).toBe(20);
+  });
+
+  it('reorders, removes and plays next in the queue, and plays a playlist of the library', async () => {
+    const { pc } = await start();
+    const client = phone();
+    await pairWith(client, pc, true);
+    const { queue, library, hello } = await until(client, (s) => s.status === 'connected' && s.queue !== null && s.library !== null);
+    expect(hello?.v).toBe(2);
+    expect(library?.map((p) => p.title)).toEqual(['Liked music', 'Road trip', 'Quiet hours']);
+    const ids = queue!.items.map((item) => item.id);
+    const order = () => client.store.getState().queue!.items.map((item) => item.id);
+
+    client.command({ c: 'queue_move', id: ids[5], i: 5, to: 2 });
+    await until(client, (s) => s.queue!.items[2].id === ids[5]);
+    expect(order()).toEqual([ids[0], ids[1], ids[5], ids[2], ids[3], ids[4], ids[6], ids[7]]);
+
+    client.command({ c: 'queue_next', id: ids[7], i: 7 });
+    await until(client, (s) => s.queue!.items[1].id === ids[7]);
+
+    client.command({ c: 'queue_remove', id: ids[3], i: 5 });
+    await until(client, (s) => s.queue!.items.length === 7);
+    expect(order()).not.toContain(ids[3]);
+    expect(client.store.getState().queue!.current).toBe(0);
+
+    client.command({ c: 'open_playlist', list: 'PLfakeRoadTrip01' });
+    await until(client, (s) => s.queue!.items.length === 4 && s.player?.track.id === s.queue!.items[0].id);
+
+    // During an ad only play and pause go through.
+    pc.setAd(true);
+    await until(client, (s) => s.player?.ad === true);
+    client.command({ c: 'open_playlist', list: 'LM' });
+    await until(client, (s) => s.refusal === 'ad');
+    expect(pc.playback.tracks).toHaveLength(4);
+  });
+
+  it('sends the same queue back when the page ignored a drag, and a version 1 PC sends no library', async () => {
+    const stuck = await start({ stuckDrag: true });
+    const client = phone();
+    await pairWith(client, stuck.pc, true);
+    const { queue } = await until(client, (s) => s.status === 'connected' && s.queue !== null);
+    const before = client.store.getState().queue;
+    client.command({ c: 'queue_move', id: queue!.items[4].id, i: 4, to: 1 });
+    await until(client, (s) => s.queue !== before);
+    expect(client.store.getState().queue!.items).toEqual(queue!.items);
+
+    const old = await start({ version: { v: 1, min: 1 } });
+    const oldClient = phone();
+    await pairWith(oldClient, old.pc, true);
+    await until(oldClient, (s) => s.status === 'connected' && s.queue !== null);
+    await sleep(100);
+    expect(oldClient.store.getState().library).toBeNull();
   });
 });

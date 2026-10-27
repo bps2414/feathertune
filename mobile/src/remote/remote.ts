@@ -18,6 +18,7 @@ import {
   type PairingQr,
   type PcMessage,
   type PlayerState,
+  type Playlist,
   type Problem,
   type QueueState,
 } from './protocol';
@@ -69,6 +70,8 @@ export interface RemoteState {
   hello: Hello | null;
   player: PlayerState | null;
   queue: QueueState | null;
+  /** The PC's library playlists (version 2 PCs); null until they come. */
+  library: Playlist[] | null;
   /** The PC's answer to the last refused command. */
   refusal: 'ad' | 'unavailable' | 'invalid' | null;
   /** PC clock minus phone clock, in milliseconds, from the last `pong`. */
@@ -124,6 +127,7 @@ const INITIAL: RemoteState = {
   hello: null,
   player: null,
   queue: null,
+  library: null,
   refusal: null,
   clockOffset: 0,
   pairing: IDLE_PAIRING,
@@ -434,6 +438,9 @@ export class Remote {
       case 'queue':
         this.set({ queue: { items: message.items, current: message.current } });
         break;
+      case 'library':
+        this.set({ library: message.items });
+        break;
       case 'error':
         this.set({ refusal: message.code });
         break;
@@ -492,7 +499,7 @@ export class Remote {
 }
 
 function disconnected(): Partial<RemoteState> {
-  return { status: 'idle', problem: null, hello: null, player: null, queue: null, refusal: null };
+  return { status: 'idle', problem: null, hello: null, player: null, queue: null, library: null, refusal: null };
 }
 
 /**

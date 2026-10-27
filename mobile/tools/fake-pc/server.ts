@@ -15,8 +15,10 @@ import { createHandshake, generateKeyPair, type KeyPair, type Transport } from '
 import { Playback } from './playback';
 
 export const DEFAULT_PORT = 47652;
-const VERSION = 1;
+const VERSION = 2;
 const MIN_VERSION = 1;
+/** The pairing QR's own format, which version 2 did not change. */
+const QR_VERSION = 1;
 const PAIR_PROLOGUE = new TextEncoder().encode('feathertune-remote/1 pair');
 const KK_PROLOGUE = new TextEncoder().encode('feathertune-remote/1');
 const PAIRING_WINDOW_MS = 120_000;
@@ -91,15 +93,19 @@ export interface FakePcOptions {
   clock?: () => number;
   /** Milliseconds between player ticks (track ends, colors, a state every few seconds); 0: only `tick()`. */
   tickMs?: number;
-  /** The `v` and `min` of `hello`, to try the phone's version check; default 1 and 1. */
+  /** The `v` and `min` of `hello`, to try the phone's version check; default 2 and 1. Below 2: no `library`. */
   version?: { v: number; min: number };
+  /** Ignores `queue_move`, like a page that does not take a drag it did not see from a mouse. */
+  stuckDrag?: boolean;
 }
 
 type Command =
   | { c: 'play' | 'pause' | 'next' | 'previous' }
   | { c: 'seek'; s: number }
   | { c: 'volume'; v: number }
-  | { c: 'play_item'; id: string; i: number };
+  | { c: 'play_item' | 'queue_next' | 'queue_remove'; id: string; i: number }
+  | { c: 'queue_move'; id: string; i: number; to: number }
+  | { c: 'open_playlist'; list: string };
 
 type Incoming = { t: 'ping'; n: number } | { t: 'cmd'; cmd: Command };
 
@@ -133,6 +139,7 @@ export class FakePc {
   private readonly perMinute: number;
   private readonly tickMs: number;
   private readonly version: { v: number; min: number };
+  private readonly stuckDrag: boolean;
   private keys: KeyPair;
   private devices: Stored['devices'] = [];
   private pairing: Pairing | null = null;
@@ -156,6 +163,7 @@ export class FakePc {
     this.perMinute = options.perMinute ?? 5;
     this.tickMs = options.tickMs ?? 250;
     this.version = options.version ?? { v: VERSION, min: MIN_VERSION };
+    this.stuckDrag = options.stuckDrag ?? false;
     this.clock = options.clock ?? Date.now;
     this.playback = new Playback(this.clock, options.artwork ?? null);
     const stored = this.load();
@@ -452,6 +460,7 @@ export class FakePc {
     send({ t: 'hello', ...this.version, name: this.name });
     send(this.playback.stateMessage());
     send(this.playback.queueMessage());
+    if (this.version.v >= 2) send(this.playback.libraryMessage());
     this.sessions.add(session);
     this.lastState = this.clock();
     if (ping !== null) send({ t: 'pong', n: ping, at: this.clock() });
@@ -499,10 +508,23 @@ export class FakePc {
       case 'play_item':
         p.playItem(cmd.id, cmd.i);
         break;
+      case 'queue_next':
+        p.queueNext(cmd.id, cmd.i);
+        break;
+      case 'queue_remove':
+        p.queueRemove(cmd.id, cmd.i);
+        break;
+      case 'queue_move':
+        // The real page may ignore a drag it did not see from a mouse; `stuckDrag` plays that.
+        if (!this.stuckDrag) p.queueMove(cmd.id, cmd.i, cmd.to);
+        break;
+      case 'open_playlist':
+        p.openPlaylist(cmd.list);
+        break;
     }
     // A command that worked gets no reply; the next state shows it.
     this.broadcastState();
-    if (cmd.c === 'next' || cmd.c === 'previous' || cmd.c === 'play_item') this.broadcastQueue();
+    if (cmd.c !== 'play' && cmd.c !== 'pause' && cmd.c !== 'seek' && cmd.c !== 'volume') this.broadcastQueue();
     return null;
   }
 
@@ -646,6 +668,10 @@ const inRange = (v: unknown, max: number): v is number => num(v) && v >= 0 && v 
 const hasOnly = (o: Record<string, unknown>, ...keys: string[]) =>
   Object.keys(o).length === keys.length && keys.every((k) => k in o);
 
+/** A video id and a queue row below 200. */
+const row = (id: unknown, i: unknown) =>
+  typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) && Number.isInteger(i) && (i as number) >= 0 && (i as number) < MAX_QUEUE;
+
 /** A controller message in its fixed shape: unknown fields, wrong types and out-of-range values are refused. */
 export function parseIncoming(bytes: Uint8Array): Incoming | null {
   const m = parseJson(bytes);
@@ -671,6 +697,17 @@ export function parseIncoming(bytes: Uint8Array): Incoming | null {
         (m.i as number) < MAX_QUEUE
         ? { t: 'cmd', cmd: { c: 'play_item', id: m.id, i: m.i as number } }
         : null;
+    case 'queue_next':
+    case 'queue_remove':
+      return hasOnly(m, 't', 'c', 'id', 'i') && row(m.id, m.i) ? { t: 'cmd', cmd: { c: m.c, id: m.id as string, i: m.i as number } } : null;
+    case 'queue_move':
+      return hasOnly(m, 't', 'c', 'id', 'i', 'to') && row(m.id, m.i) && row(m.id, m.to) && m.to !== m.i
+        ? { t: 'cmd', cmd: { c: 'queue_move', id: m.id as string, i: m.i as number, to: m.to as number } }
+        : null;
+    case 'open_playlist':
+      return hasOnly(m, 't', 'c', 'list') && typeof m.list === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(m.list)
+        ? { t: 'cmd', cmd: { c: 'open_playlist', list: m.list } }
+        : null;
     default:
       return null;
   }
@@ -691,7 +728,7 @@ export function pairingCode(hash: Uint8Array): string {
 }
 
 export function pairingUri(addresses: string[], port: number, key: Uint8Array, secret: Uint8Array): string {
-  return `feathertune://pair?v=${VERSION}&k=${bytesToHex(key)}&s=${bytesToHex(secret)}&a=${addresses.join(',')}&p=${port}`;
+  return `feathertune://pair?v=${QR_VERSION}&k=${bytesToHex(key)}&s=${bytesToHex(secret)}&a=${addresses.join(',')}&p=${port}`;
 }
 
 const isKey = (text: unknown): text is string => typeof text === 'string' && /^[0-9a-f]{64}$/.test(text);

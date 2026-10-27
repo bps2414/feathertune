@@ -50,7 +50,7 @@ The picture other services call "connect": every device the user owns sees the o
 
 Expo gives a native UI with smooth gestures and animations, the camera (QR scan), the Keychain/Keystore and haptics as maintained modules, and EAS Build builds iOS in the cloud without a Mac. Libraries:
 
-- `expo-router` (screens), `react-native-reanimated` + `react-native-gesture-handler` (seek bar, volume, sheet), `expo-image` (artwork with a blurred backdrop), `expo-linear-gradient` with the album colors the PC already computes (`album_color.rs`).
+- `expo-router` (screens), React Native's own `PanResponder` and `Animated` (seek bar, volume, queue sheet and drag; no gesture or animation library so far), `expo-image` (artwork with a blurred backdrop), `expo-linear-gradient` with the album colors the PC already computes (`album_color.rs`), `expo-splash-screen` (the start screen, drawn from the PC app's icon).
 - `expo-camera` (QR scanner), `expo-secure-store` (keys), `expo-haptics`, `expo-local-authentication` (optional app lock), `expo-localization` (English and pt-BR, like the desktop).
 - Crypto: `@noble/curves`, `@noble/ciphers`, `@noble/hashes` (pure JS, audited, run on Hermes), randomness from `expo-crypto`.
 - State: one small store (`zustand`). No other state or UI kit.
@@ -83,14 +83,14 @@ A PC cannot scan a QR, so pairing one PC with another (stage 3) needs another fi
 - Message size cap (64 KB from the PC, 1 KB from a controller); every command is parsed into a fixed shape (`deny_unknown_fields`), numbers finite and in range, ids checked like `player.rs` does.
 - The settings window lists the paired devices (name, paired on, last seen) with Remove; removing one closes its connection at once. Turning the plugin off closes the port and stops the mDNS announcement.
 - The phone keeps the list of paired PCs and an optional app lock (biometrics). It never logs message contents.
-- What a controller sees is what the user sees in the window: track, artist, album, artwork URL, position, volume, queue (ids, titles, artists; at most 200). No history, no account data, no stats.
+- What a controller sees is what the user sees in the window: track, artist, album, artwork URL, position, volume, queue (ids, titles, artists; at most 200), the names and ids of the playlists in the site's sidebar (at most 100). No history, no account data, no stats.
 - `capabilities/` does not change: the page gets no new command. Commands from a controller go through Rust to `window.__feathertune.controls`, like the tray and the media flyout already do.
 
 The Security section of docs/DESIGN.md gets a paragraph for this when it lands.
 
 ## Protocol
 
-Everything a controller needs to talk to the PC (`app/src/remote.rs`; its tests run a `snow` initiator through every step below). Version 1.
+Everything a controller needs to talk to the PC (`app/src/remote.rs`; its tests run a `snow` initiator through every step below). Version 2, which added `library` and the queue and playlist commands; a version 1 controller still works with it (`min` is 1). The QR's `v`, the paths and the prologues did not change.
 
 **Transport.**
 - WebSocket over TCP, `ws://<address>:<port>`, default port **47652** (`[remote] port` in `config.toml`). Not `wss`: Noise is the encryption. Paths: `/v1/pair` for pairing, `/v1` for every later session; any other path gets HTTP 404.
@@ -116,14 +116,15 @@ The controller ignores parameters it does not know. `a` holds the address of the
 
 The secret is used once: the first message 1 that the PC can read (made with `k`) takes it, whatever follows (a second phone, or the same one again, gets `expired`). One it cannot read is closed with `invalid` and leaves the window open.
 
-**Session, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; the phone is the initiator with its own key pair and the PC's `k`, and the prologue is the 20 ASCII bytes `feathertune-remote/1`. Message 1 (`e, es, ss`) and message 2 (`e, ee, se`) have empty payloads. The PC tries message 1 against each paired key; with none it closes with `unknown`, without answering. After message 2 the phone's first transport message must be a `ping`; only then does the PC send `hello`, `state`, `queue` and the `pong`, in that order (a replayed message 1 gets message 2 and nothing more). At most 4 sessions at once (`busy`); the same phone connecting again replaces its old session, which is dropped without a close frame.
+**Session, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; the phone is the initiator with its own key pair and the PC's `k`, and the prologue is the 20 ASCII bytes `feathertune-remote/1`. Message 1 (`e, es, ss`) and message 2 (`e, ee, se`) have empty payloads. The PC tries message 1 against each paired key; with none it closes with `unknown`, without answering. After message 2 the phone's first transport message must be a `ping`; only then does the PC send `hello`, `state`, `queue`, `library` and the `pong`, in that order (a replayed message 1 gets message 2 and nothing more). At most 4 sessions at once (`busy`); the same phone connecting again replaces its old session, which is dropped without a close frame.
 
 After the handshake each Noise transport message is one JSON object, parsed into a fixed shape: unknown fields, wrong types and out-of-range values are refused.
 
 PC → controller:
-- `{"t":"hello","v":1,"min":1,"name":"<PC name>"}` once. A controller outside `min`..`v` closes and says which side to update.
+- `{"t":"hello","v":2,"min":1,"name":"<PC name>"}` once. A controller outside `min`..`v` closes and says which side to update.
 - `{"t":"state","track":{"id","title","artist","album","artwork","duration"},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: on every `player::Event`, on connect (once something has played) and when the album colors arrive. `id` (the 11-character video id) and `artwork` (an https URL) may be `null`; `duration` is in seconds, 0 while unknown. `position` is in seconds as of `at` (Unix milliseconds, PC clock): the controller moves it on by itself while `paused` is false (the clock offset is estimated from `ping`/`pong`). `colors` is `["#accent","#ink","#text on accent"]` from the cover, or `[]`; after a track change they come in a later `state`.
 - `{"t":"queue","items":[{"id","title","artist"}],"current":i}`: on connect and when the queue changes. At most 200 items, cut from the end if the message would not fit; `current` is `null` when not known.
+- `{"t":"library","items":[{"list","title"}]}`: on connect and when it changes, the playlists of the site's sidebar (the user's library), read by the `core` injection even before anything plays. At most 100; `list` is a playlist id, `title` at most 200 characters. Empty while the sidebar is closed or not loaded yet.
 - `{"t":"error","code":"ad"|"unavailable"|"invalid"}` after a refused message: `ad` while an ad plays, `unavailable` when the page could not be reached, `invalid` for anything malformed. A command that worked gets no reply; the next `state` shows it.
 
 Controller → PC:
@@ -131,6 +132,9 @@ Controller → PC:
 - `{"t":"cmd","c":"seek","s":seconds}`: 0 to 86 400.
 - `{"t":"cmd","c":"volume","v":0-100}`
 - `{"t":"cmd","c":"play_item","id":"<video id>","i":index}`: plays that queue row (both must match, so a stale index never plays the wrong song); `i` 0 to 199.
+- `{"t":"cmd","c":"queue_next"|"queue_remove","id","i"}` (version 2): that row right after the playing one, or out of the queue, through the row's own menu on the site. Same checks as `play_item`.
+- `{"t":"cmd","c":"queue_move","id","i","to":index}` (version 2): drags that row to `to` (0 to 199, not `i`); right after the playing row it uses "play next" instead. The PC cannot tell whether the page took the drag: the controller knows from the next `queue`, and when that holds the old order it puts the row back and keeps to `queue_next`.
+- `{"t":"cmd","c":"open_playlist","list":"<playlist id>"}` (version 2): plays that playlist from the start, a navigation of the official site (`/watch?list=`).
 - `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: first thing in a session, then every 15 s; the PC closes a connection silent for 45 s. `n` is an unsigned integer.
 
 During an ad every command but `play` and `pause` is refused with `ad` (pausing shortens nothing); a malformed command still gets `invalid`, as it is checked first.
@@ -150,7 +154,7 @@ Close codes (the reason is the word in brackets):
 | 4008 | `off` | the plugin was turned off | "the remote is off on the PC" |
 | 4009 | `full` | 16 phones already paired | remove one on the PC |
 
-Several controllers at once all get every `state`; commands apply in arrival order (the last one wins). Stage 3 adds `{"t":"cmd","c":"hand_off"}` (PC A → its paused position and playlist for PC B) and `{"t":"cmd","c":"open","id","list","s"}` (PC B opens it), both refused during an ad, and `v` becomes 2.
+Several controllers at once all get every `state`; commands apply in arrival order (the last one wins). Stage 3 adds `{"t":"cmd","c":"hand_off"}` (PC A → its paused position and playlist for PC B) and `{"t":"cmd","c":"open","id","list","s"}` (PC B opens it), both refused during an ad, and `v` becomes 3.
 
 ## Lifecycle
 
@@ -173,16 +177,16 @@ Several controllers at once all get every `state`; commands apply in arrival ord
 2. `mobile/src/noise/`: `IKpsk2` and `KK` on `@noble`, with the official test vectors as tests. CI job (Ubuntu): `pnpm install --frozen-lockfile`, typecheck, lint, tests.
 3. `mobile/tools/fake-pc`: a Node script that plays the PC side (pairing QR in the terminal, `KK`, a made-up track and queue that move, refusals during a fake ad) with the same `noise/` code. Phone work then needs no Windows PC and no account, and contributors on any OS can build every screen.
 4. Pairing screens: welcome, camera permission, scan, name, matching code, done. Android 17+ (`ACCESS_LOCAL_NETWORK`, target API 37) and iOS (`NSLocalNetworkUsageDescription`) permission asked with an explanation first.
-5. Now playing: artwork large with a backdrop from the album colors, title/artist, seek bar (drag with haptics, sends one `seek` on release), play/pause, previous/next, volume slider. Controls greyed out with a short note during an ad.
-6. Queue: a list with the current row marked; tap plays it (`play_item`). Pull down from now playing, or a tab.
+5. Now playing: artwork large with a backdrop from the album colors, title/artist, seek bar (drag with haptics, sends one `seek` on release), play/pause, previous/next, volume slider (follows the finger: at most one `volume` every 80 ms while dragging, the last value always). Controls greyed out with a short note during an ad.
+6. Queue: a sheet over now playing, opened from its "up next" bar; the current row marked, tap plays a row (`play_item`), drag a row by its handle to move it (`queue_move`), and each row's menu has "Play next" and "Remove". A Library tab next to the player lists the sidebar's playlists; tap plays one (`open_playlist`). With a version 1 PC these say to update feathertune.
 7. PCs: list of paired PCs, connect/reconnect, remove. Clear states for "PC offline or asleep", "not on the same network", "Windows is blocking the connection (Public network)", "removed by the PC" (asks to pair again), "update the app" / "update feathertune".
 8. Look: dark first, follows the system theme; one accent from the album; motion respects the OS reduce-motion setting here (the phone is not the desktop page, so the AGENTS rule about it does not apply), and animations stop when the app is in the background. Every control has an accessibility label and text follows the system font size.
 
 ## Stages
 
-1. **Phone → one PC** (everything above): pair, now playing, queue, several paired PCs switched by hand.
+1. **Phone → one PC** (everything above): pair, now playing, queue (reorder and remove included), the library's playlists, several paired PCs switched by hand.
 2. **Find and pick:** mDNS discovery, the device picker with each PC's status, lock-screen and notification controls, lyrics on the phone (the PC already has the lines), like/dislike and shuffle/repeat (each needs page selectors in `controls` and a reason in DESIGN.md).
-3. **PCs together:** one feathertune PC controlling another (same protocol, a `snow` client in `remote.rs`, a picker in the tray menu), moving playback between PCs, continue on the phone, reorder or remove queue items. Wake-on-LAN if asked for.
+3. **PCs together:** one feathertune PC controlling another (same protocol, a `snow` client in `remote.rs`, a picker in the tray menu), moving playback between PCs, continue on the phone. Wake-on-LAN if asked for.
 
 Each stage ships on its own and keeps the earlier ones working; `hello`'s `min` keeps an older phone app usable for as long as the commands it knows still exist.
 
@@ -192,10 +196,12 @@ For the maintainer, with the running app and a signed-in account:
 - Does the service's own resume already move playback between two feathertune PCs well enough? If so, stage 3's hand-off is dropped.
 - Does a seek right after opening a track by URL land reliably (and after an ad)?
 - Does `playItem` by clicking a queue row work for autoplay and radio queues, not only playlists?
+- Does the page take `queueMove`'s drag (pointer and mouse events from the row's handle)? If not, the phone falls back to Play next on its own; the drag could then go.
+- Do `queueNext` and `queueRemove` find the row menu's entries, and does the `core` injection find the sidebar's playlists (closed sidebar, a long library)?
 
 ## Releases
 
-Android: an APK attached to the GitHub release (built with EAS or locally), and maybe a store later. iOS: EAS Build plus TestFlight needs the maintainer's Apple developer account; until then, Android only. Version numbers of `mobile/` are separate from the desktop's; what must match is the `hello` message's `min`..`v` range.
+Android: an APK attached to the GitHub release (built by the CI `android` job on each `v*` tag, signed with the same debug key every time so it installs over the last one), and maybe a store later. iOS: EAS Build plus TestFlight needs the maintainer's Apple developer account; until then, Android only. Version numbers of `mobile/` are separate from the desktop's; what must match is the `hello` message's `min`..`v` range.
 
 ## How to help
 

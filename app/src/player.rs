@@ -24,6 +24,9 @@
 //!   play queue the page reported and the index of the playing track in it, for any playlist, radio or
 //!   autoplay. A separate channel, so `Event` consumers are not affected; it fires when the items or the
 //!   index change. Each `Queue` is the whole queue (the same lag rule applies).
+//! - `Player::library() -> Vec<Playlist>` and `Player::subscribe_library()`: the playlists of the library as
+//!   the site's sidebar lists them (id and title, at most 100), for the phone remote. The page may send them
+//!   alone (`{"library":[...]}`), before anything plays; the channel fires when they change.
 //!
 //! Everything in `State` comes from the page and was validated here: strings are length-capped,
 //! numbers are finite and in range, and `artwork` is an https URL on one of the image hosts below. It is
@@ -39,6 +42,7 @@ use tokio::sync::broadcast;
 /// Raw payload limit, before parsing (a queue of 200 tracks fits).
 const MAX_PAYLOAD: usize = 96 * 1024;
 const MAX_QUEUE: usize = 200;
+const MAX_LIBRARY: usize = 100;
 const MAX_ITEM_TEXT: usize = 200;
 const MAX_TEXT: usize = 512;
 const MAX_URL: usize = 2048;
@@ -65,6 +69,14 @@ pub struct QueueItem {
     pub id: String,
     pub title: String,
     pub artist: String,
+}
+
+/// A playlist of the library: its id (`list=`) and title.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Playlist {
+    pub list: String,
+    pub title: String,
 }
 
 /// Where the track plays from, for the mixes (mixes.rs): the playlist id (`list=` of the URL), the next
@@ -129,6 +141,8 @@ pub struct Player {
     tx: broadcast::Sender<Event>,
     queue: Mutex<Queue>,
     queue_tx: broadcast::Sender<Queue>,
+    library: Mutex<Vec<Playlist>>,
+    library_tx: broadcast::Sender<Vec<Playlist>>,
 }
 
 impl Player {
@@ -138,7 +152,28 @@ impl Player {
             tx: broadcast::channel(32).0,
             queue: Mutex::new(Queue::default()),
             queue_tx: broadcast::channel(8).0,
+            library: Mutex::new(Vec::new()),
+            library_tx: broadcast::channel(4).0,
         }
+    }
+
+    /// The last library reported (empty until the page reports one).
+    pub fn library(&self) -> Vec<Playlist> {
+        self.library.lock().unwrap().clone()
+    }
+
+    pub fn subscribe_library(&self) -> broadcast::Receiver<Vec<Playlist>> {
+        self.library_tx.subscribe()
+    }
+
+    fn update_library(&self, library: Vec<Playlist>) {
+        let mut current = self.library.lock().unwrap();
+        if *current == library {
+            return;
+        }
+        *current = library.clone();
+        drop(current);
+        let _ = self.library_tx.send(library);
     }
 
     pub fn current(&self) -> Option<State> {
@@ -214,6 +249,9 @@ impl Player {
 /// are dropped and nothing here triggers an action.
 #[tauri::command]
 pub fn player_state(state: String, player: tauri::State<'_, Player>, app: tauri::AppHandle) {
+    if let Some(library) = parse_library(&state) {
+        return player.update_library(library);
+    }
     match parse(&state) {
         Some((s, context, current)) => {
             player.update(s);
@@ -222,6 +260,35 @@ pub fn player_state(state: String, player: tauri::State<'_, Player>, app: tauri:
         }
         None => eprintln!("player_state: invalid payload dropped ({} bytes)", state.len()),
     }
+}
+
+/// The library alone: `{"library":[{"list","title"}]}`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LibraryPayload {
+    library: Vec<Playlist>,
+}
+
+/// The library, if that is what the payload is; titles are capped like queue items and ids checked.
+fn parse_library(json: &str) -> Option<Vec<Playlist>> {
+    if json.len() > MAX_PAYLOAD {
+        return None;
+    }
+    let p: LibraryPayload = serde_json::from_str(json).ok()?;
+    if p.library.len() > MAX_LIBRARY {
+        return None;
+    }
+    p.library
+        .into_iter()
+        .map(|p| {
+            let title = p.title.trim().to_owned();
+            let ok = valid_list(&p.list)
+                && !title.is_empty()
+                && title.chars().count() <= MAX_ITEM_TEXT
+                && !title.chars().any(char::is_control);
+            ok.then_some(Playlist { list: p.list, title })
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -471,5 +538,34 @@ mod tests {
         ] {
             assert!(parse(&payload(&bad)).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_library_is_validated_and_kept() {
+        let json = r#"{"library":[{"list":"LM","title":" Liked "},{"list":"PLx_1-2","title":"Road"}]}"#;
+        let library = parse_library(json).unwrap();
+        assert_eq!(library[0], Playlist { list: "LM".into(), title: "Liked".into() });
+        // A state payload is not a library, and a library is not a state.
+        assert!(parse_library(&payload("")).is_none());
+        assert!(parse(json).is_none());
+        let many = format!(r#"{{"library":[{}]}}"#, vec![r#"{"list":"LM","title":"x"}"#; MAX_LIBRARY + 1].join(","));
+        for bad in [
+            r#"{"library":[{"list":"../x","title":"x"}]}"#.to_owned(),
+            r#"{"library":[{"list":"LM","title":""}]}"#.to_owned(),
+            r#"{"library":[{"list":"LM","title":"a\u0007"}]}"#.to_owned(),
+            r#"{"library":[{"list":"LM","title":"x","extra":1}]}"#.to_owned(),
+            r#"{"library":[],"extra":1}"#.to_owned(),
+            many,
+        ] {
+            assert!(parse_library(&bad).is_none(), "{bad}");
+        }
+
+        let player = Player::new();
+        let mut rx = player.subscribe_library();
+        player.update_library(library.clone());
+        assert_eq!(rx.try_recv().unwrap(), library);
+        player.update_library(library.clone());
+        assert!(rx.try_recv().is_err());
+        assert_eq!(player.library(), library);
     }
 }

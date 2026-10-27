@@ -50,7 +50,7 @@ O que outros serviços chamam de "connect": cada aparelho do usuário vê os out
 
 O Expo dá interface nativa com gestos e animações suaves, câmera (ler QR), Keychain/Keystore e vibração como módulos mantidos, e o EAS Build compila iOS na nuvem sem Mac. Bibliotecas:
 
-- `expo-router` (telas), `react-native-reanimated` + `react-native-gesture-handler` (barra de progresso, volume, painel), `expo-image` (capa com fundo desfocado), `expo-linear-gradient` com as cores do álbum que o PC já calcula (`album_color.rs`).
+- `expo-router` (telas), o `PanResponder` e o `Animated` do próprio React Native (barra de progresso, volume, painel e arrasto da fila; por enquanto sem biblioteca de gestos ou de animação), `expo-image` (capa com fundo desfocado), `expo-linear-gradient` com as cores do álbum que o PC já calcula (`album_color.rs`), `expo-splash-screen` (a tela de abertura, feita do ícone do app do PC).
 - `expo-camera` (leitor de QR), `expo-secure-store` (chaves), `expo-haptics`, `expo-local-authentication` (bloqueio opcional do app), `expo-localization` (inglês e pt-BR, como o desktop).
 - Criptografia: `@noble/curves`, `@noble/ciphers`, `@noble/hashes` (JS puro, auditadas, rodam no Hermes), aleatoriedade do `expo-crypto`.
 - Estado: um store pequeno (`zustand`). Nenhum outro kit de estado ou de interface.
@@ -83,14 +83,14 @@ Um PC não lê QR, então parear um PC com outro (etapa 3) precisa de outro prim
 - Limite de tamanho de mensagem (64 KB do PC, 1 KB de um controle); todo comando é lido num formato fixo (`deny_unknown_fields`), números finitos e no intervalo, ids conferidos como o `player.rs` faz.
 - A janela de configurações lista os aparelhos pareados (nome, pareado em, visto por último) com Remover; remover um fecha a conexão dele na hora. Desligar o plugin fecha a porta e para o anúncio mDNS.
 - O celular guarda a lista de PCs pareados e um bloqueio opcional (biometria). Nunca registra o conteúdo das mensagens no log.
-- O que um controle vê é o que o usuário vê na janela: faixa, artista, álbum, URL da capa, posição, volume, fila (ids, títulos, artistas; no máximo 200). Sem histórico, sem dados da conta, sem estatísticas.
+- O que um controle vê é o que o usuário vê na janela: faixa, artista, álbum, URL da capa, posição, volume, fila (ids, títulos, artistas; no máximo 200), os nomes e ids das playlists da barra lateral do site (no máximo 100). Sem histórico, sem dados da conta, sem estatísticas.
 - `capabilities/` não muda: a página não ganha comando novo. Comandos de um controle passam pelo Rust até `window.__feathertune.controls`, como a bandeja e o painel de mídia já fazem.
 
 A seção Segurança do docs/DESIGN.md ganha um parágrafo sobre isso quando entrar.
 
 ## Protocolo
 
-Tudo o que um controle precisa para falar com o PC (`app/src/remote.rs`; os testes dele rodam um iniciador `snow` por cada passo abaixo). Versão 1.
+Tudo o que um controle precisa para falar com o PC (`app/src/remote.rs`; os testes dele rodam um iniciador `snow` por cada passo abaixo). Versão 2, que acrescentou `library` e os comandos de fila e de playlist; um controle da versão 1 continua funcionando com ela (`min` é 1). O `v` do QR, os caminhos e os prologues não mudaram.
 
 **Transporte.**
 - WebSocket sobre TCP, `ws://<endereço>:<porta>`, porta padrão **47652** (`[remote] port` no `config.toml`). Não é `wss`: a criptografia é o Noise. Caminhos: `/v1/pair` para parear, `/v1` para toda sessão depois; qualquer outro caminho recebe HTTP 404.
@@ -116,14 +116,15 @@ O controle ignora parâmetros que não conhece. `a` traz o endereço da interfac
 
 O segredo vale uma vez: a primeira mensagem 1 que o PC consegue ler (feita com `k`) o consome, aconteça o que acontecer depois (um segundo celular, ou o mesmo de novo, recebe `expired`). Uma que ele não consegue ler é fechada com `invalid` e deixa a janela aberta.
 
-**Sessão, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; o celular é o iniciador com o próprio par de chaves e o `k` do PC, e o prologue são os 20 bytes ASCII `feathertune-remote/1`. A mensagem 1 (`e, es, ss`) e a mensagem 2 (`e, ee, se`) têm payload vazio. O PC testa a mensagem 1 contra cada chave pareada; sem nenhuma, fecha com `unknown`, sem responder. Depois da mensagem 2, a primeira mensagem de transporte do celular precisa ser um `ping`; só então o PC manda `hello`, `state`, `queue` e o `pong`, nessa ordem (uma mensagem 1 repetida recebe a mensagem 2 e nada mais). No máximo 4 sessões ao mesmo tempo (`busy`); o mesmo celular conectando de novo substitui a sessão antiga, que é derrubada sem frame de fechamento.
+**Sessão, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; o celular é o iniciador com o próprio par de chaves e o `k` do PC, e o prologue são os 20 bytes ASCII `feathertune-remote/1`. A mensagem 1 (`e, es, ss`) e a mensagem 2 (`e, ee, se`) têm payload vazio. O PC testa a mensagem 1 contra cada chave pareada; sem nenhuma, fecha com `unknown`, sem responder. Depois da mensagem 2, a primeira mensagem de transporte do celular precisa ser um `ping`; só então o PC manda `hello`, `state`, `queue`, `library` e o `pong`, nessa ordem (uma mensagem 1 repetida recebe a mensagem 2 e nada mais). No máximo 4 sessões ao mesmo tempo (`busy`); o mesmo celular conectando de novo substitui a sessão antiga, que é derrubada sem frame de fechamento.
 
 Depois do handshake cada mensagem de transporte do Noise é um objeto JSON, lido num formato fixo: campos desconhecidos, tipos errados e valores fora da faixa são recusados.
 
 PC → controle:
-- `{"t":"hello","v":1,"min":1,"name":"<nome do PC>"}` uma vez. Um controle fora de `min`..`v` fecha e diz qual lado atualizar.
+- `{"t":"hello","v":2,"min":1,"name":"<nome do PC>"}` uma vez. Um controle fora de `min`..`v` fecha e diz qual lado atualizar.
 - `{"t":"state","track":{"id","title","artist","album","artwork","duration"},"position":s,"paused":b,"ad":b,"volume":0-100,"muted":b,"colors":[...],"at":ms}`: a cada `player::Event`, ao conectar (depois que algo tocou) e quando as cores do álbum chegam. `id` (o id de 11 caracteres do vídeo) e `artwork` (uma URL https) podem ser `null`; `duration` em segundos, 0 enquanto desconhecida. `position` em segundos no instante `at` (milissegundos Unix, relógio do PC): o controle avança sozinho enquanto `paused` é falso (a diferença de relógio é estimada pelo `ping`/`pong`). `colors` é `["#destaque","#tinta","#texto no destaque"]` da capa, ou `[]`; depois de uma troca de faixa elas vêm num `state` seguinte.
 - `{"t":"queue","items":[{"id","title","artist"}],"current":i}`: ao conectar e quando a fila muda. No máximo 200 itens, cortados do fim se a mensagem não couber; `current` é `null` quando não se sabe.
+- `{"t":"library","items":[{"list","title"}]}`: ao conectar e quando muda, as playlists da barra lateral do site (a biblioteca do usuário), lidas pela injeção `core` mesmo antes de tocar algo. No máximo 100; `list` é um id de playlist, `title` com no máximo 200 caracteres. Vazia enquanto a barra lateral está fechada ou ainda não carregou.
 - `{"t":"error","code":"ad"|"unavailable"|"invalid"}` depois de uma mensagem recusada: `ad` enquanto toca um anúncio, `unavailable` quando a página não pôde ser alcançada, `invalid` para qualquer coisa malformada. Um comando que deu certo não tem resposta; o próximo `state` mostra o efeito.
 
 Controle → PC:
@@ -131,6 +132,9 @@ Controle → PC:
 - `{"t":"cmd","c":"seek","s":segundos}`: de 0 a 86 400.
 - `{"t":"cmd","c":"volume","v":0-100}`
 - `{"t":"cmd","c":"play_item","id":"<id do vídeo>","i":índice}`: toca aquela linha da fila (os dois precisam bater, para um índice velho nunca tocar a música errada); `i` de 0 a 199.
+- `{"t":"cmd","c":"queue_next"|"queue_remove","id","i"}` (versão 2): aquela linha logo depois da que toca, ou fora da fila, pelo próprio menu da linha no site. Mesmas checagens do `play_item`.
+- `{"t":"cmd","c":"queue_move","id","i","to":índice}` (versão 2): arrasta aquela linha para `to` (0 a 199, diferente de `i`); logo depois da linha que toca, usa "tocar a seguir" no lugar. O PC não sabe se a página aceitou o arrasto: o controle descobre pela próxima `queue`, e quando ela mantém a ordem antiga ele devolve a linha e passa a usar só `queue_next`.
+- `{"t":"cmd","c":"open_playlist","list":"<id da playlist>"}` (versão 2): toca aquela playlist do começo, uma navegação do site oficial (`/watch?list=`).
 - `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: primeira coisa da sessão, depois a cada 15 s; o PC fecha uma conexão calada por 45 s. `n` é um inteiro sem sinal.
 
 Durante um anúncio todo comando exceto `play` e `pause` é recusado com `ad` (pausar não encurta nada); um comando malformado continua recebendo `invalid`, pois é conferido antes.
@@ -150,7 +154,7 @@ Códigos de fechamento (o motivo é a palavra entre crases):
 | 4008 | `off` | o plugin foi desligado | "o controle remoto está desligado no PC" |
 | 4009 | `full` | já há 16 celulares pareados | remover um no PC |
 
-Vários controles ao mesmo tempo recebem todo `state`; comandos valem na ordem de chegada (o último vence). A etapa 3 acrescenta `{"t":"cmd","c":"hand_off"}` (o PC A → sua posição pausada e a playlist para o PC B) e `{"t":"cmd","c":"open","id","list","s"}` (o PC B abre), os dois recusados durante anúncio, e o `v` vira 2.
+Vários controles ao mesmo tempo recebem todo `state`; comandos valem na ordem de chegada (o último vence). A etapa 3 acrescenta `{"t":"cmd","c":"hand_off"}` (o PC A → sua posição pausada e a playlist para o PC B) e `{"t":"cmd","c":"open","id","list","s"}` (o PC B abre), os dois recusados durante anúncio, e o `v` vira 3.
 
 ## Ciclo de vida
 
@@ -173,16 +177,16 @@ Vários controles ao mesmo tempo recebem todo `state`; comandos valem na ordem d
 2. `mobile/src/noise/`: `IKpsk2` e `KK` sobre `@noble`, com os vetores de teste oficiais como testes. Job de CI (Ubuntu): `pnpm install --frozen-lockfile`, typecheck, lint, testes.
 3. `mobile/tools/fake-pc`: um script Node que faz o papel do PC (QR de pareamento no terminal, `KK`, uma faixa e uma fila inventadas que andam, recusas durante um anúncio de mentira) com o mesmo código de `noise/`. Assim o trabalho no celular não precisa de PC com Windows nem de conta, e quem contribui em qualquer sistema consegue fazer todas as telas.
 4. Telas de pareamento: boas-vindas, permissão de câmera, leitura, nome, código para conferir, pronto. Permissão de rede local do Android 17+ (`ACCESS_LOCAL_NETWORK`, target API 37) e do iOS (`NSLocalNetworkUsageDescription`) pedida com uma explicação antes.
-5. Tocando agora: capa grande com fundo das cores do álbum, título/artista, barra de progresso (arrastar com vibração, manda um `seek` ao soltar), tocar/pausar, anterior/próxima, volume. Controles apagados com uma nota curta durante anúncio.
-6. Fila: lista com a linha atual marcada; tocar numa linha toca ela (`play_item`). Puxando a partir do tocando agora, ou uma aba.
+5. Tocando agora: capa grande com fundo das cores do álbum, título/artista, barra de progresso (arrastar com vibração, manda um `seek` ao soltar), tocar/pausar, anterior/próxima, volume (segue o dedo: no máximo um `volume` a cada 80 ms enquanto arrasta, sempre o último valor). Controles apagados com uma nota curta durante anúncio.
+6. Fila: um painel sobre o tocando agora, aberto pela barra "a seguir"; a linha atual marcada, tocar numa linha toca ela (`play_item`), arrastar uma linha pela alça move ela (`queue_move`), e o menu de cada linha tem "Tocar a seguir" e "Remover". Uma aba Biblioteca ao lado do player lista as playlists da barra lateral; tocar numa toca ela (`open_playlist`). Com um PC da versão 1 elas pedem para atualizar o feathertune.
 7. PCs: lista de PCs pareados, conectar/reconectar, remover. Estados claros para "PC desligado ou em suspensão", "fora da mesma rede", "o Windows está bloqueando a conexão (rede Pública)", "removido pelo PC" (pede para parear de novo), "atualize o app" / "atualize o feathertune".
 8. Visual: escuro primeiro, segue o tema do sistema; um destaque tirado do álbum; aqui as animações respeitam o "reduzir movimento" do sistema (o celular não é a página do desktop, então a regra do AGENTS sobre isso não vale) e param com o app em segundo plano. Todo controle tem rótulo de acessibilidade e o texto segue o tamanho de fonte do sistema.
 
 ## Etapas
 
-1. **Celular → um PC** (tudo acima): parear, tocando agora, fila, vários PCs pareados trocados à mão.
+1. **Celular → um PC** (tudo acima): parear, tocando agora, fila (com reordenar e remover), as playlists da biblioteca, vários PCs pareados trocados à mão.
 2. **Achar e escolher:** descoberta por mDNS, o seletor de aparelhos com o estado de cada PC, controles na tela de bloqueio e na notificação, letra no celular (o PC já tem as linhas), curtir/não curtir e aleatório/repetir (cada um precisa de seletores da página em `controls` e de um motivo no DESIGN.md).
-3. **PCs juntos:** um PC com feathertune controlando outro (mesmo protocolo, um cliente `snow` no `remote.rs`, um seletor no menu da bandeja), levar a reprodução de um PC para outro, continuar no celular, reordenar ou remover itens da fila. Wake-on-LAN se pedirem.
+3. **PCs juntos:** um PC com feathertune controlando outro (mesmo protocolo, um cliente `snow` no `remote.rs`, um seletor no menu da bandeja), levar a reprodução de um PC para outro, continuar no celular. Wake-on-LAN se pedirem.
 
 Cada etapa sai sozinha e mantém as anteriores funcionando; o `min` do `hello` mantém um app de celular mais antigo utilizável enquanto os comandos que ele conhece existirem.
 
@@ -192,10 +196,12 @@ Para o mantenedor, com o app rodando e uma conta logada:
 - O "continuar" do próprio serviço já leva a reprodução entre dois PCs com feathertune bem o bastante? Se sim, a passagem da etapa 3 sai.
 - Um seek logo depois de abrir uma faixa pela URL cai no lugar certo sempre (e depois de um anúncio)?
 - O `playItem` clicando numa linha da fila funciona em filas de reprodução automática e de rádio, não só em playlists?
+- A página aceita o arrasto do `queueMove` (eventos de ponteiro e de mouse a partir da alça da linha)? Se não, o celular passa sozinho para "Tocar a seguir"; aí o arrasto pode sair.
+- O `queueNext` e o `queueRemove` acham as entradas do menu da linha, e a injeção `core` acha as playlists da barra lateral (barra fechada, biblioteca longa)?
 
 ## Lançamentos
 
-Android: um APK anexado ao release do GitHub (feito com EAS ou localmente), talvez uma loja depois. iOS: EAS Build mais TestFlight exige a conta de desenvolvedor Apple do mantenedor; até lá, só Android. A versão de `mobile/` é separada da do desktop; o que precisa bater é a faixa `min`..`v` da mensagem `hello`.
+Android: um APK anexado ao release do GitHub (feito pelo job `android` do CI a cada tag `v*`, assinado sempre com a mesma chave de debug para instalar por cima do anterior), talvez uma loja depois. iOS: EAS Build mais TestFlight exige a conta de desenvolvedor Apple do mantenedor; até lá, só Android. A versão de `mobile/` é separada da do desktop; o que precisa bater é a faixa `min`..`v` da mensagem `hello`.
 
 ## Como ajudar
 

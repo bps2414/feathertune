@@ -2,6 +2,14 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.5.0 — 2026-10-26
+
+- **Controle pelo celular: visual novo.** O player fica sobre um degradê das cores do álbum, com uma barra "a seguir", as abas Player e Biblioteca e a fila num painel. O app agora tem ícone próprio (a pena do app do PC) e tela de abertura.
+- **Volume ao vivo pelo celular.** O volume do PC acompanha o slider enquanto você arrasta, não só ao soltar.
+- **Reordenar a fila pelo celular.** Arraste uma faixa pela alça, ou use o menu da faixa para Tocar a seguir e Remover.
+- **Tocar uma playlist da sua biblioteca pelo celular.** A aba Biblioteca lista as playlists da barra lateral do site; toque numa para tocar no PC.
+- O protocolo do controle agora é a versão 2. O app de celular 0.1.0 continua funcionando com este PC; o app novo esconde a edição da fila e a biblioteca num PC antigo e pede para atualizá-lo. APK Android: `feathertune-remote-0.2.0.apk`, anexado a este release; instala por cima do 0.1.0.
+
 ## 0.4.1 — 2026-10-24
 
 - **Aba Letra habilitada quando letras externas são encontradas.** Quando o YouTube Music indica que a faixa não tem letra (deixando o botão da aba Letra cinza/desabilitado), mas o feathertune encontra letras sincronizadas em fontes externas, o botão da aba agora é habilitado automaticamente e fica clicável para você abrir e acompanhar a letra.

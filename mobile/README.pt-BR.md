@@ -15,7 +15,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 - Escuta na sua rede local (porta 47652, `--port` para mudar) e mostra o QR de pareamento e o texto `feathertune://pair?…`. Escaneie ou cole em até 2 minutos.
 - Quando um celular pareia, o terminal mostra o nome dele e o código de 6 dígitos (o celular mostra o mesmo) e pergunta `y` ou `n`.
-- Depois disso o celular recebe uma faixa e uma fila inventadas que andam sozinhas, e os comandos dele (play, pause, próxima, anterior, seek, volume, tocar uma linha da fila) funcionam.
+- Depois disso o celular recebe uma faixa e uma fila inventadas que andam sozinhas, e os comandos dele (play, pause, próxima, anterior, seek, volume, tocar uma linha da fila, mover, remover ou tocar a seguir uma linha, tocar uma playlist de uma biblioteca inventada) funcionam. `--stuck-drag` ignora os movimentos, como uma página que não aceitou o arrasto.
 - Teclas: `a` liga ou desliga o modo anúncio (tudo menos play e pause é recusado com `ad`), `p` abre um novo QR de pareamento, `d` lista os celulares pareados, `q` sai.
 - Outras opções: `--name <texto>` (o nome do PC), `--artwork <url https>` (capa de todas as faixas; nenhuma por padrão), `--no-rate-limit` (o PC de verdade aceita 5 conexões por endereço por minuto).
 - Não toca áudio e descarta tudo de fora da rede local. Na primeira execução o Firewall do Windows pode perguntar sobre o Node: permita redes privadas.

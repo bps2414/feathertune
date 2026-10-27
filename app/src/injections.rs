@@ -12,7 +12,8 @@
 //! Rust gives a module data with `send(app, module, &json)`: it calls `window.__feathertune.<module>.set(data)`
 //! with the data parsed from a JSON string, so the page only ever receives data, never code built from
 //! strings, and the page asks for nothing. The last data of each module is kept and sent again when the
-//! page finishes loading (a sign-in or a reload loses the page's copy).
+//! page finishes loading (a sign-in or a reload loses the page's copy); the same data twice in a row is
+//! sent once.
 //!
 //! To add a module: create its folder, add one entry to `INJECTIONS` and its plugins to `PLUGINS`.
 
@@ -89,10 +90,13 @@ const INJECTIONS: &[Injection] = &[
 pub struct PageData(Mutex<BTreeMap<&'static str, String>>);
 
 /// Gives `module` (a `feathertune.<module>` object with a `set` function) its data. `Value::Null` clears.
+/// The same data as last time is not sent again (the page has it; a `set` would only redo its work).
 /// Callable from any thread.
 pub fn send(app: &AppHandle, module: &'static str, data: &Value) {
     let json = data.to_string();
-    app.state::<PageData>().0.lock().unwrap().insert(module, json.clone());
+    if app.state::<PageData>().0.lock().unwrap().insert(module, json.clone()).as_ref() == Some(&json) {
+        return;
+    }
     if let Some(site) = app.get_webview("site") {
         push(&site, module, &json);
     }

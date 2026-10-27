@@ -735,18 +735,21 @@ const corners = (ys) => {
   return out;
 };
 
-// The first stretch of the samples `ys` that stays within GLIDE_TOLERANCE_PX of one place for at least
-// REST_MS: { from, to } (sample indices; `to` is null when it lasts to the end), or null.
-const restIn = (ys) => {
+// The samples `at(0)` to `at(count - 1)`, taken only up to the end of their first stretch that stays
+// within GLIDE_TOLERANCE_PX of one place for at least REST_MS (nothing after it is used): { ys, rest },
+// with `rest` that stretch as { from, to } (sample indices; `to` is null when it lasts to the end), or null.
+const restIn = (count, at) => {
   const least = Math.ceil(REST_MS / SAMPLE_MS);
+  const ys = [at(0)];
   let a = 0;
-  for (let k = 1; k < ys.length; k++) {
+  for (let k = 1; k < count; k++) {
+    ys.push(at(k));
     if (Math.abs(ys[k] - ys[a]) > GLIDE_TOLERANCE_PX) {
-      if (k - a > least) return { from: a, to: k - 1 };
+      if (k - a > least) return { ys, rest: { from: a, to: k - 1 } };
       a = k;
     }
   }
-  return ys.length - 1 - a >= least ? { from: a, to: null } : null;
+  return { ys, rest: count - 1 - a >= least ? { from: a, to: null } : null };
 };
 
 // How far the box is moved now (its glide, or none).
@@ -778,14 +781,13 @@ const start = (v) => {
   const curveEnd = radii ? sampleStart + (smooth?.length ?? radii.length) * SAMPLE_MS : keys[keys.length - 1].ms;
   const easeEnd = Math.abs(gap) > GLIDE_TOLERANCE_PX ? ms0 + FOLLOW_S * 1000 * Math.log(Math.abs(gap) / 0.05) : ms0;
   const count = Math.max(2, Math.ceil((Math.max(curveEnd, easeEnd) - ms0) / SAMPLE_MS) + 1);
-  const ys = Float64Array.from({ length: count }, (_, s) => {
+  // Up to where the view first rests, which the glide then holds (fill) until `wake`.
+  const { ys, rest } = restIn(count, (s) => {
     const ms = ms0 + s * SAMPLE_MS;
     return onCurve(ms) + gap * Math.exp(-(ms - ms0) / (FOLLOW_S * 1000));
   });
-  // Up to where the view first rests, which the glide then holds (fill) until `wake`.
-  const rest = restIn(ys);
   const last = Math.max(1, rest ? rest.from : count - 1);
-  const frames = corners(ys.subarray(0, last + 1)).map((s) => ({
+  const frames = corners(ys.slice(0, last + 1)).map((s) => ({
     offset: s / last,
     transform: `translateY(${ys[s].toFixed(2)}px)`,
   }));

@@ -166,8 +166,8 @@ pub const PLUGINS: &[Plugin] = &[
         name: "Animated title bar",
         description: "The colors of the title bar drift slowly. Pauses while the window is hidden, minimized or \
                       in the background.",
-        cost: "Inside the noise: +3.8 points of CPU and +1 MB private against off (3 runs); the 32 px strip repaints \
-               30 times a second while the window is in front.",
+        cost: "Inside the noise: +3.8 points of CPU and +1 MB private against off (3 runs, at 30 frames a second); the \
+               32 px strip now repaints 20 times a second while the window is in front (30 while a theme flows in).",
         default_on: true,
         live: true,
         legacy: None,

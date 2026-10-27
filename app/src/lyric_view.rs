@@ -83,6 +83,8 @@ pub struct Update {
     pub playing: bool,
     /// Milliseconds until the line or the sung word changes (only while playing).
     pub next_ms: Option<f64>,
+    /// Whether what `draw` shows changed: another line or sung word, or nothing any more.
+    pub changed: bool,
 }
 
 /// The current line (-1 before the first) and, in a line timed by word, the sung word (-1: none yet).
@@ -170,6 +172,7 @@ impl View {
         let colors = app.state::<crate::settings::Live>().plugin("lyric_colors");
         let playing = wanted.as_ref().is_some_and(|(s, _)| !s.paused);
         let mut next_ms = None;
+        let mut changed = true;
         if let Some((state, synced)) = wanted.as_ref().filter(|_| playing || paused_too) {
             let lines = &synced.lines;
             let ms = state.position_now() * 1000.0 + LEAD_MS;
@@ -205,12 +208,15 @@ impl View {
                     text.sung = sung_len(&lines[i], word);
                     text.lit = None;
                 }
+            } else {
+                changed = false;
             }
         } else {
+            changed = self.shown.is_some();
             self.shown = None;
             self.old = None;
         }
-        Update { playing, next_ms }
+        Update { playing, next_ms, changed }
     }
 
     /// Nothing to show: no lyrics for the track (or paused, without `paused_too`).

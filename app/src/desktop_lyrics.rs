@@ -292,10 +292,12 @@ unsafe fn place(app: &AppHandle, hwnd: HWND) {
 }
 
 impl Floating {
-    /// Brings the content up to date, shows or hides the window, draws it and sets the timers.
-    fn update(&mut self, hwnd: HWND) {
+    /// Brings the content up to date, shows or hides the window, draws it when what it shows changed
+    /// (`force`: the lock or the size did) and sets the timers.
+    fn update(&mut self, hwnd: HWND, force: bool) {
         let update = self.view.update(&self.app, false);
         let visible = !is_locked() || (update.playing && self.view.has_text());
+        let appeared = visible && !self.visible;
         if visible != self.visible {
             self.visible = visible;
             unsafe {
@@ -303,7 +305,8 @@ impl Floating {
             }
         }
         let fading = visible && self.view.fading();
-        if visible {
+        // A roll's frames, and the one after its end (at rest).
+        if visible && (force || appeared || update.changed || fading || self.fading) {
             self.draw(hwnd);
         }
         unsafe {
@@ -415,15 +418,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if locked {
                     save_position(&f.app, hwnd);
                 }
-                f.update(hwnd);
+                f.update(hwnd, true);
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                f.update(hwnd);
+                f.update(hwnd, false);
                 return LRESULT(0);
             }
             WM_TIMER if wparam.0 == LINE_TIMER || wparam.0 == FRAME_TIMER => {
-                f.update(hwnd);
+                f.update(hwnd, false);
                 return LRESULT(0);
             }
             WM_EXITSIZEMOVE => save_position(&f.app, hwnd),
@@ -438,7 +441,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     r.bottom - r.top,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
-                f.update(hwnd);
+                f.update(hwnd, true);
                 return LRESULT(0);
             }
             WM_DESTROY => {

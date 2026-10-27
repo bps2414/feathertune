@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.6.1 — 2026-10-27
+
+- **Menos trabalho a cada troca de linha da letra.** Toda vez que a rolagem seguia de uma linha, ela calculava o caminho até o fim da música; agora para onde a tela descansa de novo. O movimento é exatamente o mesmo.
+- **A letra flutuante só desenha quando muda** (uma linha ou palavra nova, a rolagem, a trava), não a cada evento do player.
+- **Letra reenviada sem mudança não é mais reconstruída** (por exemplo depois de uma configuração que não a altera).
+
 ## 0.6.0 — 2026-10-27
 
 - **App mais leve.** A rolagem da letra para de desenhar enquanto a tela descansa numa linha, a barra de título desenha menos vezes, e o fundo do modo ambiente agora é uma imagem suave feita uma vez por capa em vez de um blur refeito a cada passo.

@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.6.1 — 2026-10-27
+
+- **Less work at each lyric line switch.** Every time the scroll moved on from a line it worked out its path to the end of the song; it now stops where the view next rests. It moves exactly as before.
+- **The floating lyrics draw only when they change** (a new line or word, the roll, the lock), not at every player event.
+- **Lyrics sent again unchanged are no longer rebuilt** (for example after a setting that does not change them).
+
 ## 0.6.0 — 2026-10-27
 
 - **A lighter app.** The lyrics' scroll stops drawing while the view rests on a line, the title bar's drift draws less often, and ambient mode's background is now a soft picture made once per cover instead of a blur redone at every step.

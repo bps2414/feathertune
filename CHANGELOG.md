@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.6.3 — 2026-10-27
+
+- **Fewer tracks left without lyrics when a source is busy.** LRCLIB, often the only source with a track's lyrics, answers "busy" (503) in bursts, and one retry after 1 s was not enough: the lyrics only showed after skipping away and back. A server error, a timeout or a network error is now asked again after 1, 3 and 8 s.
+
 ## 0.6.2 — 2026-10-27
 
 - **Lyrics found for tracks whose length was read wrong.** The player sometimes reports only what is loaded so far (20 s, then 38 s, then 50 s...), so the lyrics sources missed the track until that number came near the real length. The track's length now comes from the queue when the two are far apart.

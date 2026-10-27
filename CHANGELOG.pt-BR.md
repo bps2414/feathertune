@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.6.3 — 2026-10-27
+
+- **Menos faixas sem letra quando uma fonte está ocupada.** O LRCLIB, muitas vezes a única fonte com a letra de uma faixa, responde "ocupado" (503) em rajadas, e uma nova tentativa depois de 1 s não bastava: a letra só aparecia depois de pular a música e voltar. Agora um erro de servidor, um timeout ou um erro de rede é pedido de novo depois de 1, 3 e 8 s.
+
 ## 0.6.2 — 2026-10-27
 
 - **Letra achada em faixas cuja duração vinha errada.** O player às vezes informa só o que já carregou (20 s, depois 38 s, depois 50 s...), então as fontes de letra não achavam a faixa até esse número chegar perto do tamanho real. Agora a duração da faixa vem da fila quando os dois valores estão distantes.

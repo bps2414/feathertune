@@ -27,7 +27,7 @@
 //!   ask makes an older one stale. Each lookup runs on its own thread, so a slow one never holds up
 //!   the next track. Every step goes to the diagnostics log (diag.rs).
 //! - Sources see the title, artist and album without invisible format characters (`plain`). A server
-//!   error (5xx) is asked once more after `RETRY_WAIT`.
+//!   error (5xx), a timeout or a network error is asked again after each of `RETRY_WAITS`.
 //! - Answers are cached in `lyrics-cache/` in the profile, one small JSON file per title, artist and
 //!   duration, so a track already seen costs no request. Lines with word times are kept while their
 //!   source is on; lines timed as a whole for a week and only for the same list of sources (a source may
@@ -115,8 +115,9 @@ const KEEP_FILES: usize = 300;
 /// A lookup starts once the track's title, artist and duration stayed put this long (they change one
 /// after the other at a track change).
 const SETTLE: Duration = Duration::from_millis(500);
-/// A source answering with a server error (5xx) is asked once more after this long.
-const RETRY_WAIT: Duration = Duration::from_secs(1);
+/// A source that fails for a passing reason (server error, timeout, network) is asked again after each
+/// of these waits. LRCLIB is often the only source with a track and answers 503 in bursts.
+const RETRY_WAITS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(3), Duration::from_secs(8)];
 /// The first lines wait this long for a source ranked above their own that has not answered yet, so the
 /// page builds its box once instead of at each upgrade.
 const SHOW_HOLD: Duration = Duration::from_millis(300);
@@ -927,7 +928,7 @@ fn has_words(lines: &[Line]) -> bool {
     lines.iter().any(|l| !l.words.is_empty())
 }
 
-/// One source's answer; a server error (5xx) is asked once more after `RETRY_WAIT`.
+/// One source's answer; a passing failure is asked again after each of `RETRY_WAITS`.
 fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
     let once = || match provider {
         "lrclib" => lrclib(agent, track, duration),
@@ -935,13 +936,20 @@ fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Res
         "unison" => unison(agent, track, duration),
         _ => lrcmux(agent, track, duration),
     };
-    match once() {
-        Err(e) if e.contains("http status: 5") => {
-            std::thread::sleep(RETRY_WAIT);
-            once()
+    let mut answer = once();
+    for wait in RETRY_WAITS {
+        match &answer {
+            Err(e) if passing(e) => std::thread::sleep(wait),
+            _ => break,
         }
-        answer => answer,
+        answer = once();
     }
+    answer
+}
+
+/// A failure worth asking again: anything but a client error (4xx) or an answer that could not be read.
+fn passing(error: &str) -> bool {
+    error.starts_with("request failed:") && !error.contains("http status: 4")
 }
 
 /// The answer's JSON; `None` for a 404 (or a 401, Better Lyrics' "not cached").

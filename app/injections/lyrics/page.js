@@ -23,7 +23,10 @@
 // Also from Rust: a word `[ms, text, "#rrggbb"]` is named after a color and glows in it (lyric_colors);
 // `voices` (0 first singer, 1 second, 2 group, one per line) lay a duet out; `look` is { size, align,
 // glow, effects } from the settings. With `effects` (lyric_effects), the intro and breaks of at least
-// GAP_MS show dots that fill up over the break (Web Animations on the song's clock).
+// GAP_MS show dots that fill up over the break (Web Animations on the song's clock) and held words rise.
+// `colors` (lyric_colors) also glows each verse in one of the album's colors. `romanized` has one text (or
+// null) per line, shown under it like the translation; `beat` { bpm, first_ms } (lyric_pulse, from the
+// track analysis) makes the sung line's glow breathe on the beat.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const PLAYER_PAGE = 'ytmusic-player-page';
@@ -35,6 +38,11 @@ const HEX = /^#[0-9a-f]{6}$/i;
 const LOOKS = { size: ['small', 'medium', 'large'], align: ['left', 'center'], glow: ['off', 'normal', 'strong'] };
 // A break this long (the intro, the time between a line's end and the next one) shows its dots.
 const GAP_MS = 4000;
+// A new verse starts after a break this long (lyric_colors); a word sung this long is held (lyric_effects).
+const VERSE_GAP_MS = 2000;
+const HELD_MS = 1000;
+// The glow's pulse waits this long after its line lights, so the line's own fade-in shows first.
+const PULSE_AFTER_MS = 600;
 const MANUAL_SCROLL_MS = 4000;
 // Lines and words change this much before their time.
 const LEAD_MS = 250;
@@ -82,8 +90,9 @@ let keys = []; // [{ ms, i }]: the scroll curve passes the middle of line i at m
 let radii = null; // per sample from `sampleStart`, half the averaging window in samples; null: no fast part
 let sampleStart = 0;
 let smooth = null; // the averaged curve at those samples, built when needed from the measured lines
-let meta = { credit: '', estimated: false, look: null };
+let meta = { credit: '', estimated: false, look: null, beat: null };
 let dots = []; // per line: the dots of a break (or null), and their animations while it is lit
+let pulses = []; // per line: its glow's beat animation while it is lit (or null)
 let box = null; // our container, first child of the tab renderer
 let items = [];
 let spans = []; // per line: { main: [span], bg: [span] }, the word elements
@@ -161,7 +170,12 @@ const looks = (look) =>
   (!!look &&
     typeof look === 'object' &&
     Object.entries(LOOKS).every(([k, allowed]) => allowed.includes(look[k])) &&
-    typeof look.effects === 'boolean');
+    typeof look.effects === 'boolean' &&
+    typeof look.colors === 'boolean');
+const beats = (b) =>
+  b === undefined ||
+  (!!b && Number.isFinite(b.bpm) && b.bpm >= 40 && b.bpm <= 260 && Number.isFinite(b.first_ms) && b.first_ms >= 0);
+const lineText = (t) => t === null || (typeof t === 'string' && t.length <= MAX_TRANSLATION_CHARS);
 
 const valid = (data) =>
   !!data &&
@@ -175,9 +189,11 @@ const valid = (data) =>
       (l[3] === undefined || (Number.isFinite(l[3]) && l[3] >= 0)) &&
       wordList(l[4]),
   ) &&
-  perLine(data.translation, data, (t) => t === null || (typeof t === 'string' && t.length <= MAX_TRANSLATION_CHARS)) &&
+  perLine(data.translation, data, lineText) &&
+  perLine(data.romanized, data, lineText) &&
   perLine(data.voices, data, (v) => v === 0 || v === 1 || v === 2) &&
-  looks(data.look);
+  looks(data.look) &&
+  beats(data.beat);
 
 const clear = () => {
   lines = null;
@@ -192,6 +208,8 @@ const clear = () => {
   items = [];
   for (const d of dots) for (const a of d?.anims ?? []) a.cancel();
   dots = [];
+  for (const a of pulses) a?.cancel();
+  pulses = [];
   centers = null;
   clearTimeout(timer);
   timer = 0;
@@ -212,9 +230,12 @@ const build = () => {
   box = document.createElement('div');
   box.id = 'feathertune-lyrics';
   box.classList.toggle('ft-estimated', meta.estimated);
-  const look = meta.look ?? { size: 'medium', align: 'left', glow: 'normal', effects: false };
+  const look = meta.look ?? { size: 'medium', align: 'left', glow: 'normal', effects: false, colors: false };
   box.classList.add(`ft-size-${look.size}`, `ft-align-${look.align}`, `ft-glow-${look.glow}`);
   box.classList.toggle('ft-effects', look.effects);
+  // With the colors, each verse (lines between two breaks of at least VERSE_GAP_MS) glows in the next of the
+  // album's colors (`data-s`, 1 to 4; theme/page.js sets them).
+  let verse = 1;
   // The pointer's hover is not updated under content the compositor moves, so while the box glides a line
   // shows it only while the pointer moves (style.css); a still pointer would leave it on a line gliding away.
   const point = () => {
@@ -236,27 +257,41 @@ const build = () => {
   });
   spans = [];
   dots = lines.map(() => null);
+  pulses = lines.map(() => null);
   items = lines.map((l, i) => {
     const el = document.createElement('p');
     el.className = l.text ? 'ft-line' : 'ft-line ft-gap';
     if (l.voice) el.classList.add(`ft-v${l.voice}`);
+    if (look.colors) {
+      if (i > 0 && (!l.text || l.ms - ends[i - 1] >= VERSE_GAP_MS) && lines[i - 1].text) verse = (verse % 4) + 1;
+      el.dataset.s = String(verse);
+    }
     // The glow is a copy of the text on a layer of its own (style.css).
     el.dataset.text = l.text;
     const own = { main: [], bg: [] };
     // Each word fades in over a share of its own length; the last one ends with the line. A word named
-    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css).
+    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css). With the
+    // effects, a word held for HELD_MS or more rises a little over its length (`ft-held`, a box of its
+    // own, so its trailing space goes after it).
     const wordSpans = (parent, words) =>
       words.map((w, j) => {
         const span = document.createElement('span');
-        span.textContent = w.text;
         const end = words[j + 1]?.ms ?? ends[i];
+        const held = look.effects && end - w.ms >= HELD_MS;
+        const trail = held ? w.text.match(/\s*$/)[0] : '';
+        span.textContent = trail ? w.text.slice(0, -trail.length) : w.text;
         if (end > w.ms) span.style.setProperty('--ft-word', `${Math.round((end - w.ms) * WORD_FADE)}ms`);
+        if (held) {
+          span.classList.add('ft-held');
+          span.style.setProperty('--ft-held', `${Math.round(end - w.ms)}ms`);
+        }
         if (w.color) {
           span.classList.add('ft-hue');
           span.style.setProperty('--ft-hue', w.color);
           span.dataset.text = w.text.trim();
         }
         parent.append(span);
+        if (trail) parent.append(trail);
         return span;
       });
     if (l.words) {
@@ -287,6 +322,12 @@ const build = () => {
       el.append(bg);
     }
     spans.push(own);
+    if (l.romanized) {
+      const ro = document.createElement('span');
+      ro.className = 'ft-ro';
+      ro.textContent = l.romanized;
+      el.append(ro);
+    }
     if (l.translation) {
       const tr = document.createElement('span');
       tr.className = 'ft-tr';
@@ -400,23 +441,53 @@ const DOT_FRAMES = [
   { opacity: 0.25, transform: 'scale(0.7)' },
   { opacity: 1, transform: 'scale(1)' },
 ];
+// Keeps an animation of line `i` on the song's clock: its time is the song's since the line started, and
+// it runs, pauses and changes rate with the video.
+const onClock = (a, video, i, ms) => {
+  const running = !video.paused && video.playbackRate > 0;
+  if (running && a.playbackRate !== video.playbackRate) a.playbackRate = video.playbackRate;
+  if (running && a.playState === 'paused') a.play();
+  if (!running && a.playState === 'running') a.pause();
+  if (Math.abs((a.currentTime ?? 0) - (ms - lines[i].ms)) > DRIFT_MS) a.currentTime = ms - lines[i].ms;
+};
+
 const dotsAt = (i, video, ms) => {
   const d = dots[i];
   if (!d) return;
   const third = (ends[i] - lines[i].ms) / 3;
   d.anims ??= d.list.map((dot, k) => dot.animate(DOT_FRAMES, { duration: third, delay: k * third, fill: 'both' }));
-  const running = !video.paused && video.playbackRate > 0;
-  for (const a of d.anims) {
-    if (running && a.playbackRate !== video.playbackRate) a.playbackRate = video.playbackRate;
-    if (running && a.playState === 'paused') a.play();
-    if (!running && a.playState === 'running') a.pause();
-    if (Math.abs((a.currentTime ?? 0) - (ms - lines[i].ms)) > DRIFT_MS) a.currentTime = ms - lines[i].ms;
+  for (const a of d.anims) onClock(a, video, i, ms);
+};
+
+// The glow of a lit line breathes on the beat (lyric_pulse, with the track's measured tempo): its opacity
+// eases down over each beat from its peak on it, from PULSE_AFTER_MS after the line lit (before that and
+// once it dims, the line's own transition shows). Only at the normal rate, where the beat is the song's.
+const PULSE_FRAMES = [{ opacity: 1 }, { opacity: 0.55 }];
+const pulseAt = (i, video, ms) => {
+  const b = meta.beat;
+  if (!b || !lines[i].text || video.playbackRate !== 1 || meta.look?.glow === 'off') {
+    pulses[i]?.cancel();
+    pulses[i] = null;
+    return;
   }
+  // Its time is the song's since the line started; the delay puts the beats where the song's are.
+  const start = lines[i].ms + PULSE_AFTER_MS;
+  const delay = PULSE_AFTER_MS + ((((b.first - start) % b.period) + b.period) % b.period);
+  pulses[i] ??= items[i].animate(PULSE_FRAMES, {
+    duration: b.period,
+    delay,
+    iterations: Infinity,
+    easing: 'ease-out',
+    pseudoElement: '::before',
+  });
+  onClock(pulses[i], video, i, ms);
 };
 
 const dim = (i) => {
   for (const a of dots[i]?.anims ?? []) a.cancel();
   if (dots[i]) dots[i].anims = null;
+  pulses[i]?.cancel();
+  pulses[i] = null;
   items[i].classList.remove('ft-current');
   toggleWords(spans[i].main, sungMain[i], -1);
   toggleWords(spans[i].bg, sungBg[i], -1);
@@ -482,6 +553,7 @@ const sync = (video, force) => {
   for (const i of active) {
     singWords(i, ms);
     dotsAt(i, video, ms);
+    pulseAt(i, video, ms);
   }
   if (index === current && !force) {
     arm(video, ms, false);
@@ -827,6 +899,7 @@ feathertune.lyrics = Object.freeze({
       credit: typeof data.credit === 'string' ? data.credit.slice(0, 160) : '',
       estimated: data.estimated === true,
       look: data.look ?? null,
+      beat: data.beat ? { period: 60000 / data.beat.bpm, first: data.beat.first_ms } : null,
     };
     const toWords = (words) =>
       words?.length ? words.map(([ms, text, color]) => ({ ms, text, color: color ?? null })) : undefined;
@@ -837,6 +910,7 @@ feathertune.lyrics = Object.freeze({
       end: end ?? 0,
       bg: toWords(bg),
       translation: data.translation?.[i] ?? null,
+      romanized: data.romanized?.[i] ?? null,
       voice: data.voices?.[i] ?? 0,
     }));
     // With the effects, the intro and each break of at least GAP_MS get an empty line of their own, for

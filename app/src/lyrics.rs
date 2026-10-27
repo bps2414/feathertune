@@ -659,6 +659,7 @@ fn publish(app: &AppHandle) {
             "align": s.lyrics.align,
             "glow": s.lyrics.glow,
             "effects": s.plugin("lyric_effects"),
+            "colors": s.plugin("lyric_colors"),
         });
         (
             s.lyrics.estimate_words,

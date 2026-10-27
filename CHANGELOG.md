@@ -2,6 +2,14 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.6.0 — 2026-10-27
+
+- **A lighter app.** The lyrics' scroll stops drawing while the view rests on a line, the title bar's drift draws less often, and ambient mode's background is now a soft picture made once per cover instead of a blur redone at every step.
+- **Lyrics: dots in the breaks.** The intro and every instrumental break of 4 s or more show three dots that fill up on the song's time (Lyric effects, on).
+- **Lyrics look, in the settings' Lyrics tab:** text size, alignment (left, center or right) and the glow (off is the lightest). Hover a line to see its time.
+- **New options, off by default:** a duet layout (the first singer on the left, the second on the right, together in the middle), the source's romanization under lines in other scripts, and two experimental plugins: Lyric colors (a sung word named after a color, like "violet, blue, green, red", glows in that color, and each verse glows in one of the album's colors) and Lyrics on the beat (the sung line's glow pulses on the tempo the track analysis measured).
+- Lyrics already cached are looked up again once.
+
 ## 0.5.3 — 2026-10-27
 
 - **The lyrics no longer vanish and come back when the page changes.** Going from Home or the Library to the player page with the same song playing wiped the lines and looked them up again, with the lines swapping up to three times. A song is now its title and artist, not its video id.

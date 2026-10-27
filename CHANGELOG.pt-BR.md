@@ -2,6 +2,14 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.6.0 — 2026-10-27
+
+- **App mais leve.** A rolagem da letra para de desenhar enquanto a tela descansa numa linha, a barra de título desenha menos vezes, e o fundo do modo ambiente agora é uma imagem suave feita uma vez por capa em vez de um blur refeito a cada passo.
+- **Letra: pontinhos nas pausas.** A introdução e cada pausa instrumental de 4 s ou mais mostram três pontinhos que se enchem no tempo da música (Efeitos na letra, ligado).
+- **Visual da letra, na aba Letras das configurações:** tamanho do texto, alinhamento (esquerda, centro ou direita) e o brilho (desligado é o mais leve). Passe o mouse numa linha para ver o tempo dela.
+- **Opções novas, desligadas por padrão:** layout de dueto (a primeira voz à esquerda, a segunda à direita, juntas no meio), a romanização da fonte embaixo de linhas em outros alfabetos, e dois plugins experimentais: Cores na letra (uma palavra cantada que é nome de cor, como "violet, blue, green, red", brilha nessa cor, e cada estrofe brilha numa das cores do álbum) e Letra na batida (o brilho da linha cantada pulsa no tempo medido pela análise da faixa).
+- As letras que já estavam no cache são buscadas de novo uma vez.
+
 ## 0.5.3 — 2026-10-27
 
 - **A letra não some mais e volta quando a página muda.** Ir da Home ou da Biblioteca para a página do player com a mesma música tocando apagava as linhas e buscava de novo, com as linhas trocando até três vezes. Agora uma música é o título e o artista, não o id do vídeo.

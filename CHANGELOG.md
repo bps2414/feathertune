@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.5.2 — 2026-10-27
+
+- **Lyrics translation tries again when the server fails.** When the translation service answered with a server error (503), the track stayed untranslated until the next one; the request is now sent again after 1 s and after 3 s.
+
 ## 0.5.1 — 2026-10-27
 
 - **Playing a playlist from the phone no longer gets stuck.** The PC showed a "Leave site?" dialog and waited on it; the playlist now just starts.

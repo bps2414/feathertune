@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.5.2 — 2026-10-27
+
+- **A tradução da letra tenta de novo quando o servidor falha.** Quando o serviço de tradução respondia com erro de servidor (503), a faixa ficava sem tradução até a próxima; agora o pedido é enviado de novo após 1 s e após 3 s.
+
 ## 0.5.1 — 2026-10-27
 
 - **Tocar uma playlist pelo celular não trava mais.** O PC mostrava um diálogo "Sair do site?" e ficava esperando; agora a playlist só começa.

@@ -2,7 +2,7 @@
 
 *Português: [README.pt-BR.md](README.pt-BR.md)*
 
-> **Stable for daily use (0.3.x).** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
+> **Stable for daily use (0.5.x).** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
 
 A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: its own title bar, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
 
@@ -39,13 +39,16 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 - Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
 - Track analysis: the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
 - Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) in the Mix section of the settings window's Experimental tab. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
-- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis), which start off in its Experimental tab. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
+- Phone remote (highly experimental preview): an Android app, paired once with a QR code confirmed on the PC, shows what plays, the artwork and the queue, and controls play/pause, next/previous, seek, live volume, tap-to-play, queue editing (play next, remove) and playing a playlist of your library. Local network only, end-to-end encrypted (Noise Protocol), never during an ad except pause. The APK is attached to each release; the app is in [mobile/](mobile/README.md), the protocol in [docs/REMOTE.md](docs/REMOTE.md).
+- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis, phone remote), which start off in its Experimental tab. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-verified-yet).
 
 ## Install
 
 Download `feathertune_<version>_x64-setup.exe` from the [releases](https://github.com/bps2414/feathertune/releases) and run it: per user, no admin, Windows 10/11. Uninstalling asks whether to also delete your data (sign-in, `config.toml`); it is kept unless you tick the box.
+
+The phone remote's Android APK (`feathertune-remote-<version>.apk`) is attached to the releases that change it. Turn on Phone remote in the settings' Experimental tab on the PC, then scan the QR code from the phone app.
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
@@ -94,6 +97,7 @@ compressor = true
 crossfade = false             # experimental (off by default); also the mixes and the transition voice
 track_analysis = false        # experimental; tempo, key and loudness outline in audio-facts/ in the profile
 skip_silence = false          # experimental
+remote = false                # experimental; phone remote: opens a TCP port for paired phones only (see [remote])
 visualizer = true
 
 [shortcuts]                  # global; "" turns one off
@@ -126,6 +130,10 @@ curve = "equal_power"        # linear, equal_power, s_curve, exponential
 fade_in_ms = 1500            # 0 to 5000, into the next track
 echo_out = false             # an echo on the tail of the track that fades out
 visualizer = "bars"          # bars, wave
+
+[remote]                     # the phone remote (Experimental tab)
+port = 47652                 # TCP, 1024 to 65535; local network sources only
+name = "feathertune"         # what paired phones call this PC (never the Windows name)
 
 [ui]
 language = "auto"            # auto (Windows' language: Portuguese gets pt-BR, anything else English), en, pt-BR; applies after a restart

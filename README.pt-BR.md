@@ -2,7 +2,7 @@
 
 *English: [README.md](README.md)*
 
-> **Estável para uso diário (0.3.x).** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
+> **Estável para uso diário (0.5.x).** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
 
 Uma casca desktop leve para Windows de um player de música na web, escrita em Rust com Tauri 2. Em vez de embutir um Chromium (como os apps Electron), usa o runtime WebView2 que já vem no Windows e cuida das partes de desktop de forma nativa: barra de título própria, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
 
@@ -39,13 +39,16 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 - Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
 - Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
 - Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na seção Mix da aba Experimental da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+- Controle remoto pelo celular (prévia altamente experimental): um app Android, pareado uma vez por um QR code confirmado no PC, mostra o que toca, a capa e a fila, e controla play/pause, anterior/próxima, busca, volume ao vivo, tocar ao toque, edição da fila (tocar a seguir, remover) e tocar uma playlist da sua biblioteca. Só na rede local, criptografado de ponta a ponta (Noise Protocol), nunca durante um anúncio, exceto pausar. O APK vai anexado a cada release; o app está em [mobile/](mobile/README.pt-BR.md), o protocolo em [docs/REMOTE.pt-BR.md](docs/REMOTE.pt-BR.md).
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md#ainda-não-conferido).
 
 ## Instalar
 
 Baixe `feathertune_<versão>_x64-setup.exe` nos [releases](https://github.com/bps2414/feathertune/releases) e rode: por usuário, sem admin, Windows 10/11. Ao desinstalar, ele pergunta se também apaga seus dados (login, `config.toml`); ficam guardados se a caixa não for marcada.
+
+O APK Android do controle remoto (`feathertune-remote-<versão>.apk`) vai anexado aos releases que o alteram. Ligue o Controle pelo celular na aba Experimental das configurações, no PC, e escaneie o QR code com o app do celular.
 
 O que mudou em cada versão: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
 
@@ -94,6 +97,7 @@ compressor = true
 crossfade = false             # experimental (desligado por padrão); também os mixes e a voz de transição
 track_analysis = false        # experimental; tempo, tom e contorno de volume em audio-facts/ no perfil
 skip_silence = false          # experimental
+remote = false                # experimental; controle remoto: abre uma porta TCP só para celulares pareados (veja [remote])
 visualizer = true
 
 [shortcuts]                  # globais; "" desliga um
@@ -126,6 +130,10 @@ curve = "equal_power"        # linear, equal_power, s_curve, exponential
 fade_in_ms = 1500            # 0 a 5000, entrando na próxima faixa
 echo_out = false             # um eco no fim da faixa que some
 visualizer = "bars"          # bars, wave
+
+[remote]                     # o controle remoto pelo celular (aba Experimental)
+port = 47652                 # TCP, 1024 a 65535; só origens da rede local
+name = "feathertune"         # como os celulares pareados chamam este PC (nunca o nome do Windows)
 
 [ui]
 language = "auto"            # auto (idioma do Windows: português vira pt-BR, o resto inglês), en, pt-BR; vale depois de reiniciar

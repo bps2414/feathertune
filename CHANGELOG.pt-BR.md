@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.6.2 — 2026-10-27
+
+- **Letra achada em faixas cuja duração vinha errada.** O player às vezes informa só o que já carregou (20 s, depois 38 s, depois 50 s...), então as fontes de letra não achavam a faixa até esse número chegar perto do tamanho real. Agora a duração da faixa vem da fila quando os dois valores estão distantes.
+
 ## 0.6.1 — 2026-10-27
 
 - **Menos trabalho a cada troca de linha da letra.** Toda vez que a rolagem seguia de uma linha, ela calculava o caminho até o fim da música; agora para onde a tela descansa de novo. O movimento é exatamente o mesmo.

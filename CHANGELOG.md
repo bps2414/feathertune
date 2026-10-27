@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.6.2 — 2026-10-27
+
+- **Lyrics found for tracks whose length was read wrong.** The player sometimes reports only what is loaded so far (20 s, then 38 s, then 50 s...), so the lyrics sources missed the track until that number came near the real length. The track's length now comes from the queue when the two are far apart.
+
 ## 0.6.1 — 2026-10-27
 
 - **Less work at each lyric line switch.** Every time the scroll moved on from a line it worked out its path to the end of the song; it now stops where the view next rests. It moves exactly as before.

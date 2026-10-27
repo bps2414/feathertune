@@ -1,0 +1,33 @@
+---
+import Base from '../layouts/Base.astro';
+import Header from './Header.astro';
+import Hero from './Hero.astro';
+import Weight from './Weight.astro';
+import Records from './Records.astro';
+import Lyrics from './Lyrics.astro';
+import Never from './Never.astro';
+import Switches from './Switches.astro';
+import Install from './Install.astro';
+import Footer from './Footer.astro';
+import type { Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<Base locale={locale}>
+  <Header locale={locale} />
+  <main>
+    <Hero locale={locale} />
+    <Weight locale={locale} />
+    <Records locale={locale} />
+    <Lyrics locale={locale} />
+    <Never locale={locale} />
+    <Switches locale={locale} />
+    <Install locale={locale} />
+  </main>
+  <Footer locale={locale} />
+</Base>

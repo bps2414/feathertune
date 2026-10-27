@@ -2,6 +2,8 @@
 
 *Português: [README.pt-BR.md](README.pt-BR.md)*
 
+Website: [bps2414.github.io/feathertune](https://bps2414.github.io/feathertune/)
+
 > **Stable for daily use (0.5.x).** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
 
 A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: its own title bar, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.

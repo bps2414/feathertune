@@ -1,0 +1,94 @@
+---
+import { getRelativeLocaleUrl } from 'astro:i18n';
+import FeatherMark from './FeatherMark.astro';
+import { links, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const s = strings[locale].footer;
+---
+
+<footer class="foot">
+  <div class="wrap inner">
+    <p class="brand"><FeatherMark size={22} /> feathertune</p>
+    <p class="disclaimer">{s.disclaimer}</p>
+    <ul class="links">
+      <li><a href={links.repo}>GitHub</a></li>
+      <li><a href={links.license}>{s.license}</a></li>
+      <li>
+        {
+          locale === 'en' ? (
+            <a href={getRelativeLocaleUrl('pt-br', '')} hreflang="pt-BR" lang="pt-BR" data-lang="pt-br">
+              Português
+            </a>
+          ) : (
+            <a href={getRelativeLocaleUrl('en', '')} hreflang="en" lang="en" data-lang="en">
+              English
+            </a>
+          )
+        }
+      </li>
+    </ul>
+    <p class="made">{s.made}</p>
+  </div>
+</footer>
+
+<style>
+  .foot {
+    margin-top: var(--space);
+    padding-block: 3rem;
+    border-top: 1px solid var(--line);
+    font-size: var(--step--1);
+  }
+
+  .inner {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  @media (min-width: 52rem) {
+    .inner {
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: 1.25rem 3rem;
+    }
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--display);
+    font-size: 1.1rem;
+    font-stretch: 118%;
+    font-weight: 650;
+  }
+
+  .disclaimer {
+    max-width: 60ch;
+    color: var(--ink-soft);
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-weight: 700;
+  }
+
+  .made {
+    color: var(--ink-soft);
+  }
+
+  @media (min-width: 52rem) {
+    .made {
+      grid-column: 2;
+    }
+  }
+</style>

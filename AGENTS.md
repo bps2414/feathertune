@@ -15,6 +15,7 @@ feathertune is a Windows-only Tauri 2 app that hosts a music service's official 
   - Packaging: `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
 - `spike/`: frozen measurement prototype. Do not build it unless a task is about it.
 - `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs. `measure-plugins.ps1`: runs `measure.ps1` for every plugin (about 2 h; maintainer only).
+- `site/`: the landing page (Astro, pnpm; `pnpm build` from `site/`), published to GitHub Pages by `.github/workflows/pages.yml`. Texts for both languages are in `site/src/i18n/strings.ts`; a changed English text changes its pt-BR pair. No brand names, as in the UI.
 - `docs/`: `DESIGN.md` and `REMOTE.md` (plan for the phone remote, which will live in `mobile/`), in English and pt-BR.
 - `.github/`: `workflows/ci.yml`, the pull request template and the issue forms. `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md` (+ pt-BR).
 - Local only, gitignored: `results/` (measure output) and `plans/` (work plans, pt-BR). Do not commit or quote them.

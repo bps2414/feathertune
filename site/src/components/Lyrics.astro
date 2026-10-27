@@ -1,0 +1,132 @@
+---
+import FeatherMark from './FeatherMark.astro';
+import { strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const s = strings[Astro.props.locale].lyrics;
+---
+
+<section class="wrap section lyrics" aria-labelledby="lyrics-title">
+  <div class="text">
+    <h2 id="lyrics-title">{s.title}</h2>
+    <p class="lede">{s.lede}</p>
+    <dl class="features">
+      {
+        s.items.map((item) => (
+          <div>
+            <dt>{item.title}</dt>
+            <dd>{item.text}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+
+  <figure class="card" aria-hidden="true">
+    <div class="card-art"></div>
+    <p class="card-lines">
+      {s.card.map((line) => <span>{line}</span>)}
+    </p>
+    <p class="card-mark"><FeatherMark size={18} /> feathertune</p>
+  </figure>
+</section>
+
+<style>
+  .lyrics {
+    display: grid;
+    gap: clamp(3rem, 2rem + 4vw, 5rem);
+  }
+
+  @media (min-width: 62rem) {
+    .lyrics {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+      align-items: center;
+    }
+  }
+
+  .text {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .features {
+    display: grid;
+    gap: 1.75rem 2.5rem;
+    margin: 1.5rem 0 0;
+  }
+
+  @media (min-width: 40rem) {
+    .features {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .features div {
+    padding-left: 1rem;
+    border-left: 3px solid var(--glow);
+  }
+
+  dt {
+    font-family: var(--display);
+    font-size: var(--step-1);
+    font-stretch: 108%;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+
+  dd {
+    margin: 0.4rem 0 0;
+    color: var(--ink-soft);
+    max-width: 34ch;
+  }
+
+  /* A lyric card like the share window makes: cover, the chosen lines, the mark. */
+  .card {
+    position: relative;
+    justify-self: center;
+    display: grid;
+    gap: 1.5rem;
+    width: min(22rem, 100%);
+    margin: 0;
+    padding: 1.5rem;
+    border-radius: 1.25rem;
+    background: linear-gradient(170deg, #3b2a5c, #1d1530 80%);
+    color: #fff;
+    rotate: -2.5deg;
+    box-shadow: 0 2rem 4rem -1.5rem rgb(23 20 58 / 0.6);
+  }
+
+  .card-art {
+    aspect-ratio: 1;
+    border-radius: 0.75rem;
+    background:
+      radial-gradient(circle at 68% 34%, #f2a65a 0 16%, transparent 17%),
+      linear-gradient(180deg, #3b2a5c 0 55%, #6d4c8f 55% 62%, #241a3a 62% 100%);
+  }
+
+  .card-lines {
+    display: grid;
+    font-family: var(--display);
+    font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.1rem);
+    font-stretch: 116%;
+    font-weight: 700;
+    line-height: 1.05;
+  }
+
+  .card-lines span:last-child {
+    color: #f2a65a;
+    filter: drop-shadow(0 0 0.3em rgb(242 166 90 / 0.6));
+  }
+
+  .card-mark {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    opacity: 0.8;
+  }
+</style>

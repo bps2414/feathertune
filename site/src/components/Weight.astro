@@ -1,0 +1,111 @@
+---
+import { links, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const s = strings[Astro.props.locale].weight;
+---
+
+<section class="wrap section weight" aria-labelledby="weight-title">
+  <div class="head">
+    <h2 id="weight-title">{s.title}</h2>
+    <p class="lede">{s.lede}</p>
+  </div>
+  <dl class="stats">
+    {
+      s.stats.map((stat) => (
+        <div class="stat">
+          <dt>{stat.label}</dt>
+          <dd>
+            <span class="value">{stat.value}</span>
+            <span class="unit">{stat.unit}</span>
+          </dd>
+        </div>
+      ))
+    }
+  </dl>
+  <p class="note">
+    {s.note}
+    <a href={`${links.repo}/blob/main/docs/DESIGN.md#measurements`}>{s.noteLink}</a>
+  </p>
+</section>
+
+<style>
+  .head {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  @media (min-width: 60rem) {
+    .head {
+      grid-template-columns: 1fr 1fr;
+      align-items: end;
+      gap: 3rem;
+    }
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2.5rem 1.5rem;
+    margin: clamp(2.5rem, 1.5rem + 4vw, 5rem) 0 0;
+  }
+
+  @media (min-width: 52rem) {
+    .stats {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* The label sits under the number but comes first in the markup, so dt stays before dd. */
+  .stat {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+  }
+
+  dt {
+    max-width: 16ch;
+    color: var(--ink-soft);
+    line-height: 1.35;
+  }
+
+  dd {
+    display: flex;
+    align-items: baseline;
+    gap: 0.15em;
+    margin: 0;
+    font-family: var(--display);
+    line-height: 0.9;
+  }
+
+  .value {
+    font-size: clamp(3.6rem, 2rem + 6vw, 7rem);
+    font-weight: 160;
+    font-stretch: 70%;
+    letter-spacing: -0.03em;
+  }
+
+  .unit {
+    font-size: var(--step-1);
+    font-weight: 500;
+    font-stretch: 100%;
+    color: var(--feather);
+  }
+
+  .note {
+    margin-top: 2rem;
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+  }
+
+  .note a {
+    margin-left: 0.4em;
+    font-weight: 700;
+  }
+</style>

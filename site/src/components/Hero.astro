@@ -1,0 +1,222 @@
+---
+import { links, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const s = strings[locale].hero;
+
+// The intro dots fill first, then each word is sung for a time that grows with its length,
+// the way the app paces estimated word times.
+const INTRO = 1.5;
+let at = INTRO;
+const words = s.sung.split(' ').map((text) => {
+  const len = 0.24 + text.replace(/[^\p{L}]/gu, '').length * 0.06;
+  const word = { text, at: at.toFixed(2), len: len.toFixed(2) };
+  at += len + 0.08;
+  return word;
+});
+const nextAt = (at + 0.2).toFixed(2);
+---
+
+<section class="wrap hero sing" data-hero>
+  <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+  <h1 aria-label={s.sung}>
+    {
+      words.map((w) => (
+        <>
+          <span class="w" style={`--at:${w.at}s;--len:${w.len}s`} aria-hidden="true">
+            {w.text}
+          </span>{' '}
+        </>
+      ))
+    }
+  </h1>
+  <p class="next" style={`--at:${nextAt}s`}>{s.next}</p>
+
+  <div class="actions" style={`--at:${nextAt}s`}>
+    <a class="button" href={links.latest}>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      {s.download}
+    </a>
+    <a class="source" href={links.repo}>{s.source}</a>
+    <button type="button" class="replay" data-replay>{s.replay}</button>
+  </div>
+  <p class="fine">{s.fine}</p>
+</section>
+
+<script>
+  const hero = document.querySelector<HTMLElement>('[data-hero]');
+  hero?.querySelector('[data-replay]')?.addEventListener('click', () => {
+    hero.classList.remove('sing');
+    void hero.offsetWidth;
+    hero.classList.add('sing');
+  });
+</script>
+
+<style>
+  .hero {
+    padding-block: clamp(3rem, 1rem + 9vw, 9rem) clamp(2rem, 1rem + 4vw, 4rem);
+  }
+
+  .dots {
+    display: flex;
+    gap: 0.7rem;
+    height: 1rem;
+    margin-bottom: clamp(1rem, 0.5rem + 2vw, 2rem);
+  }
+
+  .dots i {
+    width: 0.8rem;
+    height: 0.8rem;
+    border-radius: 50%;
+    background: var(--mist);
+    opacity: 0;
+  }
+
+  h1 {
+    max-width: 14ch;
+    font-size: var(--step-hero);
+    font-weight: 720;
+    font-stretch: 122%;
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+  }
+
+  /* A word is a wipe from mist to ink with a glowing edge, like a sung word in the app. */
+  .w {
+    display: inline-block;
+    padding-bottom: 0.06em;
+    background: linear-gradient(90deg, var(--ink) 0 50%, var(--glow) 55%, var(--mist) 60% 100%);
+    background-size: 250% 100%;
+    background-position: 0 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .next {
+    max-width: 30ch;
+    margin-top: clamp(1.25rem, 0.8rem + 1.5vw, 2rem);
+    font-family: var(--display);
+    font-size: var(--step-2);
+    font-stretch: 108%;
+    font-weight: 480;
+    line-height: 1.2;
+    color: var(--ink-soft);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 1.75rem;
+    margin-top: clamp(2rem, 1.5rem + 2vw, 3rem);
+  }
+
+  .source {
+    font-weight: 700;
+  }
+
+  .replay {
+    padding: 0.4rem 0;
+    border: 0;
+    background: none;
+    color: var(--ink-soft);
+    font: inherit;
+    font-size: var(--step--1);
+    text-decoration: underline dotted;
+    text-underline-offset: 0.25em;
+    cursor: pointer;
+  }
+
+  .fine {
+    margin-top: 1rem;
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .sing .dots i {
+      animation: dot 0.45s ease-out both, dots-out 0.35s ease-in 1.4s forwards;
+    }
+    .sing .dots i:nth-child(2) {
+      animation-delay: 0.4s, 1.4s;
+    }
+    .sing .dots i:nth-child(3) {
+      animation-delay: 0.8s, 1.4s;
+    }
+    .sing .w {
+      background-position: 100% 0;
+      animation:
+        sung var(--len) linear var(--at) forwards,
+        glow calc(var(--len) + 1s) ease-out var(--at) both;
+    }
+    .sing .next {
+      opacity: 0.35;
+      animation: wake 0.7s ease-out var(--at) forwards;
+    }
+    .replay {
+      opacity: 0;
+      animation: wake 0.4s ease-out var(--at) forwards;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .replay {
+      display: none;
+    }
+  }
+
+  @keyframes dot {
+    from {
+      opacity: 0.3;
+      transform: scale(0.4);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+      background: var(--glow);
+    }
+  }
+
+  @keyframes dots-out {
+    from {
+      opacity: 1;
+      background: var(--glow);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.4);
+      background: var(--glow);
+    }
+  }
+
+  @keyframes sung {
+    to {
+      background-position: 0 0;
+    }
+  }
+
+  @keyframes glow {
+    0% {
+      filter: drop-shadow(0 0 0 transparent);
+    }
+    30% {
+      filter: drop-shadow(0 0 0.18em var(--glow-a));
+    }
+    100% {
+      filter: drop-shadow(0 0 0 transparent);
+    }
+  }
+
+  @keyframes wake {
+    to {
+      opacity: 1;
+    }
+  }
+</style>

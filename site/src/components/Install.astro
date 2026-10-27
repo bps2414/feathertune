@@ -1,0 +1,87 @@
+---
+import { links, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const s = strings[locale].install;
+const hero = strings[locale].hero;
+---
+
+<section class="wrap section install" aria-labelledby="install-title">
+  <h2 id="install-title">{s.title}</h2>
+  <ol class="steps">
+    {
+      s.steps.map((step, i) => (
+        <li>
+          <span class="num" aria-hidden="true">
+            {i + 1}
+          </span>
+          <h3>{step.title}</h3>
+          <p>{step.text}</p>
+        </li>
+      ))
+    }
+  </ol>
+  <div class="actions">
+    <a class="button" href={links.latest}>{hero.download}</a>
+    <a href={links.releases}>{s.releases}</a>
+  </div>
+  <p class="remote">{s.remote}</p>
+</section>
+
+<style>
+  .steps {
+    display: grid;
+    gap: 2.5rem 2rem;
+    margin: clamp(2rem, 1.5rem + 2vw, 3.5rem) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 48rem) {
+    .steps {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  li {
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+  }
+
+  .num {
+    font-family: var(--display);
+    font-size: clamp(4rem, 3rem + 4vw, 6.5rem);
+    font-weight: 140;
+    font-stretch: 60%;
+    line-height: 0.85;
+    color: var(--feather);
+  }
+
+  li p {
+    max-width: 30ch;
+    color: var(--ink-soft);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 1.75rem;
+    margin-top: clamp(2.5rem, 2rem + 2vw, 3.5rem);
+  }
+
+  .actions a:not(.button) {
+    font-weight: 700;
+  }
+
+  .remote {
+    margin-top: 1.25rem;
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+  }
+</style>

@@ -1,0 +1,101 @@
+---
+import { strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const s = strings[Astro.props.locale].never;
+---
+
+<section class="section never" aria-labelledby="never-title">
+  <div class="wrap inner">
+    <div class="head">
+      <h2 id="never-title">{s.title}</h2>
+      <p class="lede">{s.lede}</p>
+    </div>
+    <ul class="list">
+      {
+        s.items.map((item) => (
+          <li>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  /* The one band that turns the page's colors around: the promises are the firmest part. */
+  .never {
+    margin-top: var(--space);
+    padding-block: var(--space);
+    background: var(--night);
+    color: #eeebff;
+    --ink-soft: #b9b2e8;
+    --line: rgb(238 235 255 / 0.16);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .never {
+      background: #eeebfa;
+      color: #221c4f;
+      --ink-soft: #4a4380;
+      --line: rgb(34 28 79 / 0.16);
+    }
+  }
+
+  .inner {
+    display: grid;
+    gap: clamp(2.5rem, 1.5rem + 4vw, 4rem);
+  }
+
+  @media (min-width: 60rem) {
+    .inner {
+      grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    }
+  }
+
+  .head {
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+  }
+
+  .list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .list li {
+    display: grid;
+    gap: 0.35rem 2rem;
+    padding-block: 1.25rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .list li:last-child {
+    border-bottom: 1px solid var(--line);
+  }
+
+  @media (min-width: 44rem) {
+    .list li {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: baseline;
+    }
+  }
+
+  /* Struck through: these are what the app refuses to do. */
+  h3 {
+    text-decoration: line-through;
+    text-decoration-color: var(--glow);
+    text-decoration-thickness: 0.12em;
+  }
+
+  .list p {
+    color: var(--ink-soft);
+  }
+</style>

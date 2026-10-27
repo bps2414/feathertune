@@ -1,0 +1,425 @@
+---
+import FeatherMark from './FeatherMark.astro';
+import { records, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const s = strings[Astro.props.locale].records;
+---
+
+<section class="wrap section records" aria-labelledby="records-title">
+  <div class="intro">
+    <h2 id="records-title">{s.title}</h2>
+    <p class="lede">{s.lede}</p>
+
+    <fieldset class="picker">
+      <legend>{s.pick}</legend>
+      {
+        records.map((r, i) => (
+          <label class="pick">
+            <input type="radio" name="record" value={r.id} id={`rec-${r.id}`} checked={i === 0} />
+            <span class={`cover cover-${r.id}`} aria-hidden="true" />
+            <span class="pick-text">
+              <span class="pick-title">{r.title}</span>
+              <span class="pick-artist">
+                {s.by} {r.artist}
+              </span>
+            </span>
+          </label>
+        ))
+      }
+    </fieldset>
+  </div>
+
+  <div class="stage" aria-hidden="true">
+    <div class="win">
+      <div class="bar">
+        <FeatherMark size={16} />
+        <span class="app">feathertune</span>
+        {
+          records.map((r) => (
+            <span class="track" data-rec={r.id}>
+              {r.title} - {r.artist}
+            </span>
+          ))
+        }
+        <span class="tools">
+          <i class="ico ico-share"></i><i class="ico ico-game"></i><i class="ico ico-mini"></i><i class="ico ico-gear"></i>
+        </span>
+        <span class="caption"><i>&#8211;</i><i>&#9633;</i><i>&#215;</i></span>
+      </div>
+      <div class="page">
+        {
+          records.map((r) => (
+            <div class={`ambient cover-${r.id}`} data-rec={r.id} />
+          ))
+        }
+        {
+          records.map((r) => (
+            <div class="lyrics" data-rec={r.id}>
+              <p class="past">{r.lines[0]}</p>
+              <p class="now">{r.lines[1]}</p>
+              <p class="soon">{r.lines[2]}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <figure class="mini">
+      {records.map((r) => <div class={`mini-cover cover-${r.id}`} data-rec={r.id} />)}
+      <div class="mini-body">
+        {
+          records.map((r) => (
+            <div data-rec={r.id}>
+              <p class="mini-title">{r.title}</p>
+              <p class="mini-artist">{r.artist}</p>
+              <p class="mini-line">{r.lines[1]}</p>
+            </div>
+          ))
+        }
+        <p class="mini-controls"><i>&#9664;&#9664;</i><i>&#10074;&#10074;</i><i>&#9654;&#9654;</i></p>
+      </div>
+      <figcaption>{s.mini}</figcaption>
+    </figure>
+  </div>
+</section>
+
+<style>
+  /* Each record sets the colors the app would take from its cover. */
+  .records {
+    --bar: #3b2a5c;
+    --bar-ink: #fbe9d7;
+    --accent: #f2a65a;
+    --deep: #1d1530;
+    display: grid;
+    gap: clamp(2.5rem, 1.5rem + 4vw, 5rem);
+  }
+
+  .records:has(#rec-b:checked) {
+    --bar: #0f4c5c;
+    --bar-ink: #dff5f0;
+    --accent: #8fd3c7;
+    --deep: #072a33;
+  }
+
+  .records:has(#rec-c:checked) {
+    --bar: #6b2d2a;
+    --bar-ink: #fff1d6;
+    --accent: #f4c95d;
+    --deep: #2e1311;
+  }
+
+  [data-rec] {
+    display: none;
+  }
+
+  .records:has(#rec-a:checked) [data-rec='a'],
+  .records:has(#rec-b:checked) [data-rec='b'],
+  .records:has(#rec-c:checked) [data-rec='c'] {
+    display: revert;
+  }
+
+  @media (min-width: 64rem) {
+    .records {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      align-items: center;
+    }
+  }
+
+  .intro {
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+  }
+
+  .cover-a {
+    background:
+      radial-gradient(circle at 68% 34%, #f2a65a 0 16%, transparent 17%),
+      linear-gradient(180deg, #3b2a5c 0 55%, #6d4c8f 55% 62%, #241a3a 62% 100%);
+  }
+
+  .cover-b {
+    background:
+      repeating-linear-gradient(0deg, transparent 0 9%, rgb(143 211 199 / 0.55) 9% 11%),
+      linear-gradient(160deg, #0f4c5c, #0a2f3a 70%);
+  }
+
+  .cover-c {
+    background:
+      conic-gradient(from 210deg at 30% 70%, #f4c95d 0 22%, transparent 22% 100%),
+      linear-gradient(135deg, #6b2d2a, #3f1816);
+  }
+
+  .picker {
+    display: grid;
+    gap: 0.5rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    border: 0;
+  }
+
+  legend {
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+  }
+
+  .pick {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 0.9rem 0.6rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+  }
+
+  .pick:hover {
+    background: var(--paper-deep);
+  }
+
+  .pick:has(input:checked) {
+    border-color: var(--feather);
+    background: var(--paper-deep);
+    box-shadow: inset 0 0 0 1px var(--feather);
+  }
+
+  .pick:has(input:focus-visible) {
+    outline: 3px solid var(--feather);
+    outline-offset: 3px;
+  }
+
+  .pick input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .pick .cover {
+    flex: none;
+    width: 3.25rem;
+    aspect-ratio: 1;
+    border-radius: 0.4rem;
+  }
+
+  .pick-text {
+    display: grid;
+    line-height: 1.3;
+  }
+
+  .pick-title {
+    font-weight: 700;
+  }
+
+  .pick-artist {
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+  }
+
+  /* The window: a title bar in the record's colors over the site with ambient mode and lyrics. */
+  .stage {
+    position: relative;
+    padding-bottom: clamp(3rem, 2rem + 6vw, 7rem);
+  }
+
+  .win {
+    overflow: hidden;
+    border-radius: 0.75rem;
+    background: var(--deep);
+    box-shadow: 0 2.5rem 5rem -2rem rgb(23 20 58 / 0.55);
+    transition: background-color 0.5s ease;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    height: 2.25rem;
+    padding-left: 0.75rem;
+    background: var(--bar);
+    color: var(--bar-ink);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    transition: background-color 0.5s ease, color 0.5s ease;
+  }
+
+  .app {
+    font-weight: 700;
+  }
+
+  .track {
+    overflow: hidden;
+    min-width: 0;
+    opacity: 0.8;
+    text-overflow: ellipsis;
+  }
+
+  .tools {
+    display: flex;
+    gap: 0.7rem;
+    margin-left: auto;
+  }
+
+  .ico {
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 1.5px solid currentColor;
+    border-radius: 0.2rem;
+    opacity: 0.75;
+  }
+
+  .ico-game {
+    border-radius: 0.5rem;
+  }
+
+  .ico-gear {
+    border-radius: 50%;
+    border-style: dotted;
+  }
+
+  .caption {
+    display: flex;
+  }
+
+  .caption i {
+    display: grid;
+    place-items: center;
+    width: 2.6rem;
+    height: 2.25rem;
+    font-style: normal;
+    opacity: 0.8;
+  }
+
+  .page {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    min-height: clamp(15rem, 10rem + 18vw, 24rem);
+    padding: clamp(1.5rem, 1rem + 3vw, 3.5rem);
+    overflow: hidden;
+  }
+
+  .ambient {
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    filter: blur(48px) saturate(1.3);
+    opacity: 0.8;
+  }
+
+  .lyrics {
+    align-self: center;
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 0.9rem + 1.6vw, 2.1rem);
+    font-stretch: 110%;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+
+  .lyrics p + p {
+    margin-top: 0.5em;
+  }
+
+  .past,
+  .soon {
+    color: rgb(255 255 255 / 0.38);
+  }
+
+  .now {
+    color: #fff;
+    filter: drop-shadow(0 0 0.35em color-mix(in srgb, var(--accent) 70%, transparent));
+  }
+
+  /* The mini player overlaps the window's corner, as it floats over everything. */
+  .mini {
+    position: absolute;
+    right: clamp(0.5rem, -1rem + 4vw, 2rem);
+    bottom: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.8rem;
+    width: min(20rem, 82%);
+    margin: 0;
+    padding: 0.75rem;
+    border-radius: 0.9rem;
+    background: var(--bar);
+    color: var(--bar-ink);
+    box-shadow: 0 1.5rem 3rem -1rem rgb(23 20 58 / 0.6);
+    transition: background-color 0.5s ease, color 0.5s ease;
+  }
+
+  .mini-cover {
+    width: 4.5rem;
+    aspect-ratio: 1;
+    border-radius: 0.45rem;
+  }
+
+  .mini-body {
+    min-width: 0;
+    font-size: 0.8rem;
+    line-height: 1.3;
+  }
+
+  .mini-title {
+    overflow: hidden;
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .mini-artist {
+    opacity: 0.75;
+  }
+
+  .mini-line {
+    margin-top: 0.35rem;
+    overflow: hidden;
+    color: var(--accent);
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .mini-controls {
+    display: flex;
+    gap: 0.9rem;
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+  }
+
+  .mini-controls i {
+    font-style: normal;
+    font-variant-emoji: text;
+    letter-spacing: -0.2em;
+  }
+
+  .mini figcaption {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.5rem;
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 34rem) {
+    .tools,
+    .track {
+      display: none !important;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .win,
+    .bar,
+    .mini,
+    .pick {
+      transition: none;
+    }
+  }
+</style>

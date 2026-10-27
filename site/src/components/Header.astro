@@ -1,0 +1,179 @@
+---
+import { getRelativeLocaleUrl } from 'astro:i18n';
+import FeatherMark from './FeatherMark.astro';
+import { links, strings, type Locale } from '../i18n/strings';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const s = strings[locale];
+const languages = [
+  { id: 'en', label: 'English', short: 'EN' },
+  { id: 'pt-br', label: 'Português', short: 'PT' },
+] as const;
+---
+
+<header class="wrap top">
+  <a class="brand" href={getRelativeLocaleUrl(locale, '')}>
+    <FeatherMark />
+    <span>feathertune</span>
+  </a>
+  <nav class="nav">
+    <ul class="langs" aria-label={s.nav.language}>
+      {
+        languages.map((l) => (
+          <li>
+            <a
+              href={getRelativeLocaleUrl(l.id, '')}
+              hreflang={l.id === 'en' ? 'en' : 'pt-BR'}
+              lang={l.id === 'en' ? 'en' : 'pt-BR'}
+              aria-current={l.id === locale ? 'page' : undefined}
+              data-lang={l.id}
+            >
+              <abbr title={l.label}>{l.short}</abbr>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+    <a class="gh" href={links.repo}>{s.nav.github}</a>
+  </nav>
+</header>
+
+{
+  locale === 'en' && (
+    <aside class="suggest" lang="pt-BR" hidden data-suggest>
+      <div class="wrap suggest-row">
+        <p lang="en">{s.suggest.text}</p>
+        <a href={getRelativeLocaleUrl('pt-br', '')} data-lang="pt-br">
+          {s.suggest.go}
+        </a>
+        <button type="button" lang="en" data-lang="en">
+          {s.suggest.dismiss}
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+<script>
+  const KEY = 'feathertune-lang';
+  const read = () => {
+    try {
+      return localStorage.getItem(KEY);
+    } catch {
+      return null;
+    }
+  };
+  const save = (lang: string) => {
+    try {
+      localStorage.setItem(KEY, lang);
+    } catch {}
+  };
+
+  document.querySelectorAll<HTMLElement>('[data-lang]').forEach((el) =>
+    el.addEventListener('click', () => {
+      save(el.dataset.lang ?? 'en');
+      el.closest<HTMLElement>('[data-suggest]')?.setAttribute('hidden', '');
+    }),
+  );
+
+  const suggest = document.querySelector<HTMLElement>('[data-suggest]');
+  if (suggest && !read() && navigator.languages.some((l) => l.toLowerCase().startsWith('pt'))) {
+    suggest.hidden = false;
+  }
+</script>
+
+<style>
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 1.25rem;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--display);
+    font-size: 1.3rem;
+    font-weight: 650;
+    font-stretch: 118%;
+    text-decoration: none;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .langs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0.2rem;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
+  .langs a {
+    display: block;
+    min-width: 2.75rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    color: var(--ink-soft);
+    font-size: var(--step--1);
+    font-weight: 700;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .langs abbr {
+    text-decoration: none;
+  }
+
+  .langs a[aria-current='page'] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .gh {
+    font-weight: 700;
+  }
+
+  .suggest {
+    background: var(--paper-deep);
+    border-block: 1px solid var(--line);
+  }
+
+  .suggest-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1.25rem;
+    padding-block: 0.7rem;
+    font-size: var(--step--1);
+  }
+
+  .suggest-row a {
+    font-weight: 700;
+  }
+
+  .suggest-row button {
+    margin-left: auto;
+    padding: 0.3rem 0.2rem;
+    border: 0;
+    background: none;
+    color: var(--ink-soft);
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+  }
+</style>

@@ -126,20 +126,14 @@ export class Playback {
     if (row >= 0) this.go(row);
   }
 
-  /** Moves a row to `to`, the playing track staying the one that plays. */
-  queueMove(id: string, index: number, to: number): void {
+  /** Moved right after the playing track (the PC's "play next" moves the row, it leaves no copy behind). */
+  queueNext(id: string, index: number): void {
     const from = this.row(id, index);
     if (from < 0 || from === this.index) return;
     const playing = this.track;
     const [moved] = this.tracks.splice(from, 1);
-    this.tracks.splice(Math.min(to, this.tracks.length), 0, moved);
+    this.tracks.splice(this.tracks.indexOf(playing) + 1, 0, moved);
     this.index = this.tracks.indexOf(playing);
-  }
-
-  /** Right after the playing track (the menu's "play next"). */
-  queueNext(id: string, index: number): void {
-    const from = this.row(id, index);
-    if (from >= 0) this.queueMove(id, from, from < this.index ? this.index : this.index + 1);
   }
 
   /** Out of the queue; the playing track cannot be removed (the site's menu does not offer it). */

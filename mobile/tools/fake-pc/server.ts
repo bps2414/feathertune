@@ -95,8 +95,6 @@ export interface FakePcOptions {
   tickMs?: number;
   /** The `v` and `min` of `hello`, to try the phone's version check; default 2 and 1. Below 2: no `library`. */
   version?: { v: number; min: number };
-  /** Ignores `queue_move`, like a page that does not take a drag it did not see from a mouse. */
-  stuckDrag?: boolean;
 }
 
 type Command =
@@ -104,7 +102,6 @@ type Command =
   | { c: 'seek'; s: number }
   | { c: 'volume'; v: number }
   | { c: 'play_item' | 'queue_next' | 'queue_remove'; id: string; i: number }
-  | { c: 'queue_move'; id: string; i: number; to: number }
   | { c: 'open_playlist'; list: string };
 
 type Incoming = { t: 'ping'; n: number } | { t: 'cmd'; cmd: Command };
@@ -139,7 +136,6 @@ export class FakePc {
   private readonly perMinute: number;
   private readonly tickMs: number;
   private readonly version: { v: number; min: number };
-  private readonly stuckDrag: boolean;
   private keys: KeyPair;
   private devices: Stored['devices'] = [];
   private pairing: Pairing | null = null;
@@ -163,7 +159,6 @@ export class FakePc {
     this.perMinute = options.perMinute ?? 5;
     this.tickMs = options.tickMs ?? 250;
     this.version = options.version ?? { v: VERSION, min: MIN_VERSION };
-    this.stuckDrag = options.stuckDrag ?? false;
     this.clock = options.clock ?? Date.now;
     this.playback = new Playback(this.clock, options.artwork ?? null);
     const stored = this.load();
@@ -514,10 +509,6 @@ export class FakePc {
       case 'queue_remove':
         p.queueRemove(cmd.id, cmd.i);
         break;
-      case 'queue_move':
-        // The real page may ignore a drag it did not see from a mouse; `stuckDrag` plays that.
-        if (!this.stuckDrag) p.queueMove(cmd.id, cmd.i, cmd.to);
-        break;
       case 'open_playlist':
         p.openPlaylist(cmd.list);
         break;
@@ -700,10 +691,6 @@ export function parseIncoming(bytes: Uint8Array): Incoming | null {
     case 'queue_next':
     case 'queue_remove':
       return hasOnly(m, 't', 'c', 'id', 'i') && row(m.id, m.i) ? { t: 'cmd', cmd: { c: m.c, id: m.id as string, i: m.i as number } } : null;
-    case 'queue_move':
-      return hasOnly(m, 't', 'c', 'id', 'i', 'to') && row(m.id, m.i) && row(m.id, m.to) && m.to !== m.i
-        ? { t: 'cmd', cmd: { c: 'queue_move', id: m.id as string, i: m.i as number, to: m.to as number } }
-        : null;
     case 'open_playlist':
       return hasOnly(m, 't', 'c', 'list') && typeof m.list === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(m.list)
         ? { t: 'cmd', cmd: { c: 'open_playlist', list: m.list } }

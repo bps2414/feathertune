@@ -186,7 +186,6 @@ export type Command =
   | { c: 'seek'; s: number }
   | { c: 'volume'; v: number }
   | { c: 'play_item' | 'queue_next' | 'queue_remove'; id: string; i: number }
-  | { c: 'queue_move'; id: string; i: number; to: number }
   | { c: 'open_playlist'; list: string };
 
 /** True when the PC knows the version 2 commands and sends `library`. */

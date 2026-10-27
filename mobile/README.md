@@ -15,7 +15,7 @@ pnpm typecheck && pnpm lint && pnpm test
 
 - It listens on your local network (port 47652, `--port` to change) and prints the pairing QR and its `feathertune://pair?…` text. Scan or paste it within 2 minutes.
 - When a phone pairs, the terminal shows its name and the 6-digit code (the phone shows the same) and asks `y` or `n`.
-- After that the phone gets a made-up track and queue that move on their own, and its commands (play, pause, next, previous, seek, volume, play a queue row, move, remove or play next a row, play a playlist of a made-up library) work. `--stuck-drag` ignores moves, like a page that did not take the drag.
+- After that the phone gets a made-up track and queue that move on their own, and its commands (play, pause, next, previous, seek, volume, play a queue row, remove or play next a row, play a playlist of a made-up library) work.
 - Keys: `a` turns the ad mode on or off (everything but play and pause is then refused with `ad`), `p` opens a new pairing QR, `d` lists the paired phones, `q` quits.
 - Other options: `--name <text>` (the PC name), `--artwork <https url>` (artwork for every track; none by default), `--no-rate-limit` (the real PC allows 5 connections per address a minute).
 - It plays no audio and drops anything outside the local network. The first run may trigger the Windows Firewall prompt for Node: allow private networks.

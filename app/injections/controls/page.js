@@ -10,9 +10,10 @@ const SELECTORS = {
   // The rows of the queue, and the link in one when the row's data has no video id.
   queueRows: 'ytmusic-player-queue ytmusic-player-queue-item',
   rowLink: 'a[href*="watch?v="]',
-  // A queue row's menu button and drag handle, and the entries of the open menu.
+  // What a tap on a queue row plays: its play button over the thumbnail, else its title.
+  rowPlay: 'ytmusic-play-button-renderer, .song-info',
+  // A queue row's menu button, and the entries of the open menu.
   rowMenu: 'ytmusic-menu-renderer yt-button-shape button, ytmusic-menu-renderer #button',
-  dragHandle: '#drag-handle, .drag-handle, [class*="drag-handle"]',
   menuEntries: 'ytmusic-menu-popup-renderer ytmusic-menu-service-item-renderer',
 };
 // Volume keys without the precise_volume module: one 5% step through the player's public API.
@@ -94,10 +95,25 @@ const findRow = (id, index) => {
   }
   return row;
 };
+const isPlaying = (row) => row.hasAttribute('selected') || row.getAttribute('play-button-state') === 'playing';
+
+// A tap on `el` as the site's own handlers see one: pointer and mouse down and up at its middle, then the
+// click (a queue row does not react to a bare click() on it).
+const tap = (el) => {
+  const r = el.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, composed: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  const pointer = { ...at, pointerId: 1, isPrimary: true, pointerType: 'mouse' };
+  el.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, buttons: 1 }));
+  el.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }));
+  el.dispatchEvent(new PointerEvent('pointerup', pointer));
+  el.dispatchEvent(new MouseEvent('mouseup', at));
+  el.dispatchEvent(new MouseEvent('click', at));
+};
+
 const playItem = (id, index) => {
   const row = findRow(id, index);
   if (!row) return false;
-  row.click();
+  tap(row.querySelector(SELECTORS.rowPlay) || row);
   return true;
 };
 
@@ -110,7 +126,8 @@ const MENU_ENTRY = {
   remove: (d) => !!d?.serviceEndpoint?.removeFromQueueEndpoint || d?.icon?.iconType === 'REMOVE',
 };
 const MENU_WAIT_MS = 1500;
-const menuAction = (id, index, action) => {
+// `done` runs once the entry was clicked.
+const menuAction = (id, index, action, done) => {
   const row = findRow(id, index);
   const button = row?.querySelector(SELECTORS.rowMenu);
   if (!button) return false;
@@ -120,7 +137,10 @@ const menuAction = (id, index, action) => {
     const entry = [...document.querySelectorAll(SELECTORS.menuEntries)].find(
       (e) => e.offsetParent !== null && MENU_ENTRY[action](e.data),
     );
-    if (entry) return entry.click();
+    if (entry) {
+      entry.click();
+      return done?.();
+    }
     if (performance.now() - started < MENU_WAIT_MS) return setTimeout(pick, 50);
     // Not in this menu: close it again.
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -129,47 +149,48 @@ const menuAction = (id, index, action) => {
   return true;
 };
 
-// Moves queue row `index` (track `id`) to `to`. Right after the playing track is the menu's "play next";
-// anywhere else the row's drag handle is dragged there with mouse events (the site may ignore them: then the
-// phone sees the queue unchanged and falls back to its menu).
-const DRAG_STEPS = 8;
-const queueMove = (id, index, to) => {
-  if (!Number.isInteger(to) || to < 0 || to >= MAX_QUEUE || to === index) return false;
+// Play next as a move: the site's own "Play next" adds a copy of the row after the playing one, so once the
+// copy shows up the row it came from is removed through its own menu. A row already next stays put; when no
+// copy shows up within COPY_WAIT_MS nothing is removed.
+const COPY_WAIT_MS = 2000;
+const queueNext = (id, index) => {
   const row = findRow(id, index);
   if (!row) return false;
-  const rows = [...document.querySelectorAll(SELECTORS.queueRows)];
-  const current = rows.findIndex((r) => r.hasAttribute('selected') || r.getAttribute('play-button-state') === 'playing');
-  if (current >= 0 && to === current + (index < current ? 0 : 1)) return menuAction(id, index, 'next');
-  const target = rows[Math.min(to, rows.length - 1)];
-  const handle = row.querySelector(SELECTORS.dragHandle) || row;
-  if (!target) return false;
-  const from = handle.getBoundingClientRect();
-  const dest = target.getBoundingClientRect();
-  const x = from.left + from.width / 2;
-  const y0 = from.top + from.height / 2;
-  // Past the target's middle, so it lands on the side the phone asked for.
-  const y1 = to > index ? dest.bottom - 2 : dest.top + 2;
-  const fire = (el, type, y, Kind = MouseEvent) =>
-    el.dispatchEvent(
-      new Kind(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, buttons: 1, pointerId: 1, isPrimary: true }),
-    );
-  fire(handle, 'pointerdown', y0, PointerEvent);
-  fire(handle, 'mousedown', y0);
-  for (let i = 1; i <= DRAG_STEPS; i++) {
-    const y = y0 + ((y1 - y0) * i) / DRAG_STEPS;
-    const over = document.elementFromPoint(x, y) || target;
-    fire(over, 'pointermove', y, PointerEvent);
-    fire(over, 'mousemove', y);
-  }
-  const end = document.elementFromPoint(x, y1) || target;
-  fire(end, 'pointerup', y1, PointerEvent);
-  fire(end, 'mouseup', y1);
-  return true;
+  const rows = () => [...document.querySelectorAll(SELECTORS.queueRows)];
+  const copies = () => rows().filter((r) => rowId(r) === id).length;
+  const at = rows().indexOf(row);
+  const current = rows().findIndex(isPlaying);
+  if (current >= 0 && at === current + 1) return true;
+  const before = copies();
+  return menuAction(id, index, 'next', () => {
+    const started = performance.now();
+    const removeOriginal = () => {
+      if (copies() <= before) {
+        if (performance.now() - started < COPY_WAIT_MS) setTimeout(removeOriginal, 100);
+        return;
+      }
+      // The copy is right after the playing row; the original is the other row of the track nearest its place.
+      const next = rows().findIndex(isPlaying) + 1;
+      let original = -1;
+      rows().forEach((r, i) => {
+        if (i !== next && rowId(r) === id && (original < 0 || Math.abs(i - at) < Math.abs(original - at))) original = i;
+      });
+      if (original >= 0) menuAction(id, original, 'remove');
+    };
+    setTimeout(removeOriginal, 100);
+  });
 };
+
+// Our own navigation (openPlaylist) leaves the page: the site's beforeunload handler would stop it with a
+// "Leave site?" dialog that nobody at the PC asked for. This module runs before the site's scripts, so this
+// listener comes first and keeps the site's from running, only for that navigation.
+let leaving = false;
+window.addEventListener('beforeunload', (e) => leaving && e.stopImmediatePropagation(), { capture: true });
 
 // Plays playlist `list` of the library: the site's own page for it, which starts it.
 const openPlaylist = (list) => {
   if (typeof list !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(list) || adShowing()) return false;
+  leaving = true;
   location.assign(`/watch?list=${list}`);
   return true;
 };
@@ -185,8 +206,7 @@ feathertune.controls = Object.freeze({
   seek,
   setVolume,
   playItem,
-  queueNext: (id, index) => menuAction(id, index, 'next'),
+  queueNext,
   queueRemove: (id, index) => menuAction(id, index, 'remove'),
-  queueMove,
   openPlaylist,
 });

@@ -3,7 +3,6 @@
 //   --name <text>    the PC name shown on the phone (default feathertune)
 //   --artwork <url>  https artwork for every track (default none)
 //   --no-rate-limit  no limit on connections per address (the real PC allows 5 a minute)
-//   --stuck-drag     ignore queue_move, like a page that did not take the drag
 
 import { join } from 'node:path';
 import { emitKeypressEvents } from 'node:readline';
@@ -36,7 +35,6 @@ const pc = new FakePc({
   artwork,
   storePath: join(__dirname, 'fake-pc.json'),
   perMinute: process.argv.includes('--no-rate-limit') ? Infinity : undefined,
-  stuckDrag: process.argv.includes('--stuck-drag'),
   log: (line) => say(`  ${line}`),
   onAsk: ({ name, code }) => say(`\nAllow "${name}" to control feathertune? The phone shows ${code}.  [y] allow  [n] deny`),
 });

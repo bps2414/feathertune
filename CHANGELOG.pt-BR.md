@@ -2,6 +2,13 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.5.1 — 2026-10-27
+
+- **Tocar uma playlist pelo celular não trava mais.** O PC mostrava um diálogo "Sair do site?" e ficava esperando; agora a playlist só começa.
+- **Toque numa faixa da fila do celular para tocar.** O toque chegava ao PC, mas a faixa não começava; agora começa.
+- **Tocar a seguir move a faixa.** Antes ela ficava onde estava e uma cópia entrava depois da que toca.
+- **Sem arrastar na fila do celular.** O site ignorava o arraste; use o menu da faixa para Tocar a seguir e Remover. APK Android: `feathertune-remote-0.2.1.apk`, anexado a este release; instala por cima do 0.2.0.
+
 ## 0.5.0 — 2026-10-26
 
 - **Controle pelo celular: visual novo.** O player fica sobre um degradê das cores do álbum, com uma barra "a seguir", as abas Player e Biblioteca e a fila num painel. O app agora tem ícone próprio (a pena do app do PC) e tela de abertura.

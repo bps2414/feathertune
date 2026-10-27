@@ -2,6 +2,13 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.5.1 — 2026-10-27
+
+- **Playing a playlist from the phone no longer gets stuck.** The PC showed a "Leave site?" dialog and waited on it; the playlist now just starts.
+- **Tap a track in the phone's queue to play it.** The tap reached the PC but the track did not start; it does now.
+- **Play next moves the track.** It used to leave the track where it was and add a copy after the playing one.
+- **No more dragging in the phone's queue.** The site ignored the drag; use a track's menu for Play next and Remove. Android APK: `feathertune-remote-0.2.1.apk`, attached to this release; it installs over 0.2.0.
+
 ## 0.5.0 — 2026-10-26
 
 - **Phone remote: a new look.** The player sits on a gradient from the album's colors, with an "up next" bar, a Player and a Library tab, and the queue in a sheet. The app now has its own icon (the PC app's feather) and a start screen.

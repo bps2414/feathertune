@@ -175,7 +175,6 @@ impl Host for AppHost {
             Command::PlayItem { id, i } => crate::player_play_item(app, id, *i),
             Command::QueueNext { id, i } => crate::player_queue_next(app, id, *i),
             Command::QueueRemove { id, i } => crate::player_queue_remove(app, id, *i),
-            Command::QueueMove { id, i, to } => crate::player_queue_move(app, id, *i, *to),
             Command::OpenPlaylist { list } => crate::player_open_playlist(app, list),
         }
     }
@@ -201,7 +200,6 @@ enum Command {
     PlayItem { id: String, i: usize },
     QueueNext { id: String, i: usize },
     QueueRemove { id: String, i: usize },
-    QueueMove { id: String, i: usize, to: usize },
     OpenPlaylist { list: String },
 }
 
@@ -212,7 +210,6 @@ impl Command {
             Command::Seek { s } => s.is_finite() && (0.0..=MAX_SECONDS).contains(s),
             Command::Volume { v } => v.is_finite() && (0.0..=100.0).contains(v),
             Command::PlayItem { id, i } | Command::QueueNext { id, i } | Command::QueueRemove { id, i } => row(id, *i),
-            Command::QueueMove { id, i, to } => row(id, *i) && *to < MAX_QUEUE && to != i,
             Command::OpenPlaylist { list } => crate::player::valid_list(list),
             _ => true,
         }
@@ -1537,8 +1534,8 @@ mod tests {
             let mut phone = knock(addr, &pc_key(&shared), &keys).await.unwrap();
             phone.intro().await;
             for bad in [
-                r#""c":"queue_move","id":"aaaaaaaaaaa","i":2,"to":2"#,
-                r#""c":"queue_move","id":"aaaaaaaaaaa","i":2,"to":200"#,
+                // Gone: the page did not take a drag it did not see from a mouse.
+                r#""c":"queue_move","id":"aaaaaaaaaaa","i":3,"to":0"#,
                 r#""c":"queue_next","id":"short","i":0"#,
                 r#""c":"queue_remove","id":"aaaaaaaaaaa","i":200"#,
                 r#""c":"open_playlist","list":"../x""#,
@@ -1547,7 +1544,6 @@ mod tests {
                 phone.send(&format!(r#"{{"t":"cmd",{bad}}}"#)).await;
                 assert_eq!(phone.recv().await.unwrap(), json!({ "t": "error", "code": "invalid" }), "{bad}");
             }
-            phone.send(r#"{"t":"cmd","c":"queue_move","id":"aaaaaaaaaaa","i":3,"to":0}"#).await;
             phone.send(r#"{"t":"cmd","c":"queue_next","id":"aaaaaaaaaaa","i":1}"#).await;
             phone.send(r#"{"t":"cmd","c":"queue_remove","id":"aaaaaaaaaaa","i":1}"#).await;
             phone.send(r#"{"t":"cmd","c":"open_playlist","list":"PLx_1-2"}"#).await;
@@ -1556,7 +1552,6 @@ mod tests {
             assert_eq!(
                 host.ran(),
                 [
-                    r#"QueueMove { id: "aaaaaaaaaaa", i: 3, to: 0 }"#,
                     r#"QueueNext { id: "aaaaaaaaaaa", i: 1 }"#,
                     r#"QueueRemove { id: "aaaaaaaaaaa", i: 1 }"#,
                     r#"OpenPlaylist { list: "PLx_1-2" }"#,
@@ -1568,11 +1563,7 @@ mod tests {
 
             host.set_state(state(true));
             assert_eq!(phone.recv().await.unwrap()["ad"], true);
-            for c in [
-                r#""c":"queue_next","id":"aaaaaaaaaaa","i":1"#,
-                r#""c":"queue_move","id":"aaaaaaaaaaa","i":3,"to":0"#,
-                r#""c":"open_playlist","list":"LM""#,
-            ] {
+            for c in [r#""c":"queue_next","id":"aaaaaaaaaaa","i":1"#, r#""c":"open_playlist","list":"LM""#] {
                 phone.send(&format!(r#"{{"t":"cmd",{c}}}"#)).await;
                 assert_eq!(phone.recv().await.unwrap(), json!({ "t": "error", "code": "ad" }), "{c}");
             }

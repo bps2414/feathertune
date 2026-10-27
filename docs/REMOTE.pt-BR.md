@@ -50,7 +50,7 @@ O que outros serviços chamam de "connect": cada aparelho do usuário vê os out
 
 O Expo dá interface nativa com gestos e animações suaves, câmera (ler QR), Keychain/Keystore e vibração como módulos mantidos, e o EAS Build compila iOS na nuvem sem Mac. Bibliotecas:
 
-- `expo-router` (telas), o `PanResponder` e o `Animated` do próprio React Native (barra de progresso, volume, painel e arrasto da fila; por enquanto sem biblioteca de gestos ou de animação), `expo-image` (capa com fundo desfocado), `expo-linear-gradient` com as cores do álbum que o PC já calcula (`album_color.rs`), `expo-splash-screen` (a tela de abertura, feita do ícone do app do PC).
+- `expo-router` (telas), o `PanResponder` e o `Animated` do próprio React Native (barra de progresso, volume, painel da fila; por enquanto sem biblioteca de gestos ou de animação), `expo-image` (capa com fundo desfocado), `expo-linear-gradient` com as cores do álbum que o PC já calcula (`album_color.rs`), `expo-splash-screen` (a tela de abertura, feita do ícone do app do PC).
 - `expo-camera` (leitor de QR), `expo-secure-store` (chaves), `expo-haptics`, `expo-local-authentication` (bloqueio opcional do app), `expo-localization` (inglês e pt-BR, como o desktop).
 - Criptografia: `@noble/curves`, `@noble/ciphers`, `@noble/hashes` (JS puro, auditadas, rodam no Hermes), aleatoriedade do `expo-crypto`.
 - Estado: um store pequeno (`zustand`). Nenhum outro kit de estado ou de interface.
@@ -132,8 +132,7 @@ Controle → PC:
 - `{"t":"cmd","c":"seek","s":segundos}`: de 0 a 86 400.
 - `{"t":"cmd","c":"volume","v":0-100}`
 - `{"t":"cmd","c":"play_item","id":"<id do vídeo>","i":índice}`: toca aquela linha da fila (os dois precisam bater, para um índice velho nunca tocar a música errada); `i` de 0 a 199.
-- `{"t":"cmd","c":"queue_next"|"queue_remove","id","i"}` (versão 2): aquela linha logo depois da que toca, ou fora da fila, pelo próprio menu da linha no site. Mesmas checagens do `play_item`.
-- `{"t":"cmd","c":"queue_move","id","i","to":índice}` (versão 2): arrasta aquela linha para `to` (0 a 199, diferente de `i`); logo depois da linha que toca, usa "tocar a seguir" no lugar. O PC não sabe se a página aceitou o arrasto: o controle descobre pela próxima `queue`, e quando ela mantém a ordem antiga ele devolve a linha e passa a usar só `queue_next`.
+- `{"t":"cmd","c":"queue_next"|"queue_remove","id","i"}` (versão 2): aquela linha logo depois da que toca, ou fora da fila, pelo próprio menu da linha no site. Mesmas checagens do `play_item`. O "Tocar a seguir" do site cria uma cópia, então o `queue_next` depois remove a linha de origem: a linha se move. Não existe `queue_move` (a página ignorava um arrasto que não veio de um mouse); o PC responde `invalid` a ele.
 - `{"t":"cmd","c":"open_playlist","list":"<id da playlist>"}` (versão 2): toca aquela playlist do começo, uma navegação do site oficial (`/watch?list=`).
 - `{"t":"ping","n":n}` → `{"t":"pong","n":n,"at":ms}`: primeira coisa da sessão, depois a cada 15 s; o PC fecha uma conexão calada por 45 s. `n` é um inteiro sem sinal.
 
@@ -178,7 +177,7 @@ Vários controles ao mesmo tempo recebem todo `state`; comandos valem na ordem d
 3. `mobile/tools/fake-pc`: um script Node que faz o papel do PC (QR de pareamento no terminal, `KK`, uma faixa e uma fila inventadas que andam, recusas durante um anúncio de mentira) com o mesmo código de `noise/`. Assim o trabalho no celular não precisa de PC com Windows nem de conta, e quem contribui em qualquer sistema consegue fazer todas as telas.
 4. Telas de pareamento: boas-vindas, permissão de câmera, leitura, nome, código para conferir, pronto. Permissão de rede local do Android 17+ (`ACCESS_LOCAL_NETWORK`, target API 37) e do iOS (`NSLocalNetworkUsageDescription`) pedida com uma explicação antes.
 5. Tocando agora: capa grande com fundo das cores do álbum, título/artista, barra de progresso (arrastar com vibração, manda um `seek` ao soltar), tocar/pausar, anterior/próxima, volume (segue o dedo: no máximo um `volume` a cada 80 ms enquanto arrasta, sempre o último valor). Controles apagados com uma nota curta durante anúncio.
-6. Fila: um painel sobre o tocando agora, aberto pela barra "a seguir"; a linha atual marcada, tocar numa linha toca ela (`play_item`), arrastar uma linha pela alça move ela (`queue_move`), e o menu de cada linha tem "Tocar a seguir" e "Remover". Uma aba Biblioteca ao lado do player lista as playlists da barra lateral; tocar numa toca ela (`open_playlist`). Com um PC da versão 1 elas pedem para atualizar o feathertune.
+6. Fila: um painel sobre o tocando agora, aberto pela barra "a seguir"; a linha atual marcada, tocar numa linha toca ela (`play_item`), e o menu de cada linha tem "Tocar a seguir" e "Remover". Uma aba Biblioteca ao lado do player lista as playlists da barra lateral; tocar numa toca ela (`open_playlist`). Com um PC da versão 1 elas pedem para atualizar o feathertune.
 7. PCs: lista de PCs pareados, conectar/reconectar, remover. Estados claros para "PC desligado ou em suspensão", "fora da mesma rede", "o Windows está bloqueando a conexão (rede Pública)", "removido pelo PC" (pede para parear de novo), "atualize o app" / "atualize o feathertune".
 8. Visual: escuro primeiro, segue o tema do sistema; um destaque tirado do álbum; aqui as animações respeitam o "reduzir movimento" do sistema (o celular não é a página do desktop, então a regra do AGENTS sobre isso não vale) e param com o app em segundo plano. Todo controle tem rótulo de acessibilidade e o texto segue o tamanho de fonte do sistema.
 
@@ -196,7 +195,6 @@ Para o mantenedor, com o app rodando e uma conta logada:
 - O "continuar" do próprio serviço já leva a reprodução entre dois PCs com feathertune bem o bastante? Se sim, a passagem da etapa 3 sai.
 - Um seek logo depois de abrir uma faixa pela URL cai no lugar certo sempre (e depois de um anúncio)?
 - O `playItem` clicando numa linha da fila funciona em filas de reprodução automática e de rádio, não só em playlists?
-- A página aceita o arrasto do `queueMove` (eventos de ponteiro e de mouse a partir da alça da linha)? Se não, o celular passa sozinho para "Tocar a seguir"; aí o arrasto pode sair.
 - O `queueNext` e o `queueRemove` acham as entradas do menu da linha, e a injeção `core` acha as playlists da barra lateral (barra fechada, biblioteca longa)?
 
 ## Lançamentos

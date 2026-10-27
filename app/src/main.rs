@@ -491,11 +491,6 @@ fn row_call(method: &str, id: &str, index: usize) -> Option<String> {
     (player::valid_id(id) && index < MAX_QUEUE_ROWS).then(|| format!("{method}(\"{id}\",{index})"))
 }
 
-fn queue_move_call(id: &str, index: usize, to: usize) -> Option<String> {
-    (player::valid_id(id) && index < MAX_QUEUE_ROWS && to < MAX_QUEUE_ROWS && to != index)
-        .then(|| format!("queueMove(\"{id}\",{index},{to})"))
-}
-
 fn open_playlist_call(list: &str) -> Option<String> {
     player::valid_list(list).then(|| format!("openPlaylist(\"{list}\")"))
 }
@@ -523,11 +518,6 @@ pub(crate) fn player_queue_next(app: &AppHandle, id: &str, index: usize) -> bool
 /// Removes queue row `index` (track `id`) from the queue. Refused by the page during an ad.
 pub(crate) fn player_queue_remove(app: &AppHandle, id: &str, index: usize) -> bool {
     row_call("queueRemove", id, index).is_some_and(|call| player_call(app, &call))
-}
-
-/// Moves queue row `index` (track `id`) to row `to`. Refused by the page during an ad.
-pub(crate) fn player_queue_move(app: &AppHandle, id: &str, index: usize, to: usize) -> bool {
-    queue_move_call(id, index, to).is_some_and(|call| player_call(app, &call))
 }
 
 /// Plays playlist `list` (a `list=` id). Refused by the page during an ad.
@@ -738,10 +728,6 @@ mod tests {
         for bad in ["", "short", "dQw4w9WgXcQx", "dQw4w9WgXc\"", "dQw4w9WgXc;", "dQw4w9WgXc "] {
             assert_eq!(row_call("queueRemove", bad, 0), None, "{bad:?}");
         }
-        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 0).as_deref(), Some(r#"queueMove("dQw4w9WgXcQ",3,0)"#));
-        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 3), None);
-        assert_eq!(queue_move_call("dQw4w9WgXcQ", 3, 200), None);
-        assert_eq!(queue_move_call("bad", 3, 1), None);
     }
 
     #[test]

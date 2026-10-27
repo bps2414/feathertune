@@ -512,15 +512,6 @@ export function Glyph({ name, size, color }: { name: GlyphName; size: number; co
         </View>
       );
       break;
-    case 'handle':
-      body = (
-        <View style={{ gap: s * 0.16 }}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={bar(s * 0.62, s * 0.09)} />
-          ))}
-        </View>
-      );
-      break;
     case 'more':
       body = (
         <View style={[styles.row, { gap: s * 0.14 }]}>
@@ -565,7 +556,6 @@ export type GlyphName =
   | 'down'
   | 'speaker'
   | 'playing'
-  | 'handle'
   | 'more'
   | 'library';
 

@@ -259,7 +259,7 @@ describe('the connection', () => {
     expect(pc.playback.volume).toBe(20);
   });
 
-  it('reorders, removes and plays next in the queue, and plays a playlist of the library', async () => {
+  it('plays next and removes in the queue, and plays a playlist of the library', async () => {
     const { pc } = await start();
     const client = phone();
     await pairWith(client, pc, true);
@@ -269,14 +269,12 @@ describe('the connection', () => {
     const ids = queue!.items.map((item) => item.id);
     const order = () => client.store.getState().queue!.items.map((item) => item.id);
 
-    client.command({ c: 'queue_move', id: ids[5], i: 5, to: 2 });
-    await until(client, (s) => s.queue!.items[2].id === ids[5]);
-    expect(order()).toEqual([ids[0], ids[1], ids[5], ids[2], ids[3], ids[4], ids[6], ids[7]]);
+    // Play next moves the row: no copy is left where it was.
+    client.command({ c: 'queue_next', id: ids[5], i: 5 });
+    await until(client, (s) => s.queue!.items[1].id === ids[5]);
+    expect(order()).toEqual([ids[0], ids[5], ids[1], ids[2], ids[3], ids[4], ids[6], ids[7]]);
 
-    client.command({ c: 'queue_next', id: ids[7], i: 7 });
-    await until(client, (s) => s.queue!.items[1].id === ids[7]);
-
-    client.command({ c: 'queue_remove', id: ids[3], i: 5 });
+    client.command({ c: 'queue_remove', id: ids[3], i: 4 });
     await until(client, (s) => s.queue!.items.length === 7);
     expect(order()).not.toContain(ids[3]);
     expect(client.store.getState().queue!.current).toBe(0);
@@ -292,16 +290,7 @@ describe('the connection', () => {
     expect(pc.playback.tracks).toHaveLength(4);
   });
 
-  it('sends the same queue back when the page ignored a drag, and a version 1 PC sends no library', async () => {
-    const stuck = await start({ stuckDrag: true });
-    const client = phone();
-    await pairWith(client, stuck.pc, true);
-    const { queue } = await until(client, (s) => s.status === 'connected' && s.queue !== null);
-    const before = client.store.getState().queue;
-    client.command({ c: 'queue_move', id: queue!.items[4].id, i: 4, to: 1 });
-    await until(client, (s) => s.queue !== before);
-    expect(client.store.getState().queue!.items).toEqual(queue!.items);
-
+  it('gets no library from a version 1 PC', async () => {
     const old = await start({ version: { v: 1, min: 1 } });
     const oldClient = phone();
     await pairWith(oldClient, old.pc, true);

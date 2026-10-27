@@ -1,11 +1,9 @@
-// The queue as a sheet over the player. Tap a row to play it; with a version 2 PC, drag a row by its handle to
-// move it (`queue_move`) and open its ⋯ for the safe actions, Play next and Remove (`queue_next`, `queue_remove`).
-// A drag shows its result at once; when the PC's queue does not follow (the page may not take a drag it did not
-// see from a mouse), the order goes back, the handles go away and the ⋯ actions stay.
+// The queue as a sheet over the player. Tap a row to play it; with a version 2 PC, open its ⋯ for Play next and
+// Remove (`queue_next`, `queue_remove`). There is no drag: the page did not take one it did not see from a mouse.
 
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, BackHandler, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Animated, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { t } from '../i18n';
@@ -13,12 +11,7 @@ import { remote, useRemote } from '../remote/app';
 import { hasQueueActions, type QueueItem } from '../remote/protocol';
 import { Body, Glyph, IconButton, type, useReducedMotion, type Colors } from '../ui';
 
-/** How long a drag waits for the PC's queue to show it before it is taken back. */
-const MOVE_WAIT_MS = 2500;
 const SHEET_MS = 260;
-
-/** Once the PC ignored a drag, this app run uses the ⋯ actions only. */
-let dragRefused = false;
 
 export function QueueSheet({ colors: c, open, onClose }: { colors: Colors; open: boolean; onClose: () => void }) {
   const reduced = useReducedMotion();
@@ -65,118 +58,18 @@ export function QueueSheet({ colors: c, open, onClose }: { colors: Colors; open:
   );
 }
 
-interface Pending {
-  items: QueueItem[];
-  current: number | null;
-  /** The ids before the move, to tell an unchanged queue from the moved one. */
-  before: string;
-}
-
 function QueueList({ colors: c, onClose }: { colors: Colors; onClose: () => void }) {
   const queue = useRemote((s) => s.queue);
   const v2 = useRemote((s) => hasQueueActions(s.hello));
   const isAd = useRemote((s) => s.player?.ad ?? false);
   const refusal = useRemote((s) => s.refusal);
-
-  const [pending, setPendingState] = useState<Pending | null>(null);
-  const [refused, setRefused] = useState(dragRefused);
   const [menu, setMenu] = useState<number | null>(null);
-  const [drag, setDragState] = useState<{ from: number; to: number } | null>(null);
-  const [dragY] = useState(() => new Animated.Value(0));
-  // Rows are one line each, so the first one's height is every row's.
-  const [rowHeight, setRowHeight] = useState(64);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Mirrors of the two states above, for the gesture and timer callbacks.
-  const pendingRef = useRef<Pending | null>(null);
-  const dragRef = useRef<{ from: number; to: number } | null>(null);
-  const setPending = (p: Pending | null) => {
-    pendingRef.current = p;
-    setPendingState(p);
-  };
-  const setDrag = (d: { from: number; to: number } | null) => {
-    dragRef.current = d;
-    setDragState(d);
-  };
 
-  const refuse = () => {
-    dragRefused = true;
-    setRefused(true);
-    setPending(null);
-  };
+  const items = queue?.items ?? [];
+  const current = queue?.current ?? null;
+  const canEdit = v2 && !isAd;
 
-  // The PC's queue came: a moved one ends the wait, the same one as before means the drag did not take.
-  useEffect(() => {
-    const p = pendingRef.current;
-    if (!p) return;
-    if (timer.current) clearTimeout(timer.current);
-    if (queue && queue.items.map((x) => x.id).join() === p.before) refuse();
-    else setPending(null);
-    // Only a new queue from the PC matters here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue]);
-
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-
-  const items = pending?.items ?? queue?.items ?? [];
-  const current = pending ? pending.current : (queue?.current ?? null);
-  const canEdit = v2 && !isAd && pending === null;
-  const canDrag = canEdit && !refused;
-
-  const move = (from: number, to: number) => {
-    if (!queue || from === to || to < 0 || to >= items.length) return;
-    const moved = [...items];
-    const [item] = moved.splice(from, 1);
-    moved.splice(to, 0, item);
-    const playing = current !== null ? items[current] : null;
-    setPending({ items: moved, current: playing ? moved.indexOf(playing) : null, before: items.map((x) => x.id).join() });
-    remote.command({ c: 'queue_move', id: item.id, i: from, to });
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(refuse, MOVE_WAIT_MS);
-  };
-
-  const dragging = {
-    start: (from: number) => {
-      setMenu(null);
-      dragY.setValue(0);
-      setDrag({ from, to: from });
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    },
-    move: (dy: number) => {
-      dragY.setValue(dy);
-      const d = dragRef.current;
-      if (!d) return;
-      const to = Math.max(0, Math.min(items.length - 1, d.from + Math.round(dy / rowHeight)));
-      if (to === d.to) return;
-      void Haptics.selectionAsync();
-      setDrag({ ...d, to });
-    },
-    end: () => {
-      const d = dragRef.current;
-      setDrag(null);
-      dragY.setValue(0);
-      if (d && d.to !== d.from) move(d.from, d.to);
-    },
-  };
-
-  const shift = (k: number): number => {
-    if (!drag || k === drag.from) return 0;
-    const { from, to } = drag;
-    if (from < to && k > from && k <= to) return -rowHeight;
-    if (to < from && k >= to && k < from) return rowHeight;
-    return 0;
-  };
-
-  const note = !v2
-    ? t('queueUpdatePc')
-    : isAd
-      ? t('nowAdNote')
-      : refusal === 'unavailable'
-        ? t('nowUnavailable')
-        : refused
-          ? t('queueDragFailed')
-          : null;
+  const note = !v2 ? t('queueUpdatePc') : isAd ? t('nowAdNote') : refusal === 'unavailable' ? t('nowUnavailable') : null;
 
   return (
     <>
@@ -197,27 +90,19 @@ function QueueList({ colors: c, onClose }: { colors: Colors; onClose: () => void
           </Text>
         )}
       </View>
-      <ScrollView contentContainerStyle={styles.list} scrollEnabled={drag === null}>
+      <ScrollView contentContainerStyle={styles.list}>
         {items.length === 0 && <Body muted colors={c}>{t('nowEmptyQueue')}</Body>}
         {items.map((item, index) => (
           <Row
             key={`${item.id}-${index}`}
             item={item}
             index={index}
-            count={items.length}
             current={index === current}
             colors={c}
             isAd={isAd}
             canEdit={canEdit && index !== current}
-            canDrag={canDrag && index !== current}
             menuOpen={menu === index}
-            dragged={drag?.from === index}
-            dragY={dragY}
-            shift={shift(index)}
             onMenu={() => setMenu(menu === index ? null : index)}
-            onLayout={(h) => index === 0 && menu === null && setRowHeight(Math.round(h))}
-            dragging={dragging}
-            onMove={move}
             onAction={(c2) => {
               setMenu(null);
               remote.command({ c: c2, id: item.id, i: index });
@@ -232,59 +117,21 @@ function QueueList({ colors: c, onClose }: { colors: Colors; onClose: () => void
 function Row(props: {
   item: QueueItem;
   index: number;
-  count: number;
   current: boolean;
   colors: Colors;
   isAd: boolean;
   canEdit: boolean;
-  canDrag: boolean;
   menuOpen: boolean;
-  dragged: boolean;
-  dragY: Animated.Value;
-  shift: number;
   onMenu: () => void;
-  onLayout: (height: number) => void;
-  dragging: { start: (from: number) => void; move: (dy: number) => void; end: () => void };
-  onMove: (from: number, to: number) => void;
   onAction: (c: 'queue_next' | 'queue_remove') => void;
 }) {
-  const { item, index, count, current, colors: c, isAd, canEdit, canDrag, menuOpen, dragged } = props;
-  const latest = useRef(props);
-  useEffect(() => {
-    latest.current = props;
-  });
-
-  const responder = useMemo(
-    () =>
-      // eslint-disable-next-line react-hooks/refs
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => latest.current.canDrag,
-        onMoveShouldSetPanResponder: () => latest.current.canDrag,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => latest.current.dragging.start(latest.current.index),
-        onPanResponderMove: (_, g) => latest.current.dragging.move(g.dy),
-        onPanResponderRelease: () => latest.current.dragging.end(),
-        onPanResponderTerminate: () => latest.current.dragging.end(),
-      }),
-    []
-  );
-
+  const { item, index, current, colors: c, isAd, canEdit, menuOpen } = props;
   return (
-    <Animated.View
-      onLayout={(e) => props.onLayout(e.nativeEvent.layout.height)}
-      style={[
-        dragged
-          ? { zIndex: 10, elevation: 8, transform: [{ translateY: props.dragY }, { scale: 1.02 }] }
-          : { transform: [{ translateY: props.shift }] },
-      ]}
-    >
+    <View>
       <View
         style={[
           styles.row,
-          {
-            backgroundColor: dragged ? c.raised : current ? c.raised : 'transparent',
-            borderColor: current || dragged ? c.line : 'transparent',
-          },
+          { backgroundColor: current ? c.raised : 'transparent', borderColor: current ? c.line : 'transparent' },
         ]}
       >
         <Pressable
@@ -323,26 +170,6 @@ function Row(props: {
             <Glyph name="more" size={20} color={c.muted} />
           </Pressable>
         )}
-        {canDrag && (
-          <View
-            {...responder.panHandlers}
-            accessible
-            accessibilityRole="adjustable"
-            accessibilityLabel={t('queueDrag', { title: item.title })}
-            accessibilityHint={t('queueDragHint')}
-            accessibilityActions={[
-              { name: 'increment', label: t('queueMoveDown') },
-              { name: 'decrement', label: t('queueMoveUp') },
-            ]}
-            onAccessibilityAction={(e) => {
-              const to = index + (e.nativeEvent.actionName === 'increment' ? 1 : -1);
-              if (to >= 0 && to < count) props.onMove(index, to);
-            }}
-            style={styles.tool}
-          >
-            <Glyph name="handle" size={22} color={c.muted} />
-          </View>
-        )}
       </View>
       {menuOpen && (
         <View style={styles.actions}>
@@ -350,7 +177,7 @@ function Row(props: {
           <Action label={t('queueRemove')} colors={c} onPress={() => props.onAction('queue_remove')} />
         </View>
       )}
-    </Animated.View>
+    </View>
   );
 }
 

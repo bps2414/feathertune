@@ -47,6 +47,7 @@ const nextAt = (at + 0.2).toFixed(2);
     <button type="button" class="replay" data-replay>{s.replay}</button>
   </div>
   <p class="fine">{s.fine}</p>
+  <pre class="eq" aria-hidden="true" data-eq></pre>
 </section>
 
 <script>
@@ -56,6 +57,42 @@ const nextAt = (at + 0.2).toFixed(2);
     void hero.offsetWidth;
     hero.classList.add('sing');
   });
+
+  // An equalizer in characters, ~10 fps, only while it is on screen and the tab is visible.
+  const eq = document.querySelector<HTMLElement>('[data-eq]');
+  if (eq) {
+    const BARS = 22;
+    const ROWS = 6;
+    const still = matchMedia('(prefers-reduced-motion: reduce)');
+    const draw = (t: number) => {
+      const heights = Array.from({ length: BARS }, (_, i) => {
+        const level = 0.5 + 0.5 * Math.sin(t * (1.6 + ((i * 7) % 5) * 0.45) + i * 1.3);
+        return 1 + Math.round(level * (ROWS - 1));
+      });
+      eq.textContent = Array.from({ length: ROWS }, (_, r) =>
+        heights.map((h) => (h > ROWS - 1 - r ? '##' : '  ')).join(' ').trimEnd(),
+      ).join('\n');
+    };
+
+    let timer = 0;
+    let seen = true;
+    const sync = () => {
+      const run = seen && !document.hidden && !still.matches;
+      if (run && !timer) timer = window.setInterval(() => draw(performance.now() / 1000), 100);
+      if (!run && timer) {
+        clearInterval(timer);
+        timer = 0;
+      }
+    };
+    new IntersectionObserver(([entry]) => {
+      seen = entry.isIntersecting;
+      sync();
+    }).observe(eq);
+    document.addEventListener('visibilitychange', sync);
+    still.addEventListener('change', sync);
+    draw(2);
+    sync();
+  }
 </script>
 
 <style>
@@ -138,6 +175,17 @@ const nextAt = (at + 0.2).toFixed(2);
     margin-top: 1rem;
     color: var(--ink-soft);
     font-size: var(--step--1);
+  }
+
+  .eq {
+    margin: clamp(2rem, 1.5rem + 2vw, 3rem) 0 0;
+    height: 6.6em;
+    overflow: hidden;
+    color: var(--feather);
+    font-family: var(--mono);
+    font-size: clamp(0.6rem, 0.4rem + 0.9vw, 0.95rem);
+    line-height: 1.1;
+    user-select: none;
   }
 
   @media (prefers-reduced-motion: no-preference) {

@@ -13,7 +13,7 @@ const s = strings[locale].footer;
 
 <footer class="foot">
   <div class="wrap inner">
-    <p class="brand"><FeatherMark size={22} /> feathertune</p>
+    <p class="brand" data-feathers><FeatherMark size={22} /> feathertune</p>
     <p class="disclaimer">{s.disclaimer}</p>
     <ul class="links">
       <li><a href={links.repo}>GitHub</a></li>
@@ -35,6 +35,30 @@ const s = strings[locale].footer;
     <p class="made">{s.made}</p>
   </div>
 </footer>
+
+<script>
+  // Click the name and a few feathers drift down, in characters.
+  const brand = document.querySelector<HTMLElement>('[data-feathers]');
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const GLYPHS = ['/', '\\', '~', "'", ')', '}'];
+  brand?.addEventListener('click', () => {
+    if (still.matches) return;
+    const box = brand.getBoundingClientRect();
+    for (let i = 0; i < 16; i++) {
+      const f = document.createElement('span');
+      f.className = 'feather-fall';
+      f.textContent = GLYPHS[i % GLYPHS.length];
+      f.style.left = `${box.left + Math.random() * box.width}px`;
+      f.style.top = `${box.top}px`;
+      f.style.setProperty('--dx', `${(Math.random() - 0.5) * 220}px`);
+      f.style.setProperty('--rot', `${(Math.random() - 0.5) * 540}deg`);
+      f.style.animationDuration = `${1.6 + Math.random() * 1.4}s`;
+      f.style.animationDelay = `${Math.random() * 0.25}s`;
+      f.addEventListener('animationend', () => f.remove());
+      document.body.append(f);
+    }
+  });
+</script>
 
 <style>
   .foot {
@@ -65,6 +89,29 @@ const s = strings[locale].footer;
     font-size: 1.1rem;
     font-stretch: 118%;
     font-weight: 650;
+    cursor: pointer;
+  }
+
+  :global(.feather-fall) {
+    position: fixed;
+    z-index: 20;
+    color: var(--feather);
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    pointer-events: none;
+    animation: feather-fall 2s ease-in both;
+  }
+
+  @keyframes feather-fall {
+    from {
+      opacity: 1;
+      transform: translate(0, 0) rotate(0);
+    }
+    to {
+      opacity: 0;
+      transform: translate(var(--dx), 70vh) rotate(var(--rot));
+    }
   }
 
   .disclaimer {

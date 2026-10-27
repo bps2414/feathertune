@@ -1,0 +1,134 @@
+<canvas class="field" aria-hidden="true" data-field></canvas>
+
+<script>
+  // A field of slow sound waves drawn in characters behind the page. It follows the scroll, rises around the
+  // pointer, runs at ~15 fps, stops while the tab is hidden and is drawn once for reduced motion.
+  const canvas = document.querySelector<HTMLCanvasElement>('[data-field]');
+  const ctx = canvas?.getContext('2d');
+
+  if (canvas && ctx) {
+    const RAMP = ' .:-=+*#';
+    const FONT = 15;
+    const FAMILY = "ui-monospace, 'Cascadia Code', Consolas, monospace";
+    const STEP = 1000 / 15;
+    const still = matchMedia('(prefers-reduced-motion: reduce)');
+    const root = document.documentElement;
+
+    let cw = 9;
+    let ch = 19;
+    let cols = 0;
+    let rows = 0;
+    let color = '#5a4bda';
+    let raf = 0;
+    let last = 0;
+    let px = -99;
+    let py = -99;
+    let boost = 0;
+
+    const readColor = () => {
+      color = getComputedStyle(root).getPropertyValue('--feather').trim() || color;
+    };
+
+    const size = () => {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      canvas.width = Math.ceil(innerWidth * dpr);
+      canvas.height = Math.ceil(innerHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.font = `${FONT}px ${FAMILY}`;
+      ctx.textBaseline = 'top';
+      cw = ctx.measureText('M').width || 9;
+      ch = Math.round(FONT * 1.27);
+      cols = Math.ceil(innerWidth / cw);
+      rows = Math.ceil(innerHeight / ch);
+    };
+
+    const draw = (t: number) => {
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      ctx.fillStyle = color;
+      const shift = scrollY / ch / 3;
+      const cx = cols * 0.7;
+      const cy = rows * 0.35;
+      for (let r = 0; r < rows; r++) {
+        const y = r + shift;
+        for (let c = 0; c < cols; c++) {
+          let v =
+            Math.sin(c * 0.085 + t * 0.9) +
+            Math.sin(y * 0.17 - t * 0.7) +
+            Math.sin((c * 0.5 + y) * 0.09 + t * 0.55) +
+            Math.sin(Math.hypot(c - cx, (y - cy) * 2) * 0.11 - t * 1.2);
+          if (boost > 0.02) {
+            const d = Math.hypot(c - px, (r - py) * 2);
+            v += boost * 2.4 * Math.exp((-d * d) / 160) * Math.sin(d * 0.7 - t * 7);
+          }
+          const i = Math.floor(((v + 4) / 8 - 0.56) * 2.3 * RAMP.length);
+          if (i > 0) {
+            ctx.globalAlpha = 0.04 + Math.min(i, RAMP.length - 1) * 0.018;
+            ctx.fillText(RAMP[Math.min(i, RAMP.length - 1)], c * cw, r * ch);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      if (now - last < STEP) return;
+      last = now;
+      boost *= 0.9;
+      draw(now / 1000);
+    };
+
+    const start = () => {
+      if (!raf && !still.matches && !document.hidden) raf = requestAnimationFrame(frame);
+    };
+    const stop = () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    const redraw = () => {
+      size();
+      if (still.matches) draw(1.5);
+    };
+
+    let pending = 0;
+    addEventListener('resize', () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(redraw);
+    });
+    addEventListener(
+      'pointermove',
+      (e) => {
+        if (still.matches) return;
+        px = e.clientX / cw;
+        py = e.clientY / ch;
+        boost = 1;
+      },
+      { passive: true },
+    );
+    document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
+    still.addEventListener('change', () => {
+      stop();
+      redraw();
+      start();
+    });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      readColor();
+      if (still.matches) draw(1.5);
+    });
+
+    readColor();
+    redraw();
+    start();
+  }
+</script>
+
+<style>
+  .field {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+</style>

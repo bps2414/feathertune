@@ -8,6 +8,14 @@ interface Props {
 const { locale } = Astro.props;
 const s = strings[locale].install;
 const hero = strings[locale].hero;
+
+// Each terminal line types out after the one before it.
+let at = 0.3;
+const lines = s.terminal.map((text) => {
+  const line = { text, n: text.length, at: at.toFixed(2), prompt: text.startsWith('$') };
+  at += text.length * 0.035 + 0.3;
+  return line;
+});
 ---
 
 <section class="wrap section install" aria-labelledby="install-title">
@@ -25,12 +33,35 @@ const hero = strings[locale].hero;
       ))
     }
   </ol>
+  <div class="term" aria-hidden="true" data-term>
+    {
+      lines.map((l) => (
+        <p class:list={{ cmd: l.prompt }} style={`--n:${l.n};--at:${l.at}s`}>
+          {l.text}
+        </p>
+      ))
+    }
+  </div>
   <div class="actions">
     <a class="button" href={links.latest}>{hero.download}</a>
     <a href={links.releases}>{s.releases}</a>
   </div>
   <p class="remote">{s.remote}</p>
 </section>
+
+<script>
+  // Armed first so the lines start hidden, then typed once the block scrolls into view.
+  const term = document.querySelector<HTMLElement>('[data-term]');
+  if (term) {
+    term.classList.add('armed');
+    new IntersectionObserver(([entry], io) => {
+      if (!entry.isIntersecting) return;
+      void term.offsetWidth;
+      term.classList.add('go');
+      io.disconnect();
+    }, { threshold: 0.5 }).observe(term);
+  }
+</script>
 
 <style>
   .steps {
@@ -65,6 +96,68 @@ const hero = strings[locale].hero;
   li p {
     max-width: 30ch;
     color: var(--ink-soft);
+  }
+
+  .term {
+    margin-top: clamp(2rem, 1.5rem + 2vw, 3.5rem);
+    padding: 1.1rem 1.4rem;
+    overflow-x: auto;
+    border-radius: 0.9rem;
+    background: var(--night);
+    color: #eeebff;
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    line-height: 1.75;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .term {
+      background: var(--paper-deep);
+    }
+  }
+
+  .term p {
+    width: calc(var(--n) * 1ch + var(--pad, 0.5ch));
+    overflow: hidden;
+    white-space: nowrap;
+    color: #b9b2e8;
+  }
+
+  .term .cmd {
+    color: var(--glow);
+  }
+
+  .term p:last-child {
+    --pad: 2ch;
+  }
+
+  .term p:last-child::after {
+    content: '_';
+    margin-left: 0.2ch;
+    color: var(--glow);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .term.armed p {
+      width: 0;
+    }
+    .term.armed p::after {
+      opacity: 0;
+    }
+    .term.go p {
+      width: calc(var(--n) * 1ch + var(--pad, 0.5ch));
+      transition: width calc(var(--n) * 35ms) steps(var(--n), end) var(--at);
+    }
+    .term.go p:last-child::after {
+      opacity: 1;
+      animation: blink 1s steps(1) infinite;
+    }
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
   }
 
   .actions {

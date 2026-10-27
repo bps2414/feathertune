@@ -1,6 +1,7 @@
 ---
 import { getAbsoluteLocaleUrl } from 'astro:i18n';
 import '../styles/global.css';
+import AsciiField from '../components/AsciiField.astro';
 import { htmlLang, locales, strings, type Locale } from '../i18n/strings';
 
 interface Props {
@@ -32,6 +33,15 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
     <meta property="og:locale" content={htmlLang[locale].replace('-', '_')} />
   </head>
   <body>
+    <div class="progress" aria-hidden="true"></div>
+    <AsciiField />
     <slot />
+    <script>
+      import { links } from '../i18n/strings';
+
+      console.log(
+        `\n   .-.     .-.     .-.\n--'   '---'   '---'   '--  feathertune\n                            your music, without the weight.\n\nread the source: ${links.repo}\n`,
+      );
+    </script>
   </body>
 </html>

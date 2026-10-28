@@ -118,6 +118,12 @@ fn push(site: &Webview, module: &str, json: &str) {
     // `module` is one of our constant ids; the data goes in as a string literal that the page parses.
     let literal = serde_json::to_string(json).expect("a string serializes");
     let _ = site.eval(format!("window.__feathertune?.{module}?.set(JSON.parse({literal}))"));
+    // The extensions' page code reads the lyrics and the album colors too (`ft.lyrics`, `ft.theme`).
+    if matches!(module, "lyrics" | "theme")
+        && site.state::<crate::extensions::Extensions>().running().iter().any(|e| e.js.is_some())
+    {
+        let _ = site.eval(format!("window.__feathertune?.ext?.feed('{module}', JSON.parse({literal}))"));
+    }
 }
 
 /// The host of the imported extensions: loaded when any running one has page code (extensions.rs).

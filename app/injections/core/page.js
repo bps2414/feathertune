@@ -208,6 +208,10 @@ const send = (video, force, queueChanged = false) => {
     s.queue = w.queue;
   }
   window.__TAURI_INTERNALS__?.invoke('player_state', { state: JSON.stringify(s) }).catch(() => {});
+  // The imported extensions' page code gets the same state (injections/extensions/page.js), when any runs.
+  try {
+    feathertune.ext?.state(s);
+  } catch {}
 };
 
 // The queue's DOM changed (a track added, shuffle, the queue refilled): send what changed, once it settles.

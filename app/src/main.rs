@@ -162,6 +162,7 @@ fn main() {
         .manage(mixes::Mixes::new(&profile))
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         .manage(extensions)
+        .manage(extension_api::Storage::default())
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
         .invoke_handler(tauri::generate_handler![

@@ -12,6 +12,8 @@
 //! - `fetch` ({url, method?, headers?, body?}) → {status, headers, body}: https only, to the hosts of its `net:`
 //!   permissions, no redirects followed, 10 s, a 1 MB body out and 2 MB back as text, 60 a minute.
 //! - `notify` ({title, body?}): a toast under the app's name, one per 10 s (permission `notify`).
+//!
+//! Page only: `native` ({data}): a message to the extension's own WebAssembly, at most 256 KB (wasm.rs).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -40,6 +42,13 @@ pub async fn ext_call(webview: Webview, app: AppHandle, id: String, op: String, 
     // Requests and files are slow next to the page: off the main thread and the async workers.
     tauri::async_runtime::spawn_blocking(move || {
         let ext = app.state::<Extensions>().get(&id).cloned().ok_or("unknown extension")?;
+        if op == "native" {
+            let data = arg.get("data").ok_or("expected data")?;
+            if data.to_string().len() > crate::wasm::MAX_PAGE_MESSAGE {
+                return Err("the message is over 256 KB".into());
+            }
+            return crate::wasm::page_message(&app, &ext.id, data.clone()).map(|()| Value::Null);
+        }
         call(&app, &ext, &op, &arg)
     })
     .await

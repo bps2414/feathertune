@@ -52,6 +52,7 @@ mod taskbar;
 mod titlebar;
 mod traymenu;
 mod updater;
+mod wasm;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -163,6 +164,7 @@ fn main() {
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
         .manage(extensions)
         .manage(extension_api::Storage::default())
+        .manage(wasm::Wasm::default())
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
         .invoke_handler(tauri::generate_handler![
@@ -260,6 +262,7 @@ fn main() {
             if live.plugin("listening_stats") {
                 stats::start(app.handle(), &profile);
             }
+            wasm::start(app.handle());
             // Managed even when off: the settings window lists the paired phones. No socket until it is on.
             app.manage(remote::Remote::new(app.handle(), &profile));
             let handle = app.handle().clone();

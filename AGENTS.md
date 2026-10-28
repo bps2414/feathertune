@@ -12,7 +12,7 @@ feathertune is a Windows-only Tauri 2 app that hosts a music service's official 
   - Lyrics and art: `lyrics.rs` sources, cache and translation; `lyric_view.rs` current/next line (floating lyrics, mini player); `desktop_lyrics.rs`; `share_lyrics.rs` picture cards; `artwork.rs` + `album_color.rs` cover and album colors; `ambient.rs` ambient mode's background.
   - Audio: `audio.rs` + `injections/audio/` the audio graph (equalizer, compressor, crossfade, analysis, skip silence, visualizer, mix buttons); `audio_facts.rs` track analysis store; `mixes.rs` mixes and the Mix tab's command; `deck.rs` + `injections/deck/` the transition voice.
   - Page: `injections.rs` + `injections/<id>/` page scripts (`core`, `controls`, `theme`, `lyrics`, `ambient`, `audio`, `deck`, `precise_volume`, `skip_disliked`, `song_mode`, `extensions`); `privacy.rs` + `filters/` tracker filter; `capabilities/` + `permissions/` what the remote page may call.
-  - Extensions (imported by the user): `extensions.rs` packages, import and page scripts; `extension_api.rs` the `ext_call` command; `injections/extensions/` their page API.
+  - Extensions (imported by the user): `extensions.rs` packages, import and page scripts; `extension_api.rs` the `ext_call` command; `injections/extensions/` their page API; `wasm.rs` their WebAssembly (wasmi).
   - Packaging: `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
 - `spike/`: frozen measurement prototype. Do not build it unless a task is about it.
 - `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs. `measure-plugins.ps1`: runs `measure.ps1` for every plugin (about 2 h; maintainer only).

@@ -661,6 +661,7 @@ fn push_extension_settings(app: &AppHandle) {
         .collect();
     drop(settings);
     crate::injections::send(app, "ext", &json!({ "settings": all }));
+    crate::wasm::settings(app);
 }
 
 /// The user's Downloads folder.

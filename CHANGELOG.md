@@ -2,6 +2,11 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.7.0 — 2026-10-28
+
+- **Extensions: plugins made by anyone, imported by you.** A new Extensions tab in the settings imports a folder, a `.zip`, or a single `.css` (a theme) or `.js`, by picking or dropping it. An extension can restyle the page, run code in it and run WebAssembly in a sandbox. Each one asks for its permissions (player control, storage, notifications, requests to the sites it names) and starts off until you switch it on. Its settings are drawn in the tab, and its errors show under it. Extensions are your own code: the app does not review them, so import only what you trust.
+- **For authors:** a guide (docs/EXTENSIONS.md), types for the page API, a Rust crate for the WebAssembly side and three examples: a theme, a track card and a track counter.
+
 ## 0.6.3 — 2026-10-27
 
 - **Fewer tracks left without lyrics when a source is busy.** LRCLIB, often the only source with a track's lyrics, answers "busy" (503) in bursts, and one retry after 1 s was not enough: the lyrics only showed after skipping away and back. A server error, a timeout or a network error is now asked again after 1, 3 and 8 s.

@@ -2,6 +2,11 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.7.0 — 2026-10-28
+
+- **Extensões: plugins feitos por qualquer pessoa, importados por você.** Uma aba Extensões nova nas configurações importa uma pasta, um `.zip`, ou um `.css` (um tema) ou `.js` sozinho, escolhido ou solto ali. Uma extensão pode mudar o visual da página, rodar código nela e rodar WebAssembly numa sandbox. Cada uma pede suas permissões (controlar o player, guardar dados, notificações, requisições aos sites que ela nomeia) e começa desligada até você ligá-la. As configurações dela aparecem na aba, e os erros dela aparecem sob ela. Extensões são código seu: o app não as revisa, então importe só o que você confia.
+- **Para autores:** um guia (docs/EXTENSIONS.pt-BR.md), tipos da API de página, um crate Rust para o lado WebAssembly e três exemplos: um tema, um cartão da faixa e um contador de faixas.
+
 ## 0.6.3 — 2026-10-27
 
 - **Menos faixas sem letra quando uma fonte está ocupada.** O LRCLIB, muitas vezes a única fonte com a letra de uma faixa, responde "ocupado" (503) em rajadas, e uma nova tentativa depois de 1 s não bastava: a letra só aparecia depois de pular a música e voltar. Agora um erro de servidor, um timeout ou um erro de rede é pedido de novo depois de 1, 3 e 8 s.

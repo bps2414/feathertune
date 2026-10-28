@@ -1,4 +1,6 @@
 target/
+# Built from the example's source (docs/EXTENSIONS.md, WebAssembly)
+examples/extensions/*/plugin.wasm
 # WebView2 profiles (cookies and session)
 data/
 # measure.ps1 output: local paths and listening history, never committed

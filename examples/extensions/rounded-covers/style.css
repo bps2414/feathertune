@@ -1,0 +1,8 @@
+/* Rounder covers and thumbnails across the page. */
+ytmusic-player-bar img,
+ytmusic-player #song-image img,
+ytmusic-thumbnail-renderer img,
+ytmusic-two-row-item-renderer img,
+ytmusic-responsive-list-item-renderer img {
+  border-radius: 12px !important;
+}

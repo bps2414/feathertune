@@ -74,7 +74,7 @@ const en = {
   },
   switches: {
     title: 'Every feature is a switch',
-    lede: 'Everything starts on and can be turned off in the settings, which show what each one costs. Experimental ones start off.',
+    lede: 'Everything starts on and can be turned off in the settings, which show what each one costs. Experimental ones start off. Extensions you write or import yourself get a tab of their own.',
     on: 'On by default',
     off: 'Experimental, off by default',
     experimental: 'Experimental',
@@ -180,7 +180,7 @@ const ptBr: Strings = {
   },
   switches: {
     title: 'Cada recurso é um interruptor',
-    lede: 'Tudo começa ligado e pode ser desligado nas configurações, que mostram quanto cada um custa. Os experimentais começam desligados.',
+    lede: 'Tudo começa ligado e pode ser desligado nas configurações, que mostram quanto cada um custa. Os experimentais começam desligados. Extensões que você escreve ou importa ganham uma aba própria.',
     on: 'Ligado por padrão',
     off: 'Experimental, desligado por padrão',
     experimental: 'Experimental',

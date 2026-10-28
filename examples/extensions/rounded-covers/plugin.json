@@ -1,0 +1,14 @@
+{
+  "id": "examples.rounded-covers",
+  "name": "Rounded covers",
+  "version": "1.0.0",
+  "author": "feathertune examples",
+  "description": "A theme: rounder album covers and thumbnails.",
+  "api": 1,
+  "i18n": {
+    "pt-BR": {
+      "Rounded covers": "Capas arredondadas",
+      "A theme: rounder album covers and thumbnails.": "Um tema: capas de álbum e miniaturas mais arredondadas."
+    }
+  }
+}

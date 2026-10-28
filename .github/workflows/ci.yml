@@ -38,6 +38,25 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
+  # The example extensions: every manifest is JSON with the required fields, and the Rust SDK builds the
+  # WebAssembly example.
+  extensions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/extensions
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: |
+          for m in */plugin.json; do
+            jq -e '(.id | test("^[a-z0-9_-]+(\\.[a-z0-9_-]+)+$")) and (.name | length > 0) and (.version | length > 0) and .api == 1' "$m" > /dev/null || { echo "invalid $m"; exit 1; }
+          done
+      - run: cargo build --release --locked --target wasm32-unknown-unknown
+        working-directory: examples/extensions/track-counter
+
   # The phone remote (mobile/): typecheck, lint and tests (the Noise vectors among them), only when it changed.
   mobile-changes:
     runs-on: ubuntu-latest

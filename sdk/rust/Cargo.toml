@@ -1,0 +1,10 @@
+[package]
+name = "feathertune-ext"
+version = "0.1.0"
+edition = "2024"
+description = "Write a feathertune extension's plugin.wasm in Rust (docs/EXTENSIONS.md, WebAssembly)."
+license = "MIT"
+publish = false
+
+[dependencies]
+serde_json = "1"

@@ -1,0 +1,29 @@
+{
+  "id": "examples.track-card",
+  "name": "Track card",
+  "version": "1.0.0",
+  "author": "feathertune examples",
+  "description": "Shows the title and artist in a small card for a few seconds when the track changes.",
+  "api": 1,
+  "permissions": ["player.read"],
+  "settings": [
+    { "key": "seconds", "type": "number", "label": "Seconds on screen", "default": 4, "min": 1, "max": 30, "step": 1 },
+    {
+      "key": "corner",
+      "type": "enum",
+      "label": "Corner",
+      "default": "bottom-right",
+      "options": ["top-left", "top-right", "bottom-left", "bottom-right"]
+    },
+    { "key": "accent", "type": "color", "label": "Accent", "default": "#e0a3ff" }
+  ],
+  "i18n": {
+    "pt-BR": {
+      "Track card": "Cartão da faixa",
+      "Shows the title and artist in a small card for a few seconds when the track changes.": "Mostra o título e o artista num cartão pequeno por alguns segundos quando a faixa muda.",
+      "Seconds on screen": "Segundos na tela",
+      "Corner": "Canto",
+      "Accent": "Destaque"
+    }
+  }
+}

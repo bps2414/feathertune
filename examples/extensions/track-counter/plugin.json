@@ -1,0 +1,29 @@
+{
+  "id": "examples.track-counter",
+  "name": "Track counter",
+  "version": "1.0.0",
+  "author": "feathertune examples",
+  "description": "Counts the tracks you play, in WebAssembly, and notifies you at every round number.",
+  "api": 1,
+  "permissions": ["storage", "notify"],
+  "settings": [
+    {
+      "key": "every",
+      "type": "number",
+      "label": "Notify every",
+      "hint": "Tracks between notifications; 0 turns them off.",
+      "default": 100,
+      "min": 0,
+      "max": 10000,
+      "step": 10
+    }
+  ],
+  "i18n": {
+    "pt-BR": {
+      "Track counter": "Contador de faixas",
+      "Counts the tracks you play, in WebAssembly, and notifies you at every round number.": "Conta as faixas que você toca, em WebAssembly, e avisa a cada número redondo.",
+      "Notify every": "Avisar a cada",
+      "Tracks between notifications; 0 turns them off.": "Faixas entre os avisos; 0 desliga."
+    }
+  }
+}

@@ -589,6 +589,80 @@ pub fn settings_remote(webview: Webview, app: AppHandle, op: String, arg: Value)
     }
 }
 
+/// The Extensions tab. `op`: `list`; `import` ({files: {path: base64}}, what the user picked; returns what the
+/// confirmation shows); `toggle` ({id, on}; applies after a restart); `set` ({id, values}: every setting, checked
+/// against the manifest; applies at once); `remove` ({id}); `open_folder`. Only the settings window may call it.
+#[tauri::command]
+pub fn settings_extensions(webview: Webview, app: AppHandle, op: String, arg: Value) -> Result<Value, String> {
+    use crate::extensions::{Extensions, valid_id};
+    use base64::Engine;
+
+    guard(&webview)?;
+    let live = app.state::<Live>();
+    let extensions = app.state::<Extensions>();
+    let id = || arg.get("id").and_then(Value::as_str).filter(|id| valid_id(id)).ok_or("unknown extension");
+    match op.as_str() {
+        "list" => Ok(extensions.view(&live.get())),
+        "import" => {
+            let given = arg.get("files").and_then(Value::as_object).ok_or("expected files")?;
+            let mut files = std::collections::BTreeMap::new();
+            for (path, data) in given {
+                let data = data.as_str().ok_or("expected base64")?;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+                files.insert(path.clone(), bytes);
+            }
+            extensions.import(files)
+        }
+        "toggle" => {
+            let id = id()?;
+            extensions.found(id).ok_or("unknown extension")?;
+            let on = arg.get("on").and_then(Value::as_bool).ok_or("expected true or false")?;
+            live.write("extensions", id, toml_edit::value(on), None, true)?;
+            Ok(json!(true))
+        }
+        "set" => {
+            let id = id()?;
+            let ext = extensions.found(id).ok_or("unknown extension")?;
+            let values = arg.get("values").and_then(Value::as_object).ok_or("expected values")?;
+            let mut table = toml_edit::InlineTable::new();
+            for def in &ext.settings {
+                let v = values.get(&def.key).ok_or_else(|| format!("missing {}", def.key))?;
+                def.check(v)?;
+                table.insert(&def.key, crate::extensions::json_to_toml(v).ok_or("invalid value")?);
+            }
+            live.write("extension_settings", id, toml_edit::value(table), None, false)?;
+            push_extension_settings(&app);
+            Ok(Value::Null)
+        }
+        "remove" => {
+            let id = id()?;
+            extensions.remove(id)?;
+            Ok(Value::Null)
+        }
+        "open_folder" => {
+            let dir = extensions.dir();
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        _ => Err("unknown operation".into()),
+    }
+}
+
+/// Gives the running extensions their settings of now (page and WebAssembly).
+fn push_extension_settings(app: &AppHandle) {
+    let live = app.state::<Live>();
+    let settings = live.get();
+    let all: serde_json::Map<String, Value> = app
+        .state::<crate::extensions::Extensions>()
+        .running()
+        .iter()
+        .map(|e| (e.id.clone(), Value::Object(e.values(&settings))))
+        .collect();
+    drop(settings);
+    crate::injections::send(app, "ext", &json!({ "settings": all }));
+}
+
 /// The user's Downloads folder.
 pub(crate) fn downloads() -> Result<std::path::PathBuf, String> {
     unsafe {

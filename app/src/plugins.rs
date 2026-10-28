@@ -2,7 +2,7 @@
 //! declared here with an id, a name, a description, its measured cost and a default. The switch is
 //! `[plugins] <id> = true/false` in the profile's `config.toml`; the settings window lists every
 //! entry of `PLUGINS` with its switch. Plugins are compiled in: nothing is loaded from a DLL or
-//! downloaded.
+//! downloaded. Plugins made by others are imported extensions instead (extensions.rs).
 //!
 //! To add one: add an entry here, then check `Settings::plugin("<id>")` where the feature starts
 //! (and, for a page module, set `plugin` in `injections::INJECTIONS`).

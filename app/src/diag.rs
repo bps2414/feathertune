@@ -50,6 +50,17 @@ pub fn report(app: &AppHandle) -> String {
     let settings = live.get();
     let off: Vec<&str> = crate::plugins::PLUGINS.iter().filter(|p| !settings.plugin(p.id)).map(|p| p.id).collect();
     let _ = writeln!(out, "\n[plugins off] {}", if off.is_empty() { "none".to_owned() } else { off.join(", ") });
+    let running: Vec<String> = app
+        .state::<crate::extensions::Extensions>()
+        .running()
+        .iter()
+        .map(|e| format!("{} {}", e.id, e.version))
+        .collect();
+    let _ = writeln!(
+        out,
+        "[extensions running] {}",
+        if running.is_empty() { "none".to_owned() } else { running.join(", ") }
+    );
     let l = &settings.lyrics;
     let _ = writeln!(
         out,

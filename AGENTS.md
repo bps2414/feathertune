@@ -11,7 +11,8 @@ feathertune is a Windows-only Tauri 2 app that hosts a music service's official 
   - Player and integrations: `player.rs` player state (what the integrations consume); `smtc.rs` media flyout; `discord.rs`; `lastfm.rs`; `stats.rs` listening stats.
   - Lyrics and art: `lyrics.rs` sources, cache and translation; `lyric_view.rs` current/next line (floating lyrics, mini player); `desktop_lyrics.rs`; `share_lyrics.rs` picture cards; `artwork.rs` + `album_color.rs` cover and album colors; `ambient.rs` ambient mode's background.
   - Audio: `audio.rs` + `injections/audio/` the audio graph (equalizer, compressor, crossfade, analysis, skip silence, visualizer, mix buttons); `audio_facts.rs` track analysis store; `mixes.rs` mixes and the Mix tab's command; `deck.rs` + `injections/deck/` the transition voice.
-  - Page: `injections.rs` + `injections/<id>/` page scripts (`core`, `controls`, `theme`, `lyrics`, `ambient`, `audio`, `deck`, `precise_volume`, `skip_disliked`, `song_mode`); `privacy.rs` + `filters/` tracker filter; `capabilities/` + `permissions/` what the remote page may call.
+  - Page: `injections.rs` + `injections/<id>/` page scripts (`core`, `controls`, `theme`, `lyrics`, `ambient`, `audio`, `deck`, `precise_volume`, `skip_disliked`, `song_mode`, `extensions`); `privacy.rs` + `filters/` tracker filter; `capabilities/` + `permissions/` what the remote page may call.
+  - Extensions (imported by the user): `extensions.rs` packages, import and page scripts; `extension_api.rs` the `ext_call` command; `injections/extensions/` their page API.
   - Packaging: `tauri.conf.json` + `installer-hooks.nsh` the NSIS installer.
 - `spike/`: frozen measurement prototype. Do not build it unless a task is about it.
 - `measure.ps1`: process-tree meter (Windows, needs a signed-in profile; run by the maintainer). `median.ps1`: median of several of its runs. `measure-plugins.ps1`: runs `measure.ps1` for every plugin (about 2 h; maintainer only).
@@ -66,11 +67,11 @@ The app targets Windows only (`windows` crate, WebView2), so it does not build o
 - Every Chromium feature flag goes in the single `--disable-features` in `BROWSER_ARGS` (Chromium only honors the last one).
 - UI work (native or HTML) follows the performance rules: draw only on change; any animation has a plugin switch, runs on one timer only while something is on screen to move (stops when the window is hidden, minimized or in the background) and resumes where it stopped; Windows animation effects and `prefers-reduced-motion` do not turn it off (the switch does; the page gets `--force-prefers-no-reduced-motion`); invalidate only the region that changes; keep GPU resources (brushes, layouts, bitmaps) between frames.
 - Every plugin is on by default, except those in the settings' Experimental tab (off until reliable; see docs/DESIGN.md, Plugins). Write its measured cost in `plugins.rs` and docs/DESIGN.md (or "not measured yet" until the maintainer measures it).
-- The page is untrusted. It may only call `player_state`, `audio_facts` (numbers measured from a track) and `mix_open` (opens our Mix tab on a pair, nothing else); their payloads are validated and never trigger an action on the player. Do not widen `capabilities/` or `allowed()` without a reason written in docs/DESIGN.md.
+- The page is untrusted. It may only call `player_state`, `audio_facts` (numbers measured from a track), `mix_open` (opens our Mix tab on a pair, nothing else) and `ext_call` (the imported extensions' calls: errors, their own storage, requests to hosts they declared, toasts); their payloads are validated and never trigger an action on the player. Do not widen `capabilities/` or `allowed()` without a reason written in docs/DESIGN.md.
 
 ## Legal and safety limits (never cross)
 
-- Never block, hide, skip, shorten, mute, fade or cover ads; every audio effect is bypassed while one plays. Network filtering is privacy lists only.
+- Never block, hide, skip, shorten, mute, fade or cover ads in the repo's code (built-in plugins, page modules, examples, SDK); every built-in audio effect is bypassed while one plays. Network filtering is privacy lists only. Imported extensions (`extensions.rs`) are the user's own code: the app does not review or limit them, and the repo never ships, links to or recommends one that touches ads.
 - The audio the page plays may be processed and measured locally, for the listener only (Web Audio on the page's own media element). Never record, store, upload or re-encode audio and never fetch a stream; only numbers derived from it (tempo, key, a loudness envelope) may be kept, in the profile.
 - No private APIs, stream extraction, downloading or DRM handling.
 - No user-agent spoofing and no automation flags.

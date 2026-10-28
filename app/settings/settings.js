@@ -71,6 +71,7 @@ const showTab = (name) => {
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of panels) p.hidden = p.dataset.panel !== name;
   if (name === 'stats') loadStats();
+  if (name === 'extensions') loadExtensions();
   syncPairing();
 };
 for (const t of tabs) {
@@ -1005,6 +1006,329 @@ for (const input of document.querySelectorAll('[data-shortcut]')) {
     else input.value = before;
   });
 }
+
+// Extensions (extensions.rs): the list, each one's switch and settings, and the import (a folder, a .zip read
+// here, or one file), all through settings_extensions. Their texts are shown with textContent only.
+const extCall = (op, arg) => invoke('settings_extensions', { op, arg: arg ?? null });
+const PERMISSIONS = {
+  'player.control': 'Control the player (play, pause, skip, seek, volume)',
+  storage: 'Keep its own data on this PC',
+  notify: 'Show notifications',
+};
+const permissionText = (p) => (p.startsWith('net:') ? tf('Send requests to {}', p.slice(4)) : t(PERMISSIONS[p] || p));
+const asks = (x) => x.permissions.filter((p) => p !== 'player.read');
+const confirmEnable = (x) =>
+  confirm(
+    [
+      tf('Turn on {}?', x.name),
+      '',
+      t(
+        'It runs inside the player page with your signed-in account and can do anything you can do there. feathertune does not review extensions: only turn on what you trust.',
+      ),
+      ...(asks(x).length ? ['', t('It also asks to:'), ...asks(x).map((p) => `• ${permissionText(p)}`)] : []),
+      ...(x.wasm ? ['', t('It has native code (WebAssembly), run in a sandbox.')] : []),
+    ].join('\n'),
+  );
+const extStatus = (message) => {
+  $('ext-status').textContent = message || '';
+  $('ext-status').hidden = !message;
+};
+
+const extSettings = (x) => {
+  const box = el('div', 'ext-settings');
+  const values = { ...x.values };
+  const save = async (input) => {
+    try {
+      await extCall('set', { id: x.id, values });
+      input.classList.remove('invalid');
+      showError('');
+      flashSaved(input);
+    } catch (e) {
+      input.classList.add('invalid');
+      showError(String(e));
+    }
+  };
+  for (const d of x.settings) {
+    if (d.type === 'bool') {
+      const input = el('input', 'switch');
+      input.type = 'checkbox';
+      input.checked = !!values[d.key];
+      input.setAttribute('aria-label', d.label);
+      input.addEventListener('change', () => {
+        values[d.key] = input.checked;
+        save(input);
+      });
+      const body = el('div', 'body');
+      body.append(el('div', 'name small', d.label));
+      if (d.hint) body.append(el('p', 'hint', d.hint));
+      const row = el('div', 'option');
+      row.append(body, input);
+      box.append(row);
+      continue;
+    }
+    let input;
+    if (d.type === 'enum') {
+      input = el('select');
+      for (const o of d.options) {
+        const option = el('option', '', o);
+        option.value = o;
+        input.append(option);
+      }
+    } else {
+      input = el('input');
+      input.type = { number: 'number', color: 'color' }[d.type] || 'text';
+      if (d.type === 'number') {
+        if (d.min != null) input.min = d.min;
+        if (d.max != null) input.max = d.max;
+        if (d.step != null) input.step = d.step;
+      } else if (d.type === 'string') {
+        input.maxLength = d.max ?? 200;
+        input.spellcheck = false;
+      }
+    }
+    input.value = values[d.key];
+    input.addEventListener('change', () => {
+      values[d.key] = d.type === 'number' ? Number(input.value) : input.value;
+      save(input);
+    });
+    const label = el('label', '', d.label);
+    label.append(input);
+    box.append(label);
+    if (d.hint) box.append(el('p', 'hint', d.hint));
+  }
+  return box;
+};
+
+const extCard = (x) => {
+  const card = el('div', x.on ? 'card ext' : 'card ext off');
+  const body = el('div', 'body');
+  const name = el('div', 'name', x.name);
+  name.append(el('span', 'badge', x.version));
+  if (x.on !== x.running) name.append(el('span', 'badge', t('restart')));
+  body.append(name, el('div', 'hint', [x.author && tf('by {}', x.author), x.id].filter(Boolean).join(' · ')));
+  if (x.description) body.append(el('div', 'description', x.description));
+  const toggle = el('input', 'switch');
+  toggle.type = 'checkbox';
+  toggle.checked = x.on;
+  toggle.setAttribute('aria-label', x.name);
+  toggle.addEventListener('change', async () => {
+    if (toggle.checked && !confirmEnable(x)) {
+      toggle.checked = false;
+      return;
+    }
+    try {
+      await extCall('toggle', { id: x.id, on: toggle.checked });
+      showError('');
+      loadExtensions();
+      $('restart').hidden = false;
+    } catch (e) {
+      toggle.checked = !toggle.checked;
+      showError(String(e));
+    }
+  });
+  const row = el('div', 'row');
+  if (x.icon) {
+    const icon = el('img', 'ext-icon');
+    icon.src = x.icon;
+    icon.alt = '';
+    row.append(icon);
+  }
+  row.append(body, toggle);
+
+  const extra = el('div', 'extra');
+  const kinds = [x.page && t('page code'), x.css && t('styles'), x.wasm && t('native code (WebAssembly)')].filter(Boolean);
+  extra.append(el('p', 'hint', tf('Runs: {}', kinds.join(', '))));
+  if (asks(x).length) {
+    const list = el('ul', 'ext-permissions');
+    list.append(...asks(x).map((p) => el('li', '', permissionText(p))));
+    extra.append(list);
+  }
+  if (x.settings.length) extra.append(extSettings(x));
+  if (x.errors.length) {
+    const errors = el('details', 'ext-errors');
+    errors.append(el('summary', '', tf('{} errors', x.errors.length)), ...x.errors.map((m) => el('pre', '', m)));
+    extra.append(errors);
+  }
+  const remove = el('button', 'secondary', t('Remove'));
+  remove.type = 'button';
+  remove.addEventListener('click', async () => {
+    if (!confirm(tf('Remove {} and the data it keeps? This cannot be undone.', x.name))) return;
+    try {
+      await extCall('remove', { id: x.id });
+      showError('');
+      if (x.running) $('restart').hidden = false;
+      loadExtensions();
+    } catch (e) {
+      showError(String(e));
+    }
+  });
+  const actions = el('div', 'actions');
+  actions.append(remove);
+  extra.append(actions);
+  card.append(row, extra);
+  return card;
+};
+
+let extensions = null; // the last settings_extensions `list`
+const loadExtensions = async () => {
+  try {
+    extensions = await extCall('list');
+  } catch (e) {
+    showError(String(e));
+    return;
+  }
+  $('ext-list').replaceChildren(...extensions.list.map(extCard));
+  $('ext-broken').replaceChildren(
+    ...extensions.broken.map((b) => {
+      const card = el('div', 'card off');
+      card.append(el('div', 'name', b.name), el('p', 'hint', tf('Not loaded: {}', b.error)));
+      return card;
+    }),
+  );
+};
+
+// A .zip's files as [[path, ArrayBuffer]]: stored or deflate entries only (DecompressionStream), at most 32 MB.
+const MAX_PACKAGE = 32 * 1024 * 1024;
+const unzip = async (buffer) => {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let end = -1;
+  for (let i = buffer.byteLength - 22; i >= Math.max(0, buffer.byteLength - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error(t('This is not a zip file.'));
+  const count = view.getUint16(end + 10, true);
+  let p = view.getUint32(end + 16, true);
+  const decoder = new TextDecoder();
+  const out = [];
+  let total = 0;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > buffer.byteLength || view.getUint32(p, true) !== 0x02014b50) throw new Error(t('The zip file is damaged.'));
+    const flags = view.getUint16(p + 8, true);
+    const method = view.getUint16(p + 10, true);
+    const size = view.getUint32(p + 20, true);
+    const full = view.getUint32(p + 24, true);
+    const nameLength = view.getUint16(p + 28, true);
+    const local = view.getUint32(p + 42, true);
+    const name = decoder.decode(bytes.subarray(p + 46, p + 46 + nameLength));
+    p += 46 + nameLength + view.getUint16(p + 30, true) + view.getUint16(p + 32, true);
+    if (name.endsWith('/') || name.startsWith('__MACOSX/') || name.endsWith('.DS_Store')) continue;
+    if (flags & 1) throw new Error(t('Encrypted zip files are not supported.'));
+    total += full;
+    if (size === 0xffffffff || total > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const data = bytes.subarray(start, start + size);
+    if (method === 0) out.push([name, data.slice().buffer]);
+    else if (method === 8) {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      out.push([name, await new Response(stream).arrayBuffer()]);
+    } else throw new Error(t('This zip file uses a compression that is not supported.'));
+  }
+  return out;
+};
+const base64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const importFiles = async (entries) => {
+  extStatus('');
+  try {
+    const files = {};
+    for (const [path, buffer] of entries) files[path] = base64(buffer);
+    const r = await extCall('import', { files });
+    showError('');
+    await loadExtensions();
+    const x = extensions?.list.find((e) => e.id === r.id);
+    if (r.previous) {
+      extStatus(tf('{} updated from {} to {}.', r.name, r.previous, r.version));
+      if (x?.on) $('restart').hidden = false;
+    } else {
+      extStatus(tf('{} {} imported.', r.name, r.version));
+      if (x && confirmEnable(x)) {
+        await extCall('toggle', { id: x.id, on: true });
+        $('restart').hidden = false;
+        await loadExtensions();
+      }
+    }
+  } catch (e) {
+    showError(String(e));
+  }
+};
+const importPicked = async (file) => {
+  const buffer = await file.arrayBuffer();
+  if (!/\.zip$/i.test(file.name)) return importFiles([[file.name, buffer]]);
+  try {
+    importFiles(await unzip(buffer));
+  } catch (e) {
+    showError(String(e.message || e));
+  }
+};
+$('ext-pick-file').addEventListener('click', () => $('ext-file').click());
+$('ext-pick-folder').addEventListener('click', () => $('ext-folder').click());
+$('ext-open-folder').addEventListener('click', () => extCall('open_folder').catch((e) => showError(String(e))));
+$('ext-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) importPicked(file);
+});
+$('ext-folder').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (files.length) importFiles(await Promise.all(files.map(async (f) => [f.webkitRelativePath || f.name, await f.arrayBuffer()])));
+});
+// A dropped folder is walked here (FileSystemEntry); a dropped file is read like a picked one.
+const readEntry = (entry, prefix, out) =>
+  new Promise((resolve, reject) => {
+    if (entry.isFile) {
+      entry.file(async (f) => {
+        out.push([prefix + f.name, await f.arrayBuffer()]);
+        resolve();
+      }, reject);
+      return;
+    }
+    const reader = entry.createReader();
+    const children = [];
+    const next = () =>
+      reader.readEntries(async (batch) => {
+        if (batch.length) {
+          children.push(...batch);
+          next();
+          return;
+        }
+        for (const child of children) await readEntry(child, `${prefix}${entry.name}/`, out);
+        resolve();
+      }, reject);
+    next();
+  });
+const panel = document.querySelector('[data-panel="extensions"]');
+panel.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  panel.classList.add('dropping');
+});
+panel.addEventListener('dragleave', () => panel.classList.remove('dropping'));
+panel.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  panel.classList.remove('dropping');
+  const entry = e.dataTransfer.items[0]?.webkitGetAsEntry?.();
+  if (!entry) return;
+  if (entry.isFile) {
+    entry.file(importPicked, (err) => showError(String(err)));
+    return;
+  }
+  const out = [];
+  try {
+    await readEntry(entry, '', out);
+  } catch (err) {
+    showError(String(err));
+    return;
+  }
+  importFiles(out);
+});
 
 const action = async (name) => {
   try {

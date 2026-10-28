@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settings-extensions"
+description = "Enables the settings_extensions command without any pre-configured scope."
+commands.allow = ["settings_extensions"]
+
+[[permission]]
+identifier = "deny-settings-extensions"
+description = "Denies the settings_extensions command without any pre-configured scope."
+commands.deny = ["settings_extensions"]

@@ -5,9 +5,10 @@
 // The main window has no system frame: titlebar.rs draws the title bar and the site is a child
 // webview (label `site`) below it.
 // --measure prints the time until the player bar shows up and, every 10 s, the <video> time and
-// login state, and the audio graph's state, so measure.ps1 can record them. The page can call three
+// login state, and the audio graph's state, so measure.ps1 can record them. The page can call four
 // Tauri commands: `player_state` (player.rs) and `audio_facts` (audio_facts.rs), which only report
-// data, and `mix_open` (mixes.rs), which only opens the Mix tab (see capabilities/).
+// data, `mix_open` (mixes.rs), which only opens the Mix tab, and `ext_call` (extension_api.rs), the
+// imported extensions' calls (see capabilities/).
 // Two more flags work only together with --measure (measure-plugins.ps1 uses them; nothing is written
 // to config.toml): --plugins-off=<id,id,...|all> forces those plugins off in memory (unknown ids are
 // reported and skipped), and --open=<lyrics-tab|desktop-lyrics|share-lyrics|mini-player|settings>
@@ -24,6 +25,8 @@ mod deck;
 mod desktop_lyrics;
 mod diag;
 mod discord;
+mod extension_api;
+mod extensions;
 mod game_mode;
 mod gfx;
 mod i18n;
@@ -125,7 +128,9 @@ fn main() {
         settings_window::note_version(&profile, existed);
     }
     let args = browser_args(&settings.browser);
-    let script = injections::script(&settings);
+    let extensions = extensions::Extensions::load(&profile, &settings);
+    let script = injections::script(&settings, extensions.running());
+    let extension_scripts = extensions::page_scripts(extensions.running(), &settings);
     // The start screen (splash.rs) is for an interactive start; the window opens when it is done.
     let launcher = settings.plugin("launcher") && !hidden && !mini && !measure;
 
@@ -156,18 +161,21 @@ fn main() {
         .manage(audio_facts::Store::new(&profile))
         .manage(mixes::Mixes::new(&profile))
         .manage(settings::Live::new(profile.clone(), args.clone(), settings))
+        .manage(extensions)
         // Only the settings window gets an answer from it (settings_window.rs).
         .register_uri_scheme_protocol(settings_window::SCHEME, settings_window::protocol)
         .invoke_handler(tauri::generate_handler![
             player::player_state,
             audio_facts::audio_facts,
             mixes::mix_open,
+            extension_api::ext_call,
             settings_window::settings_get,
             settings_window::settings_set,
             settings_window::settings_action,
             settings_window::settings_stats,
             mixes::settings_mix,
             settings_window::settings_remote,
+            settings_window::settings_extensions,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -181,11 +189,16 @@ fn main() {
                 .build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
             let top = f64::from(titlebar::HEIGHT);
+            let mut site = WebviewBuilder::new("site", WebviewUrl::External(url))
+                .data_directory(profile.clone())
+                .additional_browser_args(&args)
+                .initialization_script(script);
+            // Each extension after the built-in modules, in a script of its own (extensions.rs).
+            for s in extension_scripts {
+                site = site.initialization_script(s);
+            }
             let site = window.add_child(
-                WebviewBuilder::new("site", WebviewUrl::External(url))
-                    .data_directory(profile.clone())
-                    .additional_browser_args(&args)
-                    .initialization_script(script)
+                site
                     // A page that (re)loaded lost the data Rust gave its modules; give it again.
                     .on_page_load(|site, payload| {
                         if payload.event() == tauri::webview::PageLoadEvent::Finished {

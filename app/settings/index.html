@@ -21,6 +21,7 @@
       <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
       <button role="tab" type="button" data-tab="audio">Audio</button>
       <button role="tab" type="button" data-tab="experimental">Experimental</button>
+      <button role="tab" type="button" data-tab="extensions">Extensions</button>
       <button role="tab" type="button" data-tab="integrations">Integrations</button>
       <button role="tab" type="button" data-tab="stats">Stats</button>
       <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
@@ -299,6 +300,24 @@
           </details>
         </div>
       </div>
+    </section>
+
+    <section role="tabpanel" data-panel="extensions" hidden>
+      <div class="card" id="ext-import">
+        <div class="name">Import an extension</div>
+        <p class="hint">A folder or a .zip with a plugin.json, or a single .js or .css file. Drop it here or pick it. Extensions are made by other people and run inside the player page with your signed-in account: import only what you trust. feathertune does not review them.</p>
+        <div class="actions">
+          <button id="ext-pick-file" type="button">Pick a file (.zip, .js, .css)</button>
+          <button id="ext-pick-folder" type="button" class="secondary">Pick a folder</button>
+          <button id="ext-open-folder" type="button" class="secondary">Open the extensions folder</button>
+        </div>
+        <input id="ext-file" type="file" accept=".zip,.js,.css" hidden>
+        <input id="ext-folder" type="file" webkitdirectory hidden>
+        <p class="hint">Importing, switching one on or off and removing apply after a restart; settings apply at once.</p>
+        <p id="ext-status" class="notice" hidden></p>
+      </div>
+      <div id="ext-list"></div>
+      <div id="ext-broken"></div>
     </section>
 
     <section role="tabpanel" data-panel="integrations" hidden>

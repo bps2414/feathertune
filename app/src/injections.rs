@@ -16,13 +16,17 @@
 //! sent once.
 //!
 //! To add a module: create its folder, add one entry to `INJECTIONS` and its plugins to `PLUGINS`.
+//!
+//! Imported extensions (extensions.rs) are not modules: the `extensions` host goes at the end of this script and
+//! each extension is an initialization script of its own; their settings reach the page as the `ext` module's data.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Webview};
 
+use crate::extensions::Extension;
 use crate::settings::Settings;
 
 struct Injection {
@@ -116,8 +120,12 @@ fn push(site: &Webview, module: &str, json: &str) {
     let _ = site.eval(format!("window.__feathertune?.{module}?.set(JSON.parse({literal}))"));
 }
 
-/// Builds the single initialization script with every enabled module.
-pub fn script(settings: &Settings) -> String {
+/// The host of the imported extensions: loaded when any running one has page code (extensions.rs).
+const EXTENSIONS_HOST: &str = include_str!("../injections/extensions/page.js");
+
+/// Builds the single initialization script with every enabled module, and the extensions' host when `extensions`
+/// (the running ones) has page code. The extensions themselves are scripts of their own (`extensions::page_scripts`).
+pub fn script(settings: &Settings, extensions: &[Arc<Extension>]) -> String {
     let mut out = String::from(
         "(() => {\n\
          if (location.origin !== 'https://music.youtube.com') return;\n\
@@ -142,6 +150,15 @@ pub fn script(settings: &Settings) -> String {
         }
         out.push_str(&format!("}} catch (e) {{ console.error('[feathertune] injection ' + {id} + ' failed', e); }}\n"));
     }
+    let expected: Vec<&str> =
+        extensions.iter().filter(|e| e.js.is_some() || e.css.is_some()).map(|e| e.id.as_str()).collect();
+    if !expected.is_empty() {
+        let expected = serde_json::to_string(&expected).unwrap();
+        out.push_str(&format!(
+            "try {{\n((feathertune) => {{\nconst EXPECTED = {expected};\n{EXTENSIONS_HOST}\n}})(feathertune);\n\
+             }} catch (e) {{ console.error('[feathertune] extensions host failed', e); }}\n"
+        ));
+    }
     out.push_str("})();\n");
     out
 }
@@ -153,10 +170,10 @@ mod tests {
     #[test]
     fn modules_follow_their_switch() {
         // A selector only `controls` uses.
-        assert!(script(&Settings::default()).contains(".previous-button"));
+        assert!(script(&Settings::default(), &[]).contains(".previous-button"));
         let off = Settings::parse("[plugins]\ncontrols = false").unwrap();
-        assert!(!script(&off).contains(".previous-button"));
-        assert!(script(&off).contains("player_state"));
+        assert!(!script(&off, &[]).contains(".previous-button"));
+        assert!(script(&off, &[]).contains("player_state"));
     }
 
     #[test]

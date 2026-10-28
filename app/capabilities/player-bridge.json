@@ -1,9 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "player-bridge",
-  "description": "The player page may only report the player state and the numbers measured from a track (audio_facts), and ask for the Mix tab to open on a pair of tracks (mix_open). Nothing else is exposed to it.",
+  "description": "The player page may only report the player state and the numbers measured from a track (audio_facts), ask for the Mix tab to open on a pair of tracks (mix_open), and make the imported extensions' calls (ext_call: errors, their own storage, requests to the hosts they declared, toasts; never an action on the player). Nothing else is exposed to it.",
   "local": false,
   "webviews": ["site"],
   "remote": { "urls": ["https://music.youtube.com/*"] },
-  "permissions": ["allow-player-state", "allow-audio-facts", "allow-mix-open"]
+  "permissions": ["allow-player-state", "allow-audio-facts", "allow-mix-open", "allow-ext-call"]
 }

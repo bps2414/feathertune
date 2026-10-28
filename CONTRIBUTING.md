@@ -18,12 +18,12 @@ If you use a coding agent (Claude Code, Copilot, Codex...), its instructions are
 
 These limits come from [AGENTS.md](AGENTS.md) and do not change, not even for a good reason. A PR that crosses any of them is closed.
 
-- **Ads:** never block, hide, skip, shorten, mute, fade or cover them. Every audio effect is bypassed while an ad plays. Network filtering is privacy lists only (third-party analytics).
+- **Ads:** never block, hide, skip, shorten, mute, fade or cover them in the repo's code. Every built-in audio effect is bypassed while an ad plays. Network filtering is privacy lists only (third-party analytics). Extensions people import are their own code; the repo never ships, links to or recommends one that touches ads.
 - **Audio:** only processed and measured locally, on the page's own sound, for the listener. Never record, store, upload or re-encode audio, and never fetch a stream. Only numbers derived from it (tempo, key, a loudness envelope) may be kept in the profile.
 - **No private APIs, stream extraction, downloading or DRM handling.**
 - **No user-agent spoofing and no automation flags.**
 - **Credentials:** the app never types or stores account credentials. Sign-in and account checks are done by me.
-- **The page is untrusted.** It may only call `player_state`, `audio_facts` and `mix_open`, with validated payloads that never trigger an action on the player. Do not widen `capabilities/` or `allowed()` without writing the reason in `docs/DESIGN.md`.
+- **The page is untrusted.** It may only call `player_state`, `audio_facts`, `mix_open` and `ext_call`, with validated payloads that never trigger an action on the player. Do not widen `capabilities/` or `allowed()` without writing the reason in `docs/DESIGN.md`.
 - **Brand and product names** stay out of the repo name, the UI text, the README and the docs. Domains and CSS selectors in code are fine where they are functional.
 - **Personal data** never goes in a commit: no local paths, usernames, emails, tokens, API keys or listening history.
 

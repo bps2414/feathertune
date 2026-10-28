@@ -7,12 +7,14 @@ fn main() {
         "player_state",
         "audio_facts",
         "mix_open",
+        "ext_call",
         "settings_get",
         "settings_set",
         "settings_action",
         "settings_stats",
         "settings_mix",
         "settings_remote",
+        "settings_extensions",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).expect("tauri-build failed");
 }

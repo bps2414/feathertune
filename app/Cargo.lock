@@ -1271,6 +1271,7 @@ name = "feathertune"
 version = "0.6.3"
 dependencies = [
  "adblock",
+ "base64 0.22.1",
  "discord-rich-presence",
  "futures-util",
  "keyring",

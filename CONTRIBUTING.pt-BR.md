@@ -18,12 +18,12 @@ Se você usa um agente de código (Claude Code, Copilot, Codex...), as instruç�
 
 Estes limites vêm do [AGENTS.md](AGENTS.md) e não mudam, nem com um bom motivo. Um PR que cruze qualquer um deles é fechado.
 
-- **Anúncios:** nunca bloquear, esconder, pular, encurtar, silenciar, esmaecer nem cobrir. Todo efeito de áudio fica em bypass enquanto um anúncio toca. O filtro de rede é só de listas de privacidade (analytics de terceiros).
+- **Anúncios:** nunca bloquear, esconder, pular, encurtar, silenciar, esmaecer nem cobrir no código do repositório. Todo efeito de áudio embutido fica em bypass enquanto um anúncio toca. O filtro de rede é só de listas de privacidade (analytics de terceiros). Extensões que as pessoas importam são código delas; o repositório nunca distribui, aponta nem recomenda uma que mexa em anúncio.
 - **Áudio:** só processar e medir localmente, no som da própria página, para quem está ouvindo. Nunca gravar, guardar, enviar nem recodificar áudio, e nunca buscar um stream. Só números derivados (tempo, tom, contorno de volume) podem ser guardados no perfil.
 - **Sem API privada, extração de stream, download nem DRM.**
 - **Sem spoof de user-agent e sem flags de automação.**
 - **Credenciais:** o app nunca digita nem guarda login de conta. Quem confere login e conta sou eu.
-- **A página é não confiável.** Ela só pode chamar `player_state`, `audio_facts` e `mix_open`, com payloads validados e sem disparar ação no player. Não amplie `capabilities/` nem `allowed()` sem escrever o motivo em `docs/DESIGN.md`.
+- **A página é não confiável.** Ela só pode chamar `player_state`, `audio_facts`, `mix_open` e `ext_call`, com payloads validados e sem disparar ação no player. Não amplie `capabilities/` nem `allowed()` sem escrever o motivo em `docs/DESIGN.md`.
 - **Nomes de marca** ficam fora do nome do repositório, da interface, do README e dos docs. Domínios e seletores CSS no código são aceitos quando funcionais.
 - **Dados pessoais** não entram em commit: nada de caminhos locais, nome de usuário, e-mail, token, chave de API nem histórico de escuta.
 

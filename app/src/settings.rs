@@ -47,6 +47,12 @@
 //!
 //! [browser]                        # extra Chromium features to turn off, added to the built-in list
 //! disable_features = []            # (see main.rs), e.g. ["Prerender2"]
+//!
+//! [extensions]                     # imported extensions (extensions.rs), off until turned on
+//! "author.name" = true
+//!
+//! [extension_settings]             # their settings, checked against each manifest
+//! "author.name" = { color = "#ff0055" }
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -271,12 +277,29 @@ impl Settings {
         for id in ids {
             if id == "all" {
                 self.forced_off.extend(PLUGINS.iter().map(|p| p.id.to_owned()));
+                self.forced_off.push("extensions".into());
             } else if plugins::get(id).is_some() {
                 self.forced_off.push(id.clone());
             } else {
                 println!("plugins-off: unknown plugin {id:?}, ignored");
             }
         }
+    }
+
+    /// An extension's switch (`[extensions] "<id>"`): off unless set; `--plugins-off=all` turns every one off.
+    pub fn extension(&self, id: &str) -> bool {
+        !self.forced_off.iter().any(|f| f == "extensions")
+            && self.raw.get("extensions").and_then(|t| t.get(id)).and_then(toml::Value::as_bool).unwrap_or(false)
+    }
+
+    /// An extension's stored settings (`[extension_settings] "<id>" = { ... }`), unchecked.
+    pub fn extension_settings(&self, id: &str) -> toml::Table {
+        self.raw
+            .get("extension_settings")
+            .and_then(|t| t.get(id))
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The plugin's switch: `[plugins]`, then its old place, then its default. Unknown ids are off.

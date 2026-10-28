@@ -19,6 +19,8 @@ tauri-plugin-global-shortcut = "2"
 discord-rich-presence = "1"
 keyring = "4"
 md5 = "0.8"
+# Extensions: the files the settings window imports, and the icon as a data: URL (already in the tree through tauri).
+base64 = "0.22"
 # "native-tls", not "native-tls-no-default": ureq 3.4 only accepts the NativeTls provider with this
 # feature on, and panics on the first https request otherwise (it also pulls in webpki-root-certs,
 # unused here: the roots come from Windows through RootCerts::PlatformVerifier).

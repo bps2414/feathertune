@@ -1564,6 +1564,7 @@ feathertune.audio = Object.freeze({
       dur: fade ? fade.dur : null,
       to: fade?.to ?? null,
       wall: wall(),
+      overlap: !!overlap,
       waiting: !!overlap?.waiting,
       done_at: overlap?.done_at ?? null,
       error: !!v?.error,

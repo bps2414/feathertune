@@ -4,7 +4,8 @@
 // (gain and a low shelf for the bass swap). Rust reads `poll()` with ExecuteScript and treats what
 // it returns as untrusted data.
 // - An ad is never played here, not even muted or hidden: while the player shows one, nothing
-//   plays and `poll()` says so (Rust then closes this webview and falls back to one player).
+//   plays and `poll()` says so (Rust then closes this webview and falls back to one player). While
+//   the page still has no player nothing plays either, and `poll()` says `loading`, not `ad`.
 // - Every gain change is scheduled on the audio clock, at a wall-clock time Rust gives (the same
 //   clock as the main page's: performance.timeOrigin + performance.now()).
 if (window.top !== window) return;
@@ -45,10 +46,14 @@ document.addEventListener(
 );
 
 const video = () => document.querySelector('video');
-const adNow = () => {
-  const p = document.querySelector(SELECTORS.player);
-  return !p || p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting');
+const player = () => document.querySelector(SELECTORS.player);
+// An ad on the player now (what Rust acts on).
+const adShowing = () => {
+  const p = player();
+  return !!p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
 };
+// Nothing plays without a player either (it may be about to show an ad), but that is not an ad yet.
+const adNow = () => !player() || adShowing();
 
 // The fade-in curve (0 to 1), the main page's fade-out backwards.
 const fadeIn = (name) => {
@@ -81,19 +86,20 @@ window.__feathertuneDeck = Object.freeze({
   // The state, and (the first time) where to wait: `in_s`, the incoming track's start.
   poll: (inS) => {
     const v = video();
-    const ad = adNow();
-    if (ad && started && !stopped) stop();
-    if (v && target === null && Number.isFinite(inS) && v.readyState >= 1 && !ad) {
+    const held = adNow();
+    if (held && started && !stopped) stop();
+    if (v && target === null && Number.isFinite(inS) && v.readyState >= 1 && !held) {
       target = Math.max(0, inS);
       v.addEventListener('seeked', () => (seeked = true), { once: true });
       if (target > 0.05) v.currentTime = target;
       else seeked = true;
     }
-    const data = v ? document.querySelector(SELECTORS.player)?.getVideoData?.() : null;
+    const data = v ? player()?.getVideoData?.() : null;
     return {
       id: data?.video_id ?? null,
-      ad,
-      ready: !!v && seeked && v.readyState >= 3 && !ad,
+      ad: adShowing(),
+      loading: !player(),
+      ready: !!v && seeked && v.readyState >= 3 && !held,
       started,
       paused: v ? v.paused : true,
       t: v ? v.currentTime : 0,

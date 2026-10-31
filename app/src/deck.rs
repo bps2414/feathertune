@@ -13,8 +13,11 @@
 //!   track change or anything else odd closes the voice and the main page does the one-player fade.
 //! - An ad on the voice closes it at once and turns the voice off until the app restarts (it never
 //!   plays one); a voice that stops or errors by itself counts as the account refusing a second
-//!   playback, and after two the voice stays off until the app restarts.
+//!   playback, and after two the voice stays off until the app restarts. A voice still loading has
+//!   no player yet: it plays nothing, and that alone is not an ad.
+//! - Every transition is logged under `transition` (diag.rs): which mode played and why.
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -49,6 +52,26 @@ const HANDOFF_MS: f64 = 150.0;
 
 static REFUSALS: AtomicU32 = AtomicU32::new(0);
 static OFF: AtomicBool = AtomicBool::new(false);
+/// How the last transition through the voice ended, for the diagnostics.
+static LAST: Mutex<Option<String>> = Mutex::new(None);
+
+fn log(msg: impl std::fmt::Display) {
+    crate::diag::log("transition", msg);
+}
+
+/// Logs how a transition ended, and keeps it for the diagnostics.
+fn finished(msg: String) {
+    log(&msg);
+    *LAST.lock().unwrap() = Some(msg);
+}
+
+/// The voice's state, for the diagnostics.
+pub fn status() -> String {
+    let voice = if OFF.load(Ordering::Relaxed) { "off until restart" } else { "on" };
+    let refusals = REFUSALS.load(Ordering::Relaxed);
+    let last = LAST.lock().unwrap().clone().unwrap_or_else(|| "none yet".into());
+    format!("voice {voice}, refusals {refusals} of {MAX_REFUSALS}, last: {last}")
+}
 
 /// The main page's state (`audio.deck()`).
 #[derive(Deserialize)]
@@ -61,6 +84,8 @@ struct Main {
     out: Option<f64>,
     to: Option<String>,
     wall: f64,
+    /// The page accepted the `overlap` command.
+    overlap: bool,
     waiting: bool,
     done_at: Option<f64>,
     error: bool,
@@ -71,6 +96,8 @@ struct Main {
 struct Voice {
     id: Option<String>,
     ad: bool,
+    /// The page has no player yet.
+    loading: bool,
     ready: bool,
     started: bool,
     paused: bool,
@@ -83,6 +110,7 @@ struct Voice {
 /// The transition `mixes::plan` picked (Rust's own data).
 #[derive(Deserialize)]
 struct Plan {
+    mode: String,
     from: String,
     to: String,
     in_ms: f64,
@@ -105,30 +133,46 @@ type Tempos = (Option<f64>, Option<f64>);
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
+        // The last track logged as having no mix transition (once per track, not on every pass).
+        let mut no_plan = None;
         loop {
             std::thread::sleep(IDLE);
             if OFF.load(Ordering::Relaxed) || !app.state::<Live>().plugin("crossfade") {
                 continue;
             }
-            let (Some(site), Some((plan, bpm))) = (app.get_webview("site"), next_plan(&app)) else { continue };
+            let Some(site) = app.get_webview("site") else { continue };
+            let Some((plan, bpm)) = next_plan(&app) else {
+                let current = app.state::<Player>().current().and_then(|s| s.track.id);
+                if current.is_some() && current != no_plan {
+                    no_plan = current;
+                    let (list, next) = app.state::<crate::mixes::Mixes>().now();
+                    log(format_args!(
+                        "one player: no mix transition (playlist: {}, next track: {})",
+                        list.is_some(),
+                        next.is_some()
+                    ));
+                }
+                continue;
+            };
             let Some(a) = read::<Main>(&site, MAIN_POLL) else { continue };
             let Some(left) = lead(&a, &plan) else { continue };
             if !(MIN_PREPARE_S..=PREPARE_S).contains(&left) {
                 continue;
             }
+            log(format_args!("voice opens {left:.1} s before the fade ({} into {})", plan.mode, plan.to));
             match mix(&app, &site, &plan, bpm) {
-                Outcome::Done => {}
-                Outcome::Fallback(why) => eprintln!("transition voice: one player this time ({why})"),
+                Outcome::Done => finished("overlap: the main page took over".into()),
+                Outcome::Fallback(why) => finished(format!("one player this time ({why})")),
                 Outcome::Refused(why) => {
                     let n = REFUSALS.fetch_add(1, Ordering::Relaxed) + 1;
-                    eprintln!("transition voice: refused ({why}), {n} of {MAX_REFUSALS}");
                     if n >= MAX_REFUSALS {
                         OFF.store(true, Ordering::Relaxed);
                     }
+                    finished(format!("refused ({why}), {n} of {MAX_REFUSALS}"));
                 }
                 Outcome::AdOnVoice => {
-                    eprintln!("transition voice: an ad on the voice, off until restart");
                     OFF.store(true, Ordering::Relaxed);
+                    finished("an ad on the voice, off until restart".into());
                 }
             }
         }
@@ -172,6 +216,8 @@ fn mix(app: &AppHandle, site: &Webview, plan: &Plan, bpm: Tempos) -> Outcome {
 fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempos) -> Outcome {
     let in_s = (plan.in_ms / 1000.0 - GO_LEAD_S).max(0.0);
     let poll = format!("window.__feathertuneDeck?.poll({in_s}) ?? null");
+    let opened = Instant::now();
+    let mut seen_ready = false;
     // Waiting for the fade, with the voice loading and seeking to its in point.
     let a = loop {
         std::thread::sleep(POLL);
@@ -186,12 +232,23 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
             }
         }
         let Some(left) = lead(&a, plan) else { return Outcome::Fallback("the main page changed") };
+        let ready = v.as_ref().is_some_and(|v| v.ready && v.id.as_deref() == Some(&plan.to));
+        if ready && !seen_ready {
+            seen_ready = true;
+            log(format_args!("voice ready after {:.1} s, {left:.1} s before the fade", opened.elapsed().as_secs_f64()));
+        }
         if left > GO_LEAD_S {
             continue;
         }
-        let ready = v.is_some_and(|v| v.ready && v.id.as_deref() == Some(&plan.to));
-        if !ready || left < 0.2 {
-            return Outcome::Fallback("the voice was not ready in time");
+        if !ready {
+            return Outcome::Fallback(match &v {
+                None => "the voice did not answer",
+                Some(v) if v.loading => "the voice was still loading",
+                Some(_) => "the voice was not ready in time",
+            });
+        }
+        if left < 0.2 {
+            return Outcome::Fallback("the fade was too close to start the voice");
         }
         break a;
     };
@@ -217,6 +274,7 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
     let started = Instant::now();
     let limit = Duration::from_secs_f64(plan.duration_ms / 1000.0) + HANDOFF_TIMEOUT;
     let mut handed = false;
+    let mut checked = false;
     loop {
         std::thread::sleep(POLL);
         if started.elapsed() > limit {
@@ -225,6 +283,10 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         let (Some(a), Some(v)) = (read::<Main>(site, MAIN_POLL), read::<Voice>(voice, &poll)) else {
             return Outcome::Fallback("no answer from a page");
         };
+        if !checked {
+            checked = true;
+            log(format_args!("voice started: {}, page accepted the overlap: {}", v.started, a.overlap));
+        }
         if a.ad {
             return Outcome::Fallback("an ad on the main page");
         }
@@ -250,6 +312,7 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         if !handed && a.waiting && on == Some(plan.to.as_str()) && (0.25..=4.0).contains(&v.rate) {
             command(app, "handoff", json!({ "t": v.t, "wall_ms": v.wall, "rate": v.rate }));
             handed = true;
+            log(format_args!("handoff at {:.1} s of the next track", v.t));
         }
     }
 }
@@ -281,7 +344,7 @@ fn open(app: &AppHandle, to: &str) -> Option<Webview> {
         .on_new_window(|_, _| NewWindowResponse::Deny);
     let voice = window
         .add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0))
-        .map_err(|e| eprintln!("transition voice: {e}"))
+        .map_err(|e| log(format_args!("the voice did not open: {e}")))
         .ok()?;
     let _ = voice.with_webview(|wv| unsafe {
         let _ = wv.controller().SetIsVisible(false);

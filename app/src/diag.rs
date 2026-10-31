@@ -3,8 +3,8 @@
 //! Downloads ("Export diagnostics"). Nothing is written to disk or sent anywhere until that is
 //! pressed; the person sends the file on their own.
 //!
-//! The report has the app and WebView2 versions, the plugin switches, the lyrics settings, the
-//! current track and lyrics, and the log. It names the tracks played since the app started (the
+//! The report has the app and WebView2 versions, the plugin switches, the lyrics and crossfade
+//! settings, the transition voice's state, the current track and lyrics, and the log. It names the tracks played since the app started (the
 //! lyrics lookups log them), never tokens, keys, account names or paths.
 
 use std::collections::VecDeque;
@@ -71,6 +71,14 @@ pub fn report(app: &AppHandle) -> String {
         l.translate_to,
         crate::lyrics::translation_target(&settings)
     );
+    let a = &settings.audio;
+    let measured = std::fs::read_dir(live.profile.join("audio-facts")).map_or(0, Iterator::count);
+    let _ = writeln!(
+        out,
+        "[audio] crossfade_ms = {}, curve = {:?}, fade_in_ms = {}, tracks measured: {measured}",
+        a.crossfade_ms, a.curve, a.fade_in_ms
+    );
+    let _ = writeln!(out, "[transition] {}", crate::deck::status());
     drop(settings);
 
     let _ = writeln!(out, "\n[now]");

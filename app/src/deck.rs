@@ -6,15 +6,17 @@
 //!
 //! - The voice has no capability (it is in no file of `capabilities/`) and only the `deck`
 //!   injection: it can call nothing. Rust reads both pages with ExecuteScript (every 250 ms, only
-//!   while a voice exists; every 2 s otherwise, only while a mix's transition is next) and treats
-//!   the answers as untrusted numbers: they only time the transition and are never passed on.
+//!   while a voice exists; the main page every 2 s otherwise, while the crossfade is on) and treats
+//!   the answers as untrusted: the numbers only time the transition and are never passed on, and
+//!   the voice's error text only goes to the log, cleaned (`clean`).
 //! - The voice is opened `PREPARE_S` before the fade and must be ready `GO_LEAD_S` before it. Each
 //!   transition picks the mode again: a voice that is not ready, an ad on either page, a pause, a
 //!   track change or anything else odd closes the voice and the main page does the one-player fade.
 //! - An ad on the voice closes it at once and turns the voice off until the app restarts (it never
-//!   plays one); a voice that stops or errors by itself counts as the account refusing a second
-//!   playback, and after two the voice stays off until the app restarts. A voice still loading has
-//!   no player yet: it plays nothing, and that alone is not an ad.
+//!   plays one); a voice that stops or errors by itself while playing counts as the account refusing
+//!   a second playback, and after two the voice stays off until the app restarts. One that fails
+//!   before it plays only falls back. A voice still loading has no player yet: it plays nothing, and
+//!   that alone is not an ad. Each transition gets one attempt.
 //! - Every transition is logged under `transition` (diag.rs): which mode played and why.
 
 use std::sync::Mutex;
@@ -65,6 +67,11 @@ fn finished(msg: String) {
     *LAST.lock().unwrap() = Some(msg);
 }
 
+/// The voice's error text for the log: a short line of plain text.
+fn clean(text: &str) -> String {
+    text.chars().filter(|c| c.is_alphanumeric() || " .,:'-".contains(*c)).take(120).collect()
+}
+
 /// The voice's state, for the diagnostics.
 pub fn status() -> String {
     let voice = if OFF.load(Ordering::Relaxed) { "off until restart" } else { "on" };
@@ -82,6 +89,10 @@ struct Main {
     paused: bool,
     ad: bool,
     out: Option<f64>,
+    dur: Option<f64>,
+    length: Option<f64>,
+    armed: bool,
+    faded: bool,
     to: Option<String>,
     wall: f64,
     /// The page accepted the `overlap` command.
@@ -104,7 +115,8 @@ struct Voice {
     t: f64,
     rate: f64,
     wall: f64,
-    error: bool,
+    /// What the page says is wrong (untrusted: only logged, see `clean`).
+    error: Option<String>,
 }
 
 /// The transition `mixes::plan` picked (Rust's own data).
@@ -135,12 +147,29 @@ pub fn start(app: &AppHandle) {
     std::thread::spawn(move || {
         // The last track logged as having no mix transition (once per track, not on every pass).
         let mut no_plan = None;
+        let mut last_fade = None;
+        // The last transition the voice tried: each one gets a single attempt.
+        let mut tried = None;
         loop {
             std::thread::sleep(IDLE);
-            if OFF.load(Ordering::Relaxed) || !app.state::<Live>().plugin("crossfade") {
+            if !app.state::<Live>().plugin("crossfade") {
                 continue;
             }
             let Some(site) = app.get_webview("site") else { continue };
+            let main = read::<Main>(&site, MAIN_POLL);
+            if let Some(a) = &main {
+                let fade = (a.id.clone(), a.out.map(|o| (o * 10.0).round() as i64), a.armed, a.faded);
+                if last_fade.as_ref() != Some(&fade) {
+                    log(format_args!(
+                        "page: at {:.1} of {:?} s, fade at {:?} for {:?} s into {:?}, armed: {}, faded: {}",
+                        a.t, a.length, a.out, a.dur, a.to, a.armed, a.faded
+                    ));
+                    last_fade = Some(fade);
+                }
+            }
+            if OFF.load(Ordering::Relaxed) {
+                continue;
+            }
             let Some((plan, bpm)) = next_plan(&app) else {
                 let current = app.state::<Player>().current().and_then(|s| s.track.id);
                 if current.is_some() && current != no_plan {
@@ -154,11 +183,13 @@ pub fn start(app: &AppHandle) {
                 }
                 continue;
             };
-            let Some(a) = read::<Main>(&site, MAIN_POLL) else { continue };
+            let Some(a) = main else { continue };
             let Some(left) = lead(&a, &plan) else { continue };
-            if !(MIN_PREPARE_S..=PREPARE_S).contains(&left) {
+            let pair = Some((plan.from.clone(), plan.to.clone()));
+            if !(MIN_PREPARE_S..=PREPARE_S).contains(&left) || tried == pair {
                 continue;
             }
+            tried = pair;
             log(format_args!("voice opens {left:.1} s before the fade ({} into {})", plan.mode, plan.to));
             match mix(&app, &site, &plan, bpm) {
                 Outcome::Done => finished("overlap: the main page took over".into()),
@@ -227,8 +258,10 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
             if v.ad {
                 return Outcome::AdOnVoice;
             }
-            if v.error {
-                return Outcome::Refused("the voice shows an error");
+            // Nothing plays yet, so this is not the account refusing a second playback.
+            if let Some(error) = &v.error {
+                log(format_args!("voice error before it played: {}", clean(error)));
+                return Outcome::Fallback("the voice shows an error");
             }
         }
         let Some(left) = lead(&a, plan) else { return Outcome::Fallback("the main page changed") };
@@ -293,7 +326,13 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         if v.ad {
             return Outcome::AdOnVoice;
         }
-        if v.error || (v.started && v.paused) {
+        if let Some(error) = &v.error {
+            log(format_args!("voice error: {}", clean(error)));
+        }
+        if !v.started {
+            return Outcome::Fallback("the voice did not start");
+        }
+        if v.error.is_some() || v.paused {
             return Outcome::Refused("the voice stopped by itself");
         }
         if a.error || a.paused {

@@ -54,6 +54,13 @@ const adShowing = () => {
 };
 // Nothing plays without a player either (it may be about to show an ad), but that is not an ad yet.
 const adNow = () => !player() || adShowing();
+// What is wrong with playback, or null. The site keeps its error element in the page, empty and
+// rendered, while there is no error: only one with something to say counts.
+const errorOf = (v) => {
+  if (v?.error) return `media error ${v.error.code}`;
+  const e = document.querySelector(SELECTORS.error);
+  return (e?.offsetParent && e.textContent.trim().slice(0, 200)) || null;
+};
 
 // The fade-in curve (0 to 1), the main page's fade-out backwards.
 const fadeIn = (name) => {
@@ -105,7 +112,7 @@ window.__feathertuneDeck = Object.freeze({
       t: v ? v.currentTime : 0,
       rate: v ? v.playbackRate : 1,
       wall: wall(),
-      error: !!(v?.error || document.querySelector(SELECTORS.error)?.offsetParent),
+      error: errorOf(v),
     };
   },
   // Plays now, silent until `at_ms`, then fades in along the curve over `dur_ms`. `rate`: the tempo

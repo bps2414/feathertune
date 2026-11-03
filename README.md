@@ -1,14 +1,36 @@
-# feathertune
+<p align="center">
+  <img src="site/public/favicon.svg" alt="feathertune logo" width="96" height="96">
+</p>
 
-*Português: [README.pt-BR.md](README.pt-BR.md)*
+<h1 align="center">feathertune</h1>
 
-Website: [bps2414.github.io/feathertune](https://bps2414.github.io/feathertune/)
+<p align="center"><strong>Your music, as a real Windows app.</strong><br>A 3 MB installer, no bundled Chromium, word-by-word synced lyrics, a mini player and media keys.</p>
 
-> **Stable for daily use (0.5.x).** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
+<p align="center">
+  <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Download</strong></a> ·
+  <a href="https://bps2414.github.io/feathertune/">Website</a> ·
+  <a href="#features">Features</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="README.pt-BR.md">Português</a>
+</p>
 
-A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2. Instead of bundling Chromium (like Electron apps do) it uses the WebView2 runtime that already ships with Windows, and handles the desktop parts natively: its own title bar, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
+<p align="center">
+  <a href="https://github.com/bps2414/feathertune/releases/latest"><img src="https://img.shields.io/github/v/release/bps2414/feathertune?label=release&color=24292f" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-24292f" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/Rust-Tauri%202-24292f" alt="Rust and Tauri 2">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-24292f" alt="MIT license"></a>
+</p>
 
-Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core with the window open, ~190 MB of RAM in the tray, about 2 s to start, a ~3 MB installer. Details in [docs/DESIGN.md](docs/DESIGN.md).
+> **Stable for daily use.** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
+
+## Why feathertune
+
+- **Light.** It uses the WebView2 runtime that already ships with Windows instead of bundling Chromium like Electron apps do. Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core with the window open, ~190 MB of RAM in the tray, about 2 s to start, a ~3 MB installer. Details in [docs/DESIGN.md](docs/DESIGN.md).
+- **A desktop app, not a browser tab.** Its own title bar in the album's colors, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
+- **Lyrics that follow the voice.** Word-by-word synced lyrics from four open sources, translated line by line, also floating over the desktop.
+- **The official website, untouched.** You sign in on the site itself. Ads are never blocked or altered, and audio is never downloaded.
+
+A lightweight Windows desktop shell for a web music player, written in Rust with Tauri 2.
 
 ## What it does and does not do
 
@@ -18,32 +40,43 @@ Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core
 
 ## Features
 
+**A desktop app, not a tab**
 - A start screen that checks for updates (and installs a newer release) while the player loads, so the window never opens on a blank page.
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
-- Discord Rich Presence and Last.fm scrobbling (with an offline queue).
+- Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
+- A tray menu in the app's look, with the track and its controls.
+- Back and forward buttons on the title bar.
+- Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
+
+**Lyrics**
 - Time-synced lyrics in the site's Lyrics tab from four open sources (Better Lyrics, Unison, lrcmux, LRCLIB), preferring lyrics timed word by word: lines and words light up as they are sung (word times are estimated from the song's pace when no source has them), cross-fade into each other, and the list scrolls slowly in time with the song.
 - Lyrics translation: a line-by-line translation under each lyric line (into Windows' language by default), the source's own when it has one, else a machine translation made for lyrics; also on the floating lyrics and the mini player.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
-- Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
-- A tray menu in the app's look, with the track and its controls.
-- Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
-- Ambient mode: the blurred, glowing cover behind the site.
-- Back and forward buttons on the title bar.
-- Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
-- Export diagnostics (Settings > Advanced): a text file to send when something goes wrong.
-- Song mode: picks the song version when a track also has a video, so the video is not decoded.
-- Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
-- Skips tracks that start already marked "dislike" (never during an ad).
-- A privacy filter for third-party analytics (never ads).
+
+**Sound**
 - Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
 - Track analysis: the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
 - Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) in the Mix section of the settings window's Experimental tab. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
+
+**Your listening**
+- Discord Rich Presence and Last.fm scrobbling (with an offline queue).
+- Listening stats, kept only on this PC: listening time, top artists, tracks and albums, when you listen, streaks; CSV export.
+- Ambient mode: the blurred, glowing cover behind the site.
+- Song mode: picks the song version when a track also has a video, so the video is not decoded.
+- Skips tracks that start already marked "dislike" (never during an ad).
+
+**Light and private**
+- Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
+- A privacy filter for third-party analytics (never ads).
+- Export diagnostics (Settings > Advanced): a text file to send when something goes wrong.
+- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis, phone remote), which start off in its Experimental tab. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
+
+**Beyond the PC**
 - Phone remote (highly experimental preview): an Android app, paired once with a QR code confirmed on the PC, shows what plays, the artwork and the queue, and controls play/pause, next/previous, seek, live volume, tap-to-play, queue editing (play next, remove) and playing a playlist of your library. Local network only, end-to-end encrypted (Noise Protocol), never during an ad except pause. The APK is attached to each release; the app is in [mobile/](mobile/README.md), the protocol in [docs/REMOTE.md](docs/REMOTE.md).
 - Extensions: import plugins made by others (or yourself) from a folder, a .zip or a single .js or .css file, in the settings window's Extensions tab. They are your own choice: the app does not review them. How to write one: [docs/EXTENSIONS.md](docs/EXTENSIONS.md).
-- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis, phone remote), which start off in its Experimental tab. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-verified-yet).
 
@@ -70,6 +103,9 @@ cargo build --release
 ## Configuration
 
 `%LOCALAPPDATA%\feathertune\config.toml` (created on first run with the plugin list, outside the repository; an existing file keeps the values written in it). The settings window (the gear on the title bar, or tray menu > Settings) edits everything below and keeps your comments; editing by hand works too. Everything is optional:
+
+<details>
+<summary>Every option, with comments</summary>
 
 ```toml
 [plugins]                    # every optional feature; the settings window shows its description and cost
@@ -153,6 +189,8 @@ language = "auto"            # auto (Windows' language: Portuguese gets pt-BR, a
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/DESIGN.md)
 ```
 
+</details>
+
 The old keys `[injections] controls`, `[privacy] tracker_filter` and `[notifications] track_change` are still read; the settings window replaces them with the `[plugins]` entry. "Start with Windows", "Connect Last.fm" and the mini player are also in the tray menu. Last.fm sign-in happens in your browser; the session key is kept in the Windows Credential Manager, never in a file. A local build without a Last.fm key needs `api_key` and `api_secret` here.
 
 ## Contributing
@@ -164,3 +202,11 @@ Pull requests are welcome; open an issue first for anything big. The full guide 
 This is an independent, unofficial project. It is not affiliated with, endorsed by or sponsored by any music streaming service or its owners. All trademarks belong to their respective owners. You are responsible for using it in line with the terms of the service you sign in to.
 
 Licensed under the [MIT License](LICENSE).
+
+---
+
+<p align="center">
+  <a href="https://star-history.com/#bps2414/feathertune&Date"><img src="https://api.star-history.com/svg?repos=bps2414/feathertune&type=Date" alt="Star history" width="560"></a>
+</p>
+
+<p align="center">If feathertune made your music feel at home on Windows, a ★ on the repo helps other people find it.</p>

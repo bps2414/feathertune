@@ -1,14 +1,36 @@
-# feathertune
+<p align="center">
+  <img src="site/public/favicon.svg" alt="Logo do feathertune" width="96" height="96">
+</p>
 
-*English: [README.md](README.md)*
+<h1 align="center">feathertune</h1>
 
-Site: [bps2414.github.io/feathertune](https://bps2414.github.io/feathertune/pt-br/)
+<p align="center"><strong>Sua música, como um app de Windows de verdade.</strong><br>Instalador de 3 MB, sem Chromium embutido, letra sincronizada palavra por palavra, mini player e teclas de mídia.</p>
 
-> **Estável para uso diário (0.5.x).** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
+<p align="center">
+  <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Baixar</strong></a> ·
+  <a href="https://bps2414.github.io/feathertune/pt-br/">Site</a> ·
+  <a href="#recursos">Recursos</a> ·
+  <a href="CHANGELOG.pt-BR.md">Novidades</a> ·
+  <a href="README.md">English</a>
+</p>
 
-Uma casca desktop leve para Windows de um player de música na web, escrita em Rust com Tauri 2. Em vez de embutir um Chromium (como os apps Electron), usa o runtime WebView2 que já vem no Windows e cuida das partes de desktop de forma nativa: barra de título própria, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
+<p align="center">
+  <a href="https://github.com/bps2414/feathertune/releases/latest"><img src="https://img.shields.io/github/v/release/bps2414/feathertune?label=release&color=24292f" alt="Versão mais recente"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-24292f" alt="Windows 10 e 11">
+  <img src="https://img.shields.io/badge/Rust-Tauri%202-24292f" alt="Rust e Tauri 2">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-24292f" alt="Licença MIT"></a>
+</p>
 
-Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um núcleo com a janela aberta, ~190 MB de RAM na bandeja, cerca de 2 s para abrir, instalador de ~3 MB. Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
+> **Estável para uso diário.** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
+
+## Por que o feathertune
+
+- **Leve.** Usa o runtime WebView2 que já vem no Windows em vez de embutir um Chromium, como fazem os apps Electron. Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um núcleo com a janela aberta, ~190 MB de RAM na bandeja, cerca de 2 s para abrir, instalador de ~3 MB. Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
+- **Um app de desktop, não uma aba do navegador.** Barra de título própria nas cores do álbum, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
+- **Letra que acompanha a voz.** Letra sincronizada palavra por palavra de quatro fontes abertas, traduzida linha a linha, também flutuando sobre a área de trabalho.
+- **O site oficial, intocado.** Você faz login no próprio site. Anúncios nunca são bloqueados nem alterados, e o áudio nunca é baixado.
+
+Uma casca desktop leve para Windows de um player de música na web, escrita em Rust com Tauri 2.
 
 ## O que faz e o que não faz
 
@@ -18,32 +40,43 @@ Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um 
 
 ## Recursos
 
+**Um app de desktop, não uma aba**
 - Uma tela de abertura que procura atualizações (e instala uma versão nova) enquanto o player carrega, então a janela nunca abre numa página em branco.
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
-- Discord Rich Presence e scrobbles no Last.fm (com fila offline).
+- Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
+- Um menu da bandeja no visual do app, com a faixa e os controles.
+- Botões de voltar e avançar na barra de título.
+- Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
+
+**Letras**
 - Letras sincronizadas na aba Letra do site, de quatro fontes abertas (Better Lyrics, Unison, lrcmux, LRCLIB), preferindo as sincronizadas palavra por palavra: linhas e palavras acendem conforme são cantadas (o tempo das palavras é estimado pelo ritmo da música quando nenhuma fonte o tem), uma esmaece enquanto a outra aparece, e a lista rola devagar no ritmo da música.
 - Tradução da letra: uma tradução linha a linha embaixo de cada linha (no idioma do Windows por padrão), a da própria fonte quando ela tem, senão uma tradução automática feita para letras; também na letra flutuante e no mini player.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
-- Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
-- Um menu da bandeja no visual do app, com a faixa e os controles.
-- Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.
-- Modo ambiente: a capa desfocada e brilhante atrás do site.
-- Botões de voltar e avançar na barra de título.
-- Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
-- Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
-- Modo música: escolhe a versão só áudio quando a faixa também tem vídeo, para o vídeo não ser decodificado.
-- Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
-- Pula faixas que começam já marcadas com "não gostei" (nunca durante um anúncio).
-- Um filtro de privacidade para analytics de terceiros (nunca anúncios).
+
+**Som**
 - Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
 - Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
 - Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na seção Mix da aba Experimental da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
+
+**O que você ouve**
+- Discord Rich Presence e scrobbles no Last.fm (com fila offline).
+- Estatísticas de escuta, guardadas só neste PC: tempo ouvido, artistas, faixas e álbuns mais ouvidos, quando você ouve, sequências; exportação CSV.
+- Modo ambiente: a capa desfocada e brilhante atrás do site.
+- Modo música: escolhe a versão só áudio quando a faixa também tem vídeo, para o vídeo não ser decodificado.
+- Pula faixas que começam já marcadas com "não gostei" (nunca durante um anúncio).
+
+**Leve e privado**
+- Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
+- Um filtro de privacidade para analytics de terceiros (nunca anúncios).
+- Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+
+**Além do PC**
 - Controle remoto pelo celular (prévia altamente experimental): um app Android, pareado uma vez por um QR code confirmado no PC, mostra o que toca, a capa e a fila, e controla play/pause, anterior/próxima, busca, volume ao vivo, tocar ao toque, edição da fila (tocar a seguir, remover) e tocar uma playlist da sua biblioteca. Só na rede local, criptografado de ponta a ponta (Noise Protocol), nunca durante um anúncio, exceto pausar. O APK vai anexado a cada release; o app está em [mobile/](mobile/README.pt-BR.md), o protocolo em [docs/REMOTE.pt-BR.md](docs/REMOTE.pt-BR.md).
 - Extensões: importe plugins feitos por outras pessoas (ou por você) a partir de uma pasta, um .zip ou um único arquivo .js ou .css, na aba Extensões da janela de configurações. Elas são escolha sua: o app não as revisa. Como escrever uma: [docs/EXTENSIONS.pt-BR.md](docs/EXTENSIONS.pt-BR.md).
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md#ainda-não-conferido).
 
@@ -70,6 +103,9 @@ cargo build --release
 ## Configuração
 
 `%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução com a lista de plugins, fora do repositório; um arquivo que já existe mantém os valores escritos nele). A janela de configurações (engrenagem da barra de título, ou menu da bandeja > Settings) edita tudo abaixo e mantém seus comentários; editar à mão também funciona. Tudo é opcional:
+
+<details>
+<summary>Todas as opções, comentadas</summary>
 
 ```toml
 [plugins]                    # todo recurso opcional; a janela de configurações mostra descrição e custo
@@ -153,6 +189,8 @@ language = "auto"            # auto (idioma do Windows: português vira pt-BR, o
 disable_features = []        # features extras do Chromium a desligar (experimentos, veja docs/DESIGN.pt-BR.md)
 ```
 
+</details>
+
 As chaves antigas `[injections] controls`, `[privacy] tracker_filter` e `[notifications] track_change` ainda são lidas; a janela de configurações as troca pela entrada em `[plugins]`. "Iniciar com o Windows", "Conectar Last.fm" e o mini player também ficam no menu da bandeja. Um build local sem chave do Last.fm precisa de `api_key` e `api_secret` aqui. O login do Last.fm acontece no navegador; a session key fica no Windows Credential Manager, nunca em arquivo.
 
 ## Contribuindo
@@ -164,3 +202,11 @@ Pull requests são bem-vindos; abra uma issue antes para qualquer coisa grande. 
 Este é um projeto independente e não oficial. Não tem afiliação, endosso nem patrocínio de nenhum serviço de streaming de música nem de seus donos. Todas as marcas pertencem aos respectivos donos. Você é responsável por usá-lo de acordo com os termos do serviço em que faz login.
 
 Licenciado sob a [Licença MIT](LICENSE).
+
+---
+
+<p align="center">
+  <a href="https://star-history.com/#bps2414/feathertune&Date"><img src="https://api.star-history.com/svg?repos=bps2414/feathertune&type=Date" alt="Histórico de stars" width="560"></a>
+</p>
+
+<p align="center">Se o feathertune deixou sua música mais em casa no Windows, uma ★ no repo ajuda outras pessoas a encontrarem.</p>

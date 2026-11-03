@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.7.1 — 2026-11-02
+
+- **The app no longer opens signed out.** Google tied the sign-in to a short-lived, device-bound cookie that the embedded browser did not renew, so every start showed "Sign in" until you clicked it. The app now asks for the plain long-lived sign-in cookies. Sign in once more after updating; it should then stay.
+
 ## 0.7.0 — 2026-10-28
 
 - **Extensions: plugins made by anyone, imported by you.** A new Extensions tab in the settings imports a folder, a `.zip`, or a single `.css` (a theme) or `.js`, by picking or dropping it. An extension can restyle the page, run code in it and run WebAssembly in a sandbox. Each one asks for its permissions (player control, storage, notifications, requests to the sites it names) and starts off until you switch it on. Its settings are drawn in the tab, and its errors show under it. Extensions are your own code: the app does not review them, so import only what you trust.

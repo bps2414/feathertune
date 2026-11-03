@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.7.1 — 2026-11-02
+
+- **O app não abre mais deslogado.** O Google amarrou o login a um cookie de curta duração ligado ao dispositivo, que o navegador embutido não renovava, então toda abertura mostrava "Fazer login" até você clicar. Agora o app pede os cookies de login comuns, de longa duração. Entre mais uma vez depois de atualizar; ele deve passar a ficar.
+
 ## 0.7.0 — 2026-10-28
 
 - **Extensões: plugins feitos por qualquer pessoa, importados por você.** Uma aba Extensões nova nas configurações importa uma pasta, um `.zip`, ou um `.css` (um tema) ou `.js` sozinho, escolhido ou solto ali. Uma extensão pode mudar o visual da página, rodar código nela e rodar WebAssembly numa sandbox. Cada uma pede suas permissões (controlar o player, guardar dados, notificações, requisições aos sites que ela nomeia) e começa desligada até você ligá-la. As configurações dela aparecem na aba, e os erros dela aparecem sob ela. Extensões são código seu: o app não as revisa, então importe só o que você confia.

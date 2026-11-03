@@ -75,7 +75,9 @@ const START_URL: &str = "https://music.youtube.com";
 // is in smtc.rs). Keep every feature in this single --disable-features: Chromium only honors the
 // last one. Features that the measured experiments kept go here (MediaRouter, DialMediaRouteProvider:
 // no Cast discovery); the ones still being measured come from `[browser] disable_features` in
-// config.toml (see `browser_args`).
+// config.toml (see `browser_args`). DeviceBoundSessions, PersistDeviceBoundSessions: with them on,
+// Google binds the sign-in to a short-lived cookie (`__Secure-*PSIDRTS`, 10 min; the profile held
+// a `gapsts_session`) and a start opened signed out; off, it should keep the plain cookies.
 const DISABLED_FEATURES: &[&str] = &[
     "msWebOOUI",
     "msPdfOOUI",
@@ -83,6 +85,8 @@ const DISABLED_FEATURES: &[&str] = &[
     "HardwareMediaKeyHandling",
     "MediaRouter",
     "DialMediaRouteProvider",
+    "DeviceBoundSessions",
+    "PersistDeviceBoundSessions",
 ];
 
 const BAR_PROBE: &str = "(() => { const b = document.querySelector('ytmusic-player-bar'); \

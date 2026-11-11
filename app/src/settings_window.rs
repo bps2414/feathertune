@@ -251,6 +251,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "eq_presets": crate::audio::EQ_PRESETS.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
             "compressor": s.audio.compressor,
             "crossfade_ms": s.audio.crossfade_ms,
+            "last_transition": crate::deck::last(),
             "curve": s.audio.curve,
             "fade_in_ms": s.audio.fade_in_ms,
             "echo_out": s.audio.echo_out,

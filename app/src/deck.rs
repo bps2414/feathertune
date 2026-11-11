@@ -1,5 +1,6 @@
-//! The transition voice: for a mix's transition (mixes.rs), the start of the next track plays in a
-//! second, hidden webview (label `deck`) while the main page fades out, so the two overlap. The
+//! The transition voice: for a crossfade (a mix's transition or the global one, mixes.rs), the start
+//! of the next track plays in a second, hidden webview (label `deck`) while the main page fades out,
+//! so the two overlap. The
 //! main page stays the only source of truth (queue, history, scrobbles, lyrics, the media flyout):
 //! when the site moves on to the next track, the main page seeks to where the voice is, they cross
 //! in 150 ms and the voice is closed. The seconds the voice played are not counted anywhere.
@@ -7,11 +8,12 @@
 //! - The voice has no capability (it is in no file of `capabilities/`) and only the `deck`
 //!   injection: it can call nothing. Rust reads both pages with ExecuteScript (every 250 ms, only
 //!   while a voice exists; the main page every 2 s otherwise, while the crossfade is on) and treats
-//!   the answers as untrusted: the numbers only time the transition and are never passed on, and
-//!   the voice's error text only goes to the log, cleaned (`clean`).
-//! - The voice is opened `PREPARE_S` before the fade and must be ready `GO_LEAD_S` before it. Each
-//!   transition picks the mode again: a voice that is not ready, an ad on either page, a pause, a
-//!   track change or anything else odd closes the voice and the main page does the one-player fade.
+//!   the answers as untrusted: the numbers only time the transition and set the voice's level (the
+//!   main page's volume, clamped), and the voice's error text only goes to the log, cleaned (`clean`).
+//! - The voice is opened `PREPARE_S` before the fade and must be ready `GO_LEAD_S` before it. Files
+//!   are only read for the plan in that window. Each transition picks the mode again: a voice that is
+//!   not ready, an ad on either page, a pause, a track change or anything else odd closes the voice
+//!   and the main page does the one-player fade.
 //! - An ad on the voice closes it at once and turns the voice off until the app restarts (it never
 //!   plays one); a voice that stops or errors by itself while playing counts as the account refusing
 //!   a second playback, and after two the voice stays off until the app restarts. One that fails
@@ -40,8 +42,16 @@ const MAIN_POLL: &str = "window.__feathertune?.audio?.deck?.() ?? null";
 /// The voice opens this long before the fade (main page time), and not with less than the minimum.
 const PREPARE_S: f64 = 40.0;
 const MIN_PREPARE_S: f64 = 10.0;
-/// `go` is sent this long before the fade; the voice waits this much before its in point.
-const GO_LEAD_S: f64 = 1.0;
+/// `overlap` is sent this long before the fade, and `go` once the page accepts it; the voice reaches
+/// its in point at the fade, playing silently before it for up to this long (the track's start
+/// permitting).
+const GO_LEAD_S: f64 = 1.5;
+/// How long the main page may take to accept the overlap, before the voice makes a sound.
+const ACCEPT_TIMEOUT: Duration = Duration::from_millis(600);
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
+/// How long the main page's state may not fit the plan before the voice gives up (its fade is planned
+/// again now and then).
+const LEAD_GRACE: Duration = Duration::from_secs(1);
 const POLL: Duration = Duration::from_millis(250);
 const IDLE: Duration = Duration::from_secs(2);
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -54,17 +64,18 @@ const HANDOFF_MS: f64 = 150.0;
 
 static REFUSALS: AtomicU32 = AtomicU32::new(0);
 static OFF: AtomicBool = AtomicBool::new(false);
-/// How the last transition through the voice ended, for the diagnostics.
-static LAST: Mutex<Option<String>> = Mutex::new(None);
+/// How the last transition through the voice ended: the log line (for the diagnostics), whether it
+/// overlapped, and why not (a key of `locales/`, for the settings).
+static LAST: Mutex<Option<(String, bool, &'static str)>> = Mutex::new(None);
 
 fn log(msg: impl std::fmt::Display) {
     crate::diag::log("transition", msg);
 }
 
-/// Logs how a transition ended, and keeps it for the diagnostics.
-fn finished(msg: String) {
+/// Logs how a transition ended, and keeps it.
+fn finished(overlapped: bool, why: &'static str, msg: String) {
     log(&msg);
-    *LAST.lock().unwrap() = Some(msg);
+    *LAST.lock().unwrap() = Some((msg, overlapped, why));
 }
 
 /// The voice's error text for the log: a short line of plain text.
@@ -76,8 +87,17 @@ fn clean(text: &str) -> String {
 pub fn status() -> String {
     let voice = if OFF.load(Ordering::Relaxed) { "off until restart" } else { "on" };
     let refusals = REFUSALS.load(Ordering::Relaxed);
-    let last = LAST.lock().unwrap().clone().unwrap_or_else(|| "none yet".into());
+    let last = LAST.lock().unwrap().as_ref().map_or_else(|| "none yet".into(), |(msg, ..)| msg.clone());
     format!("voice {voice}, refusals {refusals} of {MAX_REFUSALS}, last: {last}")
+}
+
+/// The last transition through the voice, for the settings.
+pub fn last() -> Option<serde_json::Value> {
+    let off = OFF.load(Ordering::Relaxed);
+    LAST.lock()
+        .unwrap()
+        .as_ref()
+        .map(|(_, overlapped, why)| json!({ "overlapped": overlapped, "why": why, "off": off }))
 }
 
 /// The main page's state (`audio.deck()`).
@@ -87,6 +107,8 @@ struct Main {
     t: f64,
     rate: f64,
     paused: bool,
+    volume: f64,
+    muted: bool,
     ad: bool,
     out: Option<f64>,
     dur: Option<f64>,
@@ -99,6 +121,9 @@ struct Main {
     overlap: bool,
     waiting: bool,
     done_at: Option<f64>,
+    /// How far from the voice the take-over landed (ms), and after how many seeks.
+    drift: Option<f64>,
+    seeks: u32,
     error: bool,
 }
 
@@ -117,9 +142,11 @@ struct Voice {
     wall: f64,
     /// What the page says is wrong (untrusted: only logged, see `clean`).
     error: Option<String>,
+    /// Why the browser would not play (the same).
+    blocked: Option<String>,
 }
 
-/// The transition `mixes::plan` picked (Rust's own data).
+/// The transition `mixes::transition` picked (Rust's own data).
 #[derive(Deserialize)]
 struct Plan {
     mode: String,
@@ -145,7 +172,7 @@ type Tempos = (Option<f64>, Option<f64>);
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        // The last track logged as having no mix transition (once per track, not on every pass).
+        // The last track logged as having no transition (once per track, not on every pass).
         let mut no_plan = None;
         let mut last_fade = None;
         // The last transition the voice tried: each one gets a single attempt.
@@ -170,65 +197,72 @@ pub fn start(app: &AppHandle) {
             if OFF.load(Ordering::Relaxed) {
                 continue;
             }
-            let Some((plan, bpm)) = next_plan(&app) else {
-                let current = app.state::<Player>().current().and_then(|s| s.track.id);
-                if current.is_some() && current != no_plan {
-                    no_plan = current;
+            let Some(a) = main else { continue };
+            if !until_fade(&a).is_some_and(|left| (MIN_PREPARE_S..=PREPARE_S).contains(&left)) {
+                continue;
+            }
+            let planned = next_plan(&app).and_then(|(plan, bpm)| lead(&a, &plan).map(|left| (plan, bpm, left)));
+            let Some((plan, bpm, left)) = planned else {
+                if a.id != no_plan {
+                    no_plan = a.id.clone();
                     let (list, next) = app.state::<crate::mixes::Mixes>().now();
                     log(format_args!(
-                        "one player: no mix transition (playlist: {}, next track: {})",
+                        "one player: no transition (playlist: {}, next track: {}, the page's next: {:?})",
                         list.is_some(),
-                        next.is_some()
+                        next.is_some(),
+                        a.to
                     ));
                 }
                 continue;
             };
-            let Some(a) = main else { continue };
-            let Some(left) = lead(&a, &plan) else { continue };
             let pair = Some((plan.from.clone(), plan.to.clone()));
-            if !(MIN_PREPARE_S..=PREPARE_S).contains(&left) || tried == pair {
+            if tried == pair {
                 continue;
             }
             tried = pair;
             log(format_args!("voice opens {left:.1} s before the fade ({} into {})", plan.mode, plan.to));
             match mix(&app, &site, &plan, bpm) {
-                Outcome::Done => finished("overlap: the main page took over".into()),
-                Outcome::Fallback(why) => finished(format!("one player this time ({why})")),
+                Outcome::Done => finished(true, "", "overlap: the main page took over".into()),
+                Outcome::Fallback(why) => finished(false, why, format!("one player this time ({why})")),
                 Outcome::Refused(why) => {
                     let n = REFUSALS.fetch_add(1, Ordering::Relaxed) + 1;
                     if n >= MAX_REFUSALS {
                         OFF.store(true, Ordering::Relaxed);
                     }
-                    finished(format!("refused ({why}), {n} of {MAX_REFUSALS}"));
+                    finished(false, why, format!("refused ({why}), {n} of {MAX_REFUSALS}"));
                 }
                 Outcome::AdOnVoice => {
                     OFF.store(true, Ordering::Relaxed);
-                    finished("an ad on the voice, off until restart".into());
+                    finished(false, "an ad on the voice", "an ad on the voice, off until restart".into());
                 }
             }
         }
     });
 }
 
-/// The mix's transition out of the current track, with both tracks' tempos.
+/// The transition out of the current track, with both tracks' tempos.
 fn next_plan(app: &AppHandle) -> Option<(Plan, Tempos)> {
     let current = app.state::<Player>().current().and_then(|s| s.track.id)?;
-    let data = crate::mixes::page_data(app, Some(&current));
-    let plan: Plan = serde_json::from_value(data["transition"].clone()).ok()?;
+    let plan: Plan = serde_json::from_value(crate::mixes::transition(app, &current)?).ok()?;
     let store = app.state::<crate::audio_facts::Store>();
     let bpm = (store.load(&plan.from).and_then(|f| f.bpm), store.load(&plan.to).and_then(|f| f.bpm));
     Some((plan, bpm))
 }
 
-/// Seconds (wall time) from the main page's state until its fade, if it plays the plan's track.
+/// Seconds (wall time) from the main page's state until its fade.
+fn until_fade(a: &Main) -> Option<f64> {
+    (0.25..=4.0).contains(&a.rate).then(|| a.out.map(|out| (out - a.t) / a.rate))?
+}
+
+/// `until_fade`, if the main page plays the plan's track and nothing is in the way.
 fn lead(a: &Main, plan: &Plan) -> Option<f64> {
-    let ok = a.id.as_deref() == Some(&plan.from)
-        && a.to.as_deref() == Some(&plan.to)
-        && !a.paused
-        && !a.ad
-        && !a.error
-        && (0.25..=4.0).contains(&a.rate);
-    ok.then(|| a.out.map(|out| (out - a.t) / a.rate))?
+    let ok = a.id.as_deref() == Some(&plan.from) && a.to.as_deref() == Some(&plan.to) && !a.paused && !a.ad && !a.error;
+    ok.then(|| until_fade(a))?
+}
+
+/// The main page's volume, for the voice.
+fn level(a: &Main) -> serde_json::Value {
+    json!({ "volume": a.volume.clamp(0.0, 1.0), "muted": a.muted })
 }
 
 /// One transition through the voice.
@@ -249,6 +283,7 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
     let poll = format!("window.__feathertuneDeck?.poll({in_s}) ?? null");
     let opened = Instant::now();
     let mut seen_ready = false;
+    let mut lost: Option<Instant> = None;
     // Waiting for the fade, with the voice loading and seeking to its in point.
     let a = loop {
         std::thread::sleep(POLL);
@@ -264,7 +299,17 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
                 return Outcome::Fallback("the voice shows an error");
             }
         }
-        let Some(left) = lead(&a, plan) else { return Outcome::Fallback("the main page changed") };
+        let Some(left) = lead(&a, plan) else {
+            if lost.get_or_insert_with(Instant::now).elapsed() < LEAD_GRACE {
+                continue;
+            }
+            log(format_args!(
+                "main page: on {:?}, next {:?}, fade at {:?}, paused: {}, ad: {}",
+                a.id, a.to, a.out, a.paused, a.ad
+            ));
+            return Outcome::Fallback("the main page changed");
+        };
+        lost = None;
         let ready = v.as_ref().is_some_and(|v| v.ready && v.id.as_deref() == Some(&plan.to));
         if ready && !seen_ready {
             seen_ready = true;
@@ -291,9 +336,11 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         (Some(a), Some(b)) if plan.effects.tempo && ((a / b) - 1.0).abs() <= MAX_RATE_DELTA => a / b,
         _ => 1.0,
     };
+    let mut sent_level = level(&a);
     let go = json!({
-        "at_ms": at_ms, "dur_ms": plan.duration_ms, "curve": plan.curve,
-        "rate": rate, "bass_swap": plan.effects.bass_swap, "beat_ms": beat_ms,
+        "play_ms": at_ms - (plan.in_ms - in_s * 1000.0) / rate, "at_ms": at_ms, "dur_ms": plan.duration_ms,
+        "curve": plan.curve, "rate": rate, "bass_swap": plan.effects.bass_swap, "beat_ms": beat_ms,
+        "level": sent_level,
     });
     command(
         app,
@@ -301,6 +348,10 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         json!({ "to": plan.to, "at_ms": at_ms, "dur_ms": plan.duration_ms,
         "bass_swap": plan.effects.bass_swap, "beat_ms": beat_ms }),
     );
+    // No sound from the voice unless the page will hold the next track for it.
+    if !accepted(site) {
+        return Outcome::Fallback("the page did not accept the overlap");
+    }
     let _ = voice.eval(format!("window.__feathertuneDeck?.go({go})"));
 
     // The overlap, then the take-over.
@@ -326,6 +377,14 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         if v.ad {
             return Outcome::AdOnVoice;
         }
+        // The page went back to one player by itself: the voice must not sound over it.
+        if !a.overlap {
+            return Outcome::Fallback("the page dropped the overlap");
+        }
+        if let Some(why) = &v.blocked {
+            log(format_args!("the voice could not play: {}", clean(why)));
+            return Outcome::Fallback("the voice could not play");
+        }
         if let Some(error) = &v.error {
             log(format_args!("voice error: {}", clean(error)));
         }
@@ -342,7 +401,13 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
         if on != Some(plan.from.as_str()) && on != Some(plan.to.as_str()) {
             return Outcome::Fallback("another track started");
         }
+        let now_level = level(&a);
+        if now_level != sent_level {
+            let _ = voice.eval(format!("window.__feathertuneDeck?.volume({now_level})"));
+            sent_level = now_level;
+        }
         if let Some(done) = a.done_at {
+            log(format_args!("take-over {:?} ms from the voice, after {} seeks", a.drift, a.seeks));
             let _ = voice
                 .eval(format!("window.__feathertuneDeck?.fadeOut({})", json!({ "at_ms": done, "ms": HANDOFF_MS })));
             std::thread::sleep(Duration::from_millis(1000));
@@ -354,6 +419,18 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, plan: &Plan, bpm: Tempo
             log(format_args!("handoff at {:.1} s of the next track", v.t));
         }
     }
+}
+
+/// Whether the main page took the `overlap` command, within `ACCEPT_TIMEOUT`.
+fn accepted(site: &Webview) -> bool {
+    let asked = Instant::now();
+    while asked.elapsed() < ACCEPT_TIMEOUT {
+        if read::<Main>(site, MAIN_POLL).is_some_and(|a| a.overlap) {
+            return true;
+        }
+        std::thread::sleep(ACCEPT_POLL);
+    }
+    false
 }
 
 /// A command for the main page's audio module (run once there, see mixes.rs).

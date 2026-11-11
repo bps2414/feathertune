@@ -9,8 +9,8 @@
 //! ```
 //!
 //! For the current track and the next one the page gets one transition (`plan`): the pair's, else
-//! the playlist's when its mix is on (auto: from both tracks' analysis), else none (the global
-//! crossfade). Where the player plays from (playlist, next track, queue) comes from `player_state`
+//! the playlist's when its mix is on (auto: from both tracks' analysis), else the global crossfade's
+//! (`global`). Where the player plays from (playlist, next track, queue) comes from `player_state`
 //! (`observe`) and is only used as data: to pick the transition and to list the playlist in the Mix
 //! tab. The page's only other request here is `mix_open`, which opens the Mix tab on a pair.
 
@@ -26,7 +26,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::audio_facts::{Facts, Store as FactsStore};
 use crate::player::{Context, QueueItem, valid_id, valid_list};
-use crate::settings::Live;
+use crate::settings::{AudioSettings, Live};
 
 pub const MAX_PAIRS: usize = 2000;
 /// 32 bars at 128 BPM is about this long.
@@ -182,6 +182,20 @@ pub fn plan(mix: Option<&Mix>, from: &str, to: &str, a: Option<&Facts>, b: Optio
         "mode": if d.auto { "auto" } else { "playlist" }, "from": from, "to": to, "out_ms": out_ms,
         "in_ms": in_ms, "duration_ms": duration_ms, "curve": curve, "effects": effects,
     }))
+}
+
+/// The global crossfade as a transition, so it overlaps through the voice too. No `out_ms`: the page
+/// fades at the end minus the fade, or before the final silence once it is known. `None` when off.
+pub fn global(from: &str, to: &str, a: &AudioSettings) -> Option<Value> {
+    let duration_ms = a.crossfade_ms.min(crate::audio::MAX_CROSSFADE_MS);
+    let curve = if crate::audio::CURVES.contains(&a.curve.as_str()) { a.curve.as_str() } else { "equal_power" };
+    let effects = Effects { echo: a.echo_out, ..Effects::default() };
+    (duration_ms > 0).then(|| {
+        json!({
+            "mode": "global", "from": from, "to": to, "out_ms": null, "in_ms": 0,
+            "duration_ms": duration_ms, "curve": curve, "effects": effects,
+        })
+    })
 }
 
 /// Camelot codes that mix well: the same, one step round the wheel, or the same number.
@@ -454,20 +468,31 @@ pub fn page_facts(app: &AppHandle, id: &str) -> Option<Value> {
     Some(facts)
 }
 
+/// The transition from `from` into the next track: the mix's (`plan`), else the global crossfade's.
+pub fn transition(app: &AppHandle, from: &str) -> Option<Value> {
+    let live = app.state::<Live>();
+    if !live.plugin("crossfade") {
+        return None;
+    }
+    let mixes = app.try_state::<Mixes>()?;
+    let (list, next) = mixes.now();
+    let to = next?.id;
+    if from == to {
+        return None;
+    }
+    let store = app.state::<FactsStore>();
+    let mix = list.as_deref().and_then(|l| mixes.load(l));
+    plan(mix.as_ref(), from, &to, store.load(from).as_ref(), store.load(&to).as_ref())
+        .or_else(|| global(from, &to, &live.get().audio))
+}
+
 /// What the audio page module gets about mixes: the transition from `current` into the next
 /// track, the next track's facts and the playlists whose mix is on.
 pub fn page_data(app: &AppHandle, current: Option<&str>) -> Value {
     let Some(mixes) = app.try_state::<Mixes>() else { return json!({}) };
     let (list, next) = mixes.now();
     let next_id = next.as_ref().map(|n| n.id.as_str());
-    let store = app.state::<FactsStore>();
-    let transition = match (current, next_id) {
-        (Some(from), Some(to)) if app.state::<Live>().plugin("crossfade") => {
-            let mix = list.as_deref().and_then(|l| mixes.load(l));
-            plan(mix.as_ref(), from, to, store.load(from).as_ref(), store.load(to).as_ref())
-        }
-        _ => None,
-    };
+    let transition = current.and_then(|from| transition(app, from));
     json!({
         "list": list,
         "next": next_id,
@@ -538,6 +563,22 @@ mod tests {
         let p = plan(Some(&mix), A, B, None, None).unwrap();
         assert_eq!((p["mode"].as_str(), p["out_ms"].as_u64(), p["in_ms"].as_u64()), (Some("pair"), Some(5), Some(7)));
         assert_eq!(plan(Some(&mix), B, A, None, None).unwrap()["mode"], "auto");
+    }
+
+    #[test]
+    fn the_global_crossfade_is_a_transition_unless_it_is_off() {
+        let mut a = AudioSettings { echo_out: true, ..AudioSettings::default() };
+        let t = global(A, B, &a).unwrap();
+        assert_eq!((t["mode"].as_str(), t["duration_ms"].as_u64()), (Some("global"), Some(6000)));
+        assert!(t["out_ms"].is_null());
+        assert_eq!(t["in_ms"], 0);
+        assert_eq!(t["effects"]["echo"], true);
+        a.curve = "wobbly".into();
+        a.crossfade_ms = 90_000;
+        let t = global(A, B, &a).unwrap();
+        assert_eq!((t["curve"].as_str(), t["duration_ms"].as_u64()), (Some("equal_power"), Some(12_000)));
+        a.crossfade_ms = 0;
+        assert!(global(A, B, &a).is_none());
     }
 
     #[test]

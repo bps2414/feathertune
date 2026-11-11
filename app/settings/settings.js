@@ -373,6 +373,12 @@ const renderAudio = (a) => {
     bands[i].input.value = String(v);
     bands[i].db.textContent = dbText(v);
   });
+  const last = a.last_transition;
+  $('last-transition').hidden = !last;
+  if (last) {
+    const mode = last.overlapped ? t('Last transition: overlap.') : tf('Last transition: fade only ({}).', t(last.why));
+    $('last-transition').textContent = last.off ? `${mode} ${t('Overlap is off until the app restarts.')}` : mode;
+  }
 };
 // A preset chosen from the list moves the bands to it.
 $('eq-preset').addEventListener('change', () => setTimeout(load, 100));

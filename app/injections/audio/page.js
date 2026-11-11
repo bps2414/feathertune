@@ -419,6 +419,8 @@ const bassCut = { on: false };
 let overlap = null;
 // The tempo effect after a take-over: { from, start, len } in video seconds.
 let rateBack = null;
+// The track taken over from the voice: entered late, it is measured from where it is (see startAnalysis).
+let lateEntry = null;
 // A mix's transition being previewed from the Mix tab (a pair, while its `from` track plays).
 let preview = null;
 // After a mix's fade: where its incoming track starts, { from, id, at }.
@@ -576,6 +578,7 @@ const startTrack = (v, id) => {
   faded = false;
   preview = null;
   ownSeek = null;
+  lateEntry = null;
   stopSweep();
   stopBassCut();
   if (rateBack) {
@@ -632,12 +635,15 @@ const onTime = (v) => {
   const t = songTime(v);
   if (analysis && Math.abs(analysis.t - t) > 0.5) {
     // Out of step (buffering): the envelope goes on from here, the beat window is lost.
-    if (inBeatWindow(analysis)) analysis.beatOk = false;
+    if (inBeatWindow(analysis) && analysis.beatOk) {
+      analysis.beatOk = false;
+      analysis.beatLost = [t, analysis.t - t];
+    }
     // Before any sound was heard: where it starts is not known (the time skipped was not heard).
     if (analysis.soundAt === null) analysis.leadLost = true;
     analysis.t = t;
   }
-  // A track that starts under the transition voice is entered late: not measured.
+  // While the transition voice plays the track's start, this page is not heard: not measured yet.
   if (id && !overlap) startAnalysis(v, id);
   skipSilence(v, t);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
@@ -764,6 +770,8 @@ const takeOver = (v) => {
   g.setValueAtTime(0, c);
   g.linearRampToValueAtTime(1, c + HANDOFF_S);
   overlap.done_at = at;
+  overlap.drift = Math.round((songTime(v) - voiceAt(wall())) * 1000);
+  lateEntry = overlap.to;
   if (v.playbackRate !== 1) {
     const bpm = facts()?.bpm;
     rateBack = { from: v.playbackRate, start: songTime(v), len: bpm ? (RATE_BACK_BEATS * 60) / bpm : 16 };
@@ -948,7 +956,9 @@ const dropTap = () => {
 const startAnalysis = (v, id) => {
   if (!on('track_analysis') || analysed.has(id) || analysis || ad || v.playbackRate !== 1) return;
   const length = songLength(v);
-  if (facts()?.id === id || songTime(v) > 0.5 || !Number.isFinite(length)) return;
+  // A track taken over from the voice has no start to hear: its lead-in stays unknown, the rest holds.
+  const late = lateEntry === id;
+  if (facts()?.id === id || (songTime(v) > 0.5 && !late) || !Number.isFinite(length)) return;
   const sr = ctx.sampleRate;
   analysis = {
     id,
@@ -964,10 +974,12 @@ const startAnalysis = (v, id) => {
     bins: new Float32Array(Math.min(A.MAX_BINS, Math.ceil(length / A.BIN_S) + 1) * 4),
     covered: 0,
     soundAt: null,
-    leadLost: false,
+    leadLost: late,
     onsets: [],
     onsetFrom: null,
     beatOk: true,
+    // Where and by how much it went out of step, for the diagnostics.
+    beatLost: null,
     chroma: new Float32Array(12),
     chromaFrames: 0,
   };
@@ -983,7 +995,7 @@ const stopAnalysis = (send) => {
   dropTap();
   if (send) {
     const facts = finish(a);
-    if (facts) window.__TAURI_INTERNALS__?.invoke('audio_facts', { facts: JSON.stringify(facts) }).catch(() => {});
+    if (facts) window.__TAURI_INTERNALS__?.invoke('audio_facts', { facts: JSON.stringify(facts), beatLost: a.beatLost }).catch(() => {});
   }
 };
 
@@ -1513,8 +1525,8 @@ const onMedia = (e) => {
       break;
     case 'loadedmetadata':
     case 'durationchange':
-      // A new duration: the fade is planned again.
-      if (!armed) fade = null;
+      // A new duration: the fade is planned again, in place (a gapless queue changes it near the end).
+      if (!armed) fade = planFade(v);
       if (analysis && data?.facts?.current?.id === analysis.id) stopAnalysis(false);
       break;
     case 'playing':
@@ -1538,7 +1550,8 @@ feathertune.audio = Object.freeze({
     if (off) return;
     // New crossfade settings: planned again (a fade under way is cut if the plugin went off).
     if (nodes && armed && !on('crossfade')) cancelFade();
-    if (!armed) fade = null;
+    // In place: the transition voice reads `fade`, and a command in this same call needs it.
+    if (!armed) fade = nodes && video ? planFade(video) : null;
     // Settings arrived after the first play: start now on the playing element.
     const playing = [...document.querySelectorAll('video')].find((v) => !v.paused);
     if (!ctx && playing && anyOn()) {
@@ -1559,6 +1572,8 @@ feathertune.audio = Object.freeze({
       t: v ? songTime(v) : 0,
       rate: v ? v.playbackRate : 1,
       paused: v ? v.paused : true,
+      volume: v ? v.volume : 1,
+      muted: v ? v.muted : false,
       ad,
       out: fade && !ad && nodes ? fade.out : null,
       dur: fade ? fade.dur : null,
@@ -1570,6 +1585,8 @@ feathertune.audio = Object.freeze({
       overlap: !!overlap,
       waiting: !!overlap?.waiting,
       done_at: overlap?.done_at ?? null,
+      drift: overlap?.drift ?? null,
+      seeks: overlap?.tries ?? 0,
       error: !!v?.error,
     };
   },

@@ -200,7 +200,8 @@
           </div>
           <input type="checkbox" class="switch" data-key="audio.echo_out" aria-label="Echo out">
         </div>
-        <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded.</p>
+        <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded. The fade into the next track only applies when the two cannot overlap.</p>
+        <p id="last-transition" class="hint" role="status" hidden></p>
       </div>
       <div class="card" data-plugin="track_analysis"></div>
       <div class="card" data-plugin="lyric_colors"></div>

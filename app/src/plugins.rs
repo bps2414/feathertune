@@ -297,11 +297,13 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "crossfade",
         name: "Crossfade",
-        description: "Fades each track out into the next (6 s, equal power by default; Experimental tab, with the \
-                      mixes). The site still picks the next track, so repeat, shuffle and autoplay work as usual. \
-                      Never over or into an ad, never on repeat-one.",
-        cost: "Inside the noise: -1.3 points of CPU and -1 MB private against off (3 runs); the transition itself is \
-               not measured.",
+        description: "Fades each track into the next (6 s, equal power by default; Experimental tab, with the mixes). \
+                      A hidden second player plays the start of the next track during the fade, so the two overlap; \
+                      when it cannot, the track fades out and the next one fades in. The site still picks the next \
+                      track, so repeat, shuffle and autoplay work as usual. Never over or into an ad, never on \
+                      repeat-one.",
+        cost: "Inside the noise: -1.3 points of CPU and -1 MB private against off (3 runs); the transition and its \
+               second player are not measured yet.",
         // Experimental: off until it is reliable (see docs/DESIGN.md, Plugins).
         default_on: false,
         live: true,

@@ -1,8 +1,8 @@
 // The transition voice (deck.rs): the only script of the hidden `deck` webview, which has no
 // capability (it can call nothing). It loads the next track, holds every play() until Rust says
-// `go`, and plays only the start of the track during a mix's overlap, through its own small graph
-// (gain and a low shelf for the bass swap). Rust reads `poll()` with ExecuteScript and treats what
-// it returns as untrusted data.
+// `go`, and plays only the start of the track during an overlap, through its own small graph (a low
+// shelf for the bass swap, the fade's gain and a gain that matches the main page's volume). Rust reads
+// `poll()` with ExecuteScript and treats what it returns as untrusted data.
 // - An ad is never played here, not even muted or hidden: while the player shows one, nothing
 //   plays and `poll()` says so (Rust then closes this webview and falls back to one player). While
 //   the page still has no player nothing plays either, and `poll()` says `loading`, not `ad`.
@@ -20,6 +20,7 @@ const RAMP = 0.03;
 // The bass swap: the low shelf of the incoming track, held down until halfway.
 const BASS_HZ = 200;
 const BASS_CUT_DB = -24;
+const MAX_LEVEL = 4;
 
 const wall = () => performance.timeOrigin + performance.now();
 const realPlay = HTMLMediaElement.prototype.play;
@@ -27,10 +28,14 @@ let allowed = false;
 let target = null;
 let seeked = false;
 let started = false;
+// Waiting for its moment to play, after `go`.
+let pending = false;
+let blocked = null;
 let stopped = false;
 let ctx = null;
 let gain = null;
 let bass = null;
+let level = null;
 
 // Nothing plays until `go`: play() waits (the site's promise stays pending), autoplay is paused.
 HTMLMediaElement.prototype.play = function () {
@@ -89,6 +94,30 @@ const stop = () => {
   setTimeout(() => v?.pause(), 60);
 };
 
+// Plays, unless it was stopped or an ad showed up meanwhile.
+const begin = () => {
+  if (allowed || stopped) return;
+  if (adNow()) return stop();
+  pending = false;
+  allowed = true;
+  realPlay.call(video()).catch((e) => (blocked = String(e?.name)));
+};
+// `begin` in `s` seconds, on the audio clock: this page is hidden, and its timers are held back (the
+// timer is there in case the clock does not run).
+const beginIn = (s) => {
+  pending = true;
+  const clock = ctx.createConstantSource();
+  const silent = ctx.createGain();
+  silent.gain.value = 0;
+  clock.connect(silent).connect(ctx.destination);
+  clock.onended = begin;
+  clock.start();
+  clock.stop(ctx.currentTime + s);
+  setTimeout(begin, (s + 0.25) * 1000);
+};
+// The gain that makes this <video> as loud as the main page's (its own volume is the site's to set).
+const levelOf = (l, v) => (l.muted || !v.volume ? 0 : Math.min(MAX_LEVEL, l.volume / v.volume));
+
 window.__feathertuneDeck = Object.freeze({
   // The state, and (the first time) where to wait: `in_s`, the incoming track's start.
   poll: (inS) => {
@@ -108,15 +137,17 @@ window.__feathertuneDeck = Object.freeze({
       loading: !player(),
       ready: !!v && seeked && v.readyState >= 3 && !held,
       started,
-      paused: v ? v.paused : true,
+      paused: v ? v.paused && !pending : true,
       t: v ? v.currentTime : 0,
       rate: v ? v.playbackRate : 1,
       wall: wall(),
       error: errorOf(v),
+      blocked,
     };
   },
-  // Plays now, silent until `at_ms`, then fades in along the curve over `dur_ms`. `rate`: the tempo
-  // effect (preserving pitch). `bass_swap`: the lows held down until halfway, swapped in `beat_ms`.
+  // Plays from `play_ms`, silent until `at_ms`, then fades in along the curve over `dur_ms`. `rate`:
+  // the tempo effect (preserving pitch). `bass_swap`: the lows held down until halfway, swapped in
+  // `beat_ms`. `level`: the main page's volume.
   go: (o) => {
     const v = video();
     if (!v || started || adNow()) return false;
@@ -128,7 +159,9 @@ window.__feathertuneDeck = Object.freeze({
     bass.type = 'lowshelf';
     bass.frequency.value = BASS_HZ;
     bass.gain.value = o.bass_swap ? BASS_CUT_DB : 0;
-    source.connect(bass).connect(gain).connect(ctx.destination);
+    level = ctx.createGain();
+    level.gain.value = levelOf(o.level, v);
+    source.connect(bass).connect(gain).connect(level).connect(ctx.destination);
     const start = at(o.at_ms);
     const dur = Math.max(0.05, o.dur_ms / 1000);
     gain.gain.setValueAtTime(0, ctx.currentTime);
@@ -146,10 +179,16 @@ window.__feathertuneDeck = Object.freeze({
       v.preservesPitch = true;
       v.playbackRate = o.rate;
     }
-    allowed = true;
     started = true;
-    realPlay.call(v).catch(() => {});
+    const wait = (o.play_ms - wall()) / 1000;
+    if (wait > 0.05) beginIn(wait);
+    else begin();
     return true;
+  },
+  // The main page's volume changed.
+  volume: (l) => {
+    const v = video();
+    if (level && v) level.gain.setTargetAtTime(levelOf(l, v), ctx.currentTime, RAMP);
   },
   // The main page took over: down to silence over `ms` from `at_ms`, then paused.
   fadeOut: (o) => {

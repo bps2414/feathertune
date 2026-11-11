@@ -15,6 +15,12 @@
 // public API has the track's own; `feathertune.clock` (for every module) turns the video's time into
 // the track's. The offset only changes at a track change, so it moves only by more than a second (the
 // player's time may be a moment behind the video's).
+// The player's duration can be wrong too, under or over the track's (30 s, 50 s, 274 s, then 312 s for
+// a 295 s track): the playing queue entry's own length (`queueLength`, read with the queue in `where`)
+// wins when the two are far apart for the same video.
+let queueLength = { id: null, secs: 0 };
+const trusted = (secs, id) =>
+  secs > 0 && queueLength.id === id && queueLength.secs > 0 && Math.abs(secs - queueLength.secs) > 3 ? queueLength.secs : secs;
 let trackOffset = 0;
 const offsetOf = (video) => {
   try {
@@ -29,11 +35,15 @@ const offsetOf = (video) => {
 feathertune.clock = Object.freeze({
   // The track's time (s) at the video's time now.
   time: (video) => video.currentTime - offsetOf(video),
-  // The track's length (s): the player's, else the video's (no queue appended after it).
+  // The track's length (s): the player's checked against the queue's, else the queue's, else the
+  // video's (no queue appended after it).
   duration: (video) => {
     try {
-      const d = document.querySelector('#movie_player')?.getDuration?.();
-      if (Number.isFinite(d) && d > 0) return d;
+      const p = document.querySelector('#movie_player');
+      const id = p?.getVideoData?.()?.video_id;
+      const d = p?.getDuration?.();
+      if (Number.isFinite(d) && d > 0) return trusted(d, id);
+      if (queueLength.id === id && queueLength.secs > 0) return queueLength.secs;
     } catch {}
     return video.duration;
   },
@@ -112,16 +122,13 @@ const lengthOf = (video) => {
 
 // The playing queue entry's own length ("3:56" is 236), read with the queue in `where`. The player's
 // getDuration sometimes answers only what is loaded so far (20 s, then 38 s, then 50 s...), which makes the
-// lyrics sources miss the track; when the two are far apart for the same video, the queue's wins.
-let queueLength = { id: null, secs: 0 };
+// lyrics sources miss the track and the crossfade plan its fade too early (see `queueLength`).
 const lengthSeconds = (r) => {
   const t = r?.lengthText?.simpleText ?? (r?.lengthText?.runs || []).map((x) => x.text).join('');
   const parts = String(t || '').split(':').map(Number);
   if (parts.length > 3 || parts.some((n) => !Number.isInteger(n) || n < 0)) return 0;
   return parts.reduce((total, n) => total * 60 + n, 0);
 };
-const trusted = (secs, id) =>
-  secs > 0 && queueLength.id === id && queueLength.secs > 0 && Math.abs(secs - queueLength.secs) > 3 ? queueLength.secs : secs;
 
 // While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
 const read = (video) => {
@@ -152,10 +159,19 @@ const item = (entry) => {
   if (!r?.videoId || !/^[A-Za-z0-9_-]{11}$/.test(r.videoId)) return null;
   return { id: r.videoId, title: text(r.title), artist: text(r.shortBylineText || r.longBylineText).split(' • ')[0] };
 };
+// The playlist the player is on: the player's own (the URL only has `list=` on the player page), else the
+// URL's.
+const playlistId = () => {
+  let id = null;
+  try {
+    id = document.querySelector(SELECTORS.player)?.getPlaylistId?.();
+  } catch {}
+  return typeof id === 'string' && id ? id : new URLSearchParams(location.search).get('list');
+};
 // The playlist, the next track (repeat-one: this one; at the end: the first on repeat-all, else
 // autoplay's first), the queue and the playing track's index in it (`current`, null when unknown).
 const where = () => {
-  const list = new URLSearchParams(location.search).get('list');
+  const list = playlistId();
   const out = { list: list && /^[A-Za-z0-9_-]{1,64}$/.test(list) ? list : null, next: null, queue: [], current: null };
   let q = null;
   try {
@@ -164,7 +180,11 @@ const where = () => {
   if (!q || !Array.isArray(q.items)) return out;
   const items = q.items.map(item);
   out.queue = items.filter(Boolean).slice(0, MAX_QUEUE);
-  const i = q.selectedItemIndex;
+  // The site's index lags a track change: the playing track's own entry, when it has one.
+  const selected = q.selectedItemIndex;
+  const id = videoId();
+  const found = items[selected]?.id === id ? selected : items.findIndex((x) => x?.id === id);
+  const i = found >= 0 ? found : selected;
   if (Number.isInteger(i)) {
     const r = q.items[i]?.playlistPanelVideoRenderer || q.items[i]?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
     queueLength = { id: r?.videoId ?? null, secs: lengthSeconds(r) };

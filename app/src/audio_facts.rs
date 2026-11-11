@@ -144,14 +144,19 @@ impl Store {
 }
 
 /// The command (see the module doc). Invalid payloads are dropped; nothing here triggers an action.
+/// `beat_lost`: where the beat window went out of step and by how much (s), only logged.
 #[tauri::command]
-pub fn audio_facts(webview: Webview, app: AppHandle, facts: String) {
+pub fn audio_facts(webview: Webview, app: AppHandle, facts: String, beat_lost: Option<[f64; 2]>) {
     if webview.label() != "site" {
         return;
     }
     let Some(store) = app.try_state::<Store>() else { return };
     match parse(&facts) {
-        Some(f) => store.save(&f),
+        Some(f) => {
+            let (bpm, id) = (f.bpm, &f.id);
+            crate::diag::log("analysis", format_args!("{id}: bpm {bpm:?}, beat window lost: {beat_lost:?}"));
+            store.save(&f);
+        }
         None => eprintln!("audio_facts: invalid payload dropped ({} bytes)", facts.len()),
     }
 }

@@ -40,7 +40,7 @@ const LABEL: &str = "deck";
 const SCRIPT: &str = include_str!("../injections/deck/page.js");
 const MAIN_POLL: &str = "window.__feathertune?.audio?.deck?.() ?? null";
 /// The voice opens this long before the fade (main page time), and not with less than the minimum.
-const PREPARE_S: f64 = 40.0;
+const PREPARE_S: f64 = 25.0;
 const MIN_PREPARE_S: f64 = 10.0;
 /// `overlap` is sent this long before the fade, and `go` once the page accepts it; the voice reaches
 /// its in point at the fade, playing silently before it for up to this long (the track's start

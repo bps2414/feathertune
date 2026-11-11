@@ -1,7 +1,7 @@
 ! feathertune privacy list: third-party analytics and session-recording hosts, nothing else.
 ! Written for this project (no third-party list is copied here). Never add ad networks or
 ! anything on the player's own domains: privacy.rs also refuses to filter those, whatever this
-! file says. Extra rules (for example a privacy list such as EasyPrivacy) go in
+! file says. Only ||host^ rules are read (with no option or only $third-party). Extra ones go in
 ! privacy-list.txt in the profile folder, not here.
 ||google-analytics.com^$third-party
 ||googletagmanager.com^$third-party

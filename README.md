@@ -4,7 +4,7 @@
 
 <h1 align="center">feathertune</h1>
 
-<p align="center"><strong>Your music, as a real Windows app.</strong><br>A 3 MB installer, no bundled Chromium, word-by-word synced lyrics, a mini player and media keys.</p>
+<p align="center"><strong>Your music, as a real Windows app.</strong><br>A ~4.5 MB installer, no bundled Chromium, word-by-word synced lyrics, a mini player and media keys.</p>
 
 <p align="center">
   <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Download</strong></a> ·
@@ -25,7 +25,7 @@
 
 ## Why feathertune
 
-- **Light.** It uses the WebView2 runtime that already ships with Windows instead of bundling Chromium like Electron apps do. Measured (process tree, playing): ~430 MB private memory and ~4% of one CPU core with the window open, ~190 MB of RAM in the tray, about 2 s to start, a ~3 MB installer. Details in [docs/DESIGN.md](docs/DESIGN.md).
+- **Light.** It uses the WebView2 runtime that already ships with Windows instead of bundling Chromium like Electron apps do. Measured (process tree, playing, at the start of a session): ~510 MB private memory with the window open (its CPU depends on the track: 4–13% of one core), ~225 MB of RAM and ~4% of one core in the tray, about 2 s to start, a ~4.5 MB installer. Over a long session in the tray the memory still grows (being looked into). Details in [docs/DESIGN.md](docs/DESIGN.md).
 - **A desktop app, not a browser tab.** Its own title bar in the album's colors, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
 - **Lyrics that follow the voice.** Word-by-word synced lyrics from four open sources, translated line by line, also floating over the desktop.
 - **The official website, untouched.** You sign in on the site itself. Ads are never blocked or altered, and audio is never downloaded.
@@ -57,7 +57,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**
-- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
+- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks, both playing at once during the fade (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
 - Track analysis: the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
 - Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) in the Mix section of the settings window's Experimental tab. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
 
@@ -84,7 +84,7 @@ What has not been checked yet is listed in [docs/DESIGN.md](docs/DESIGN.md#not-v
 
 Download `feathertune_<version>_x64-setup.exe` from the [releases](https://github.com/bps2414/feathertune/releases) and run it: per user, no admin, Windows 10/11. Uninstalling asks whether to also delete your data (sign-in, `config.toml`); it is kept unless you tick the box.
 
-The phone remote's Android APK (`feathertune-remote-<version>.apk`) is attached to the releases that change it. Turn on Phone remote in the settings' Experimental tab on the PC, then scan the QR code from the phone app.
+The phone remote's Android APK (`feathertune-remote-<version>.apk`) is attached to every release (rebuilt only when it changes). Turn on Phone remote in the settings' Experimental tab on the PC, then scan the QR code from the phone app.
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 

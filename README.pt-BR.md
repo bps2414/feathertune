@@ -4,7 +4,7 @@
 
 <h1 align="center">feathertune</h1>
 
-<p align="center"><strong>Sua música, como um app de Windows de verdade.</strong><br>Instalador de 3 MB, sem Chromium embutido, letra sincronizada palavra por palavra, mini player e teclas de mídia.</p>
+<p align="center"><strong>Sua música, como um app de Windows de verdade.</strong><br>Instalador de ~4,5 MB, sem Chromium embutido, letra sincronizada palavra por palavra, mini player e teclas de mídia.</p>
 
 <p align="center">
   <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Baixar</strong></a> ·
@@ -25,7 +25,7 @@
 
 ## Por que o feathertune
 
-- **Leve.** Usa o runtime WebView2 que já vem no Windows em vez de embutir um Chromium, como fazem os apps Electron. Medido (árvore de processos, tocando): ~430 MB de memória privada e ~4% de um núcleo com a janela aberta, ~190 MB de RAM na bandeja, cerca de 2 s para abrir, instalador de ~3 MB. Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
+- **Leve.** Usa o runtime WebView2 que já vem no Windows em vez de embutir um Chromium, como fazem os apps Electron. Medido (árvore de processos, tocando, no início da sessão): ~510 MB de memória privada com a janela aberta (a CPU depende da faixa: 4–13% de um núcleo), ~225 MB de RAM e ~4% de um núcleo na bandeja, cerca de 2 s para abrir, instalador de ~4,5 MB. Numa sessão longa na bandeja a memória ainda cresce (em investigação). Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
 - **Um app de desktop, não uma aba do navegador.** Barra de título própria nas cores do álbum, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
 - **Letra que acompanha a voz.** Letra sincronizada palavra por palavra de quatro fontes abertas, traduzida linha a linha, também flutuando sobre a área de trabalho.
 - **O site oficial, intocado.** Você faz login no próprio site. Anúncios nunca são bloqueados nem alterados, e o áudio nunca é baixado.
@@ -57,7 +57,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
-- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
+- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas, com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
 - Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
 - Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na seção Mix da aba Experimental da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
 
@@ -84,7 +84,7 @@ O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR
 
 Baixe `feathertune_<versão>_x64-setup.exe` nos [releases](https://github.com/bps2414/feathertune/releases) e rode: por usuário, sem admin, Windows 10/11. Ao desinstalar, ele pergunta se também apaga seus dados (login, `config.toml`); ficam guardados se a caixa não for marcada.
 
-O APK Android do controle remoto (`feathertune-remote-<versão>.apk`) vai anexado aos releases que o alteram. Ligue o Controle pelo celular na aba Experimental das configurações, no PC, e escaneie o QR code com o app do celular.
+O APK Android do controle remoto (`feathertune-remote-<versão>.apk`) vai anexado a toda release (refeito só quando ele muda). Ligue o Controle pelo celular na aba Experimental das configurações, no PC, e escaneie o QR code com o app do celular.
 
 O que mudou em cada versão: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
 

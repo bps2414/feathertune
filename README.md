@@ -4,7 +4,7 @@
 
 <h1 align="center">feathertune</h1>
 
-<p align="center"><strong>Your music, as a real Windows app.</strong><br>A ~4.5 MB installer, no bundled Chromium, word-by-word synced lyrics, a mini player and media keys.</p>
+<p align="center"><strong>Your music, as a real Windows app.</strong><br>A ~4.2 MB installer, no bundled Chromium, word-by-word synced lyrics, a mini player and media keys.</p>
 
 <p align="center">
   <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Download</strong></a> ·
@@ -25,7 +25,7 @@
 
 ## Why feathertune
 
-- **Light.** It uses the WebView2 runtime that already ships with Windows instead of bundling Chromium like Electron apps do. Measured (process tree, playing, at the start of a session): ~510 MB private memory with the window open (its CPU depends on the track: 4–13% of one core), ~225 MB of RAM and ~4% of one core in the tray, about 2 s to start, a ~4.5 MB installer. Over a long session in the tray the memory still grows (being looked into). Details in [docs/DESIGN.md](docs/DESIGN.md).
+- **Light.** It uses the WebView2 runtime that already ships with Windows instead of bundling Chromium like Electron apps do. Measured (process tree, playing, at the start of a session): ~510 MB private memory with the window open (its CPU depends on the track: 4–13% of one core), ~225 MB of RAM and ~4% of one core in the tray, about 2 s to start, a ~4.2 MB installer. Over a long session in the tray the memory still grows (being looked into). Details in [docs/DESIGN.md](docs/DESIGN.md).
 - **A desktop app, not a browser tab.** Its own title bar in the album's colors, tray icon, media keys and the Windows media flyout, an always-on-top mini player, and memory trimming while hidden.
 - **Lyrics that follow the voice.** Word-by-word synced lyrics from four open sources, translated line by line, also floating over the desktop.
 - **The official website, untouched.** You sign in on the site itself. Ads are never blocked or altered, and audio is never downloaded.

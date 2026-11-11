@@ -15,7 +15,7 @@ const en = {
   meta: {
     title: 'feathertune: your music, without the weight',
     description:
-      'A light Windows app for the music website you already use. Native title bar, mini player, media keys, synced lyrics word by word, and about 4.5 MB to install.',
+      'A light Windows app for the music website you already use. Native title bar, mini player, media keys, synced lyrics word by word, and about 4.2 MB to install.',
   },
   nav: { github: 'GitHub', language: 'Language' },
   suggest: { text: 'This page is also in Portuguese.', go: 'Ver em português', dismiss: 'Keep English' },
@@ -23,7 +23,7 @@ const en = {
     sung: 'Your music, without the weight.',
     next: 'The music site you already use, in a light Windows app.',
     download: 'Download for Windows',
-    fine: 'Windows 10 and 11. About 4.5 MB, installs without admin, updates itself.',
+    fine: 'Windows 10 and 11. About 4.2 MB, installs without admin, updates itself.',
     source: 'Read the source on GitHub',
     replay: 'Sing it again',
   },
@@ -31,7 +31,7 @@ const en = {
     title: 'Weighed, not guessed',
     lede: 'It uses the WebView2 runtime that already ships with Windows instead of bundling its own Chromium, and does the desktop parts in Rust.',
     stats: [
-      { value: '4.5', unit: 'MB', label: 'to download and install' },
+      { value: '4.2', unit: 'MB', label: 'to download and install' },
       { value: '2', unit: 's', label: 'from click to playing' },
       { value: '225', unit: 'MB', label: 'of memory while it plays from the tray' },
       { value: '4', unit: '%', label: 'of one CPU core while it plays from the tray' },
@@ -98,7 +98,7 @@ const en = {
     ],
     terminal: [
       '$ get the installer',
-      '> 4.5 MB, installs for your user, no admin',
+      '> 4.2 MB, installs for your user, no admin',
       '$ sign in on the site',
       '> your sign-in stays on this PC',
       '$ play',
@@ -121,7 +121,7 @@ const ptBr: Strings = {
   meta: {
     title: 'feathertune: sua música, sem o peso',
     description:
-      'Um app leve para Windows com o site de música que você já usa. Barra de título nativa, mini player, teclas de mídia, letras sincronizadas palavra por palavra e cerca de 4,5 MB para instalar.',
+      'Um app leve para Windows com o site de música que você já usa. Barra de título nativa, mini player, teclas de mídia, letras sincronizadas palavra por palavra e cerca de 4,2 MB para instalar.',
   },
   nav: { github: 'GitHub', language: 'Idioma' },
   suggest: { text: 'This page is also in Portuguese.', go: 'Ver em português', dismiss: 'Keep English' },
@@ -129,7 +129,7 @@ const ptBr: Strings = {
     sung: 'Sua música, sem o peso.',
     next: 'O site de música que você já usa, num app leve para Windows.',
     download: 'Baixar para Windows',
-    fine: 'Windows 10 e 11. Cerca de 4,5 MB, instala sem admin e se atualiza sozinho.',
+    fine: 'Windows 10 e 11. Cerca de 4,2 MB, instala sem admin e se atualiza sozinho.',
     source: 'Ver o código no GitHub',
     replay: 'Cantar de novo',
   },
@@ -137,7 +137,7 @@ const ptBr: Strings = {
     title: 'Pesado, não chutado',
     lede: 'Ele usa o runtime WebView2 que já vem no Windows em vez de carregar um Chromium próprio, e faz a parte de desktop em Rust.',
     stats: [
-      { value: '4,5', unit: 'MB', label: 'para baixar e instalar' },
+      { value: '4,2', unit: 'MB', label: 'para baixar e instalar' },
       { value: '2', unit: 's', label: 'do clique até tocar' },
       { value: '225', unit: 'MB', label: 'de memória tocando da bandeja' },
       { value: '4', unit: '%', label: 'de um núcleo da CPU tocando da bandeja' },
@@ -204,7 +204,7 @@ const ptBr: Strings = {
     ],
     terminal: [
       '$ baixe o instalador',
-      '> 4,5 MB, instala para o seu usuário, sem admin',
+      '> 4,2 MB, instala para o seu usuário, sem admin',
       '$ entre no site',
       '> seu login fica neste PC',
       '$ toque',

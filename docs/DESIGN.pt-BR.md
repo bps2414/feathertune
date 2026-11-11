@@ -207,7 +207,7 @@ Critério: `Win32_Process`, soma da árvore de processos; privado = `PrivatePage
 |---|---|---|
 | Janela aberta | 16–32% de CPU, 672 MB privados, 1009 MB de WS | ≤ 4% de CPU, ≤ 480 MB privados, ≤ 750 MB de WS |
 | Na bandeja | igual a aberto | ≤ 260 MB de WS |
-| Instalador | ~100 MB | poucos MB (feathertune: ~4,5 MB na 0.7.1, eram ~3 MB nas primeiras versões) |
+| Instalador | ~100 MB | poucos MB (feathertune: ~4,2 MB na 0.7.3, 4,5 MB na 0.7.1, ~3 MB nas primeiras versões) |
 
 - As linhas de 21/10/2026 são as rodadas de um dia (3 cada, em ordem embaralhada, com um aquecimento antes) numa faixa fixa diferente da das linhas de 20/10/2026, e a CPU com a janela aberta depende da faixa: compare só linhas do mesmo dia. Com todos os plugins desligados a janela custa 3,3% de CPU e 439 MB privados, então os plugins juntos custam uns 9,6 pontos de CPU e 70 MB privados; o resto é a casca, o site e o runtime. Nenhum build sem a casca nativa rodou nesse dia, então a parte da casca ainda não está separada. A CPU com a janela aberta (12,9%) fica bem acima da meta de ≤ 4% nesta faixa; na bandeja é 3,6%.
 - Ruído: o `launcher` fica desligado sob `--measure`, então a linha dele é a mesma configuração do `base`. Ela marca +2,7 pontos de CPU e −5 MB privados, e o próprio `base` varia 2,8 pontos; então abaixo de uns 3 pontos de CPU e 5 MB privados o número de um plugin não se distingue de zero.

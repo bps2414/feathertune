@@ -207,7 +207,7 @@ Criterion: `Win32_Process`, sum of the process tree; private = `PrivatePageCount
 |---|---|---|
 | Window open | 16–32% CPU, 672 MB private, 1009 MB WS | ≤ 4% CPU, ≤ 480 MB private, ≤ 750 MB WS |
 | In the tray | same as open | ≤ 260 MB WS |
-| Installer | ~100 MB | a few MB (feathertune: ~4.5 MB in 0.7.1, was ~3 MB in the first releases) |
+| Installer | ~100 MB | a few MB (feathertune: ~4.2 MB in 0.7.3, 4.5 MB in 0.7.1, ~3 MB in the first releases) |
 
 - The 2026-10-21 rows are one day's runs (3 each, in a shuffled order, a warm-up first) on a different fixed track from the 2026-10-20 rows, and the window-open CPU depends on the track: compare rows of the same day only. With every plugin off the window costs 3.3% CPU and 439 MB private, so the plugins together cost about 9.6 points of CPU and 70 MB private; what is left is the shell, the site and the runtime. No build without the native shell was run that day, so the shell's own share is still not separated. The window-open CPU (12.9%) is far over the ≤ 4% target on this track; in the tray it is 3.6%.
 - Noise: `launcher` is off under `--measure`, so its row is the same configuration as `base`. It reads +2.7 points of CPU and −5 MB private, and `base` itself spans 2.8 points; so under about 3 points of CPU and 5 MB private a plugin's number cannot be told from zero.

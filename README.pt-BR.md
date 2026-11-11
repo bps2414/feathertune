@@ -4,7 +4,7 @@
 
 <h1 align="center">feathertune</h1>
 
-<p align="center"><strong>Sua música, como um app de Windows de verdade.</strong><br>Instalador de ~4,5 MB, sem Chromium embutido, letra sincronizada palavra por palavra, mini player e teclas de mídia.</p>
+<p align="center"><strong>Sua música, como um app de Windows de verdade.</strong><br>Instalador de ~4,2 MB, sem Chromium embutido, letra sincronizada palavra por palavra, mini player e teclas de mídia.</p>
 
 <p align="center">
   <a href="https://github.com/bps2414/feathertune/releases/latest"><strong>Baixar</strong></a> ·
@@ -25,7 +25,7 @@
 
 ## Por que o feathertune
 
-- **Leve.** Usa o runtime WebView2 que já vem no Windows em vez de embutir um Chromium, como fazem os apps Electron. Medido (árvore de processos, tocando, no início da sessão): ~510 MB de memória privada com a janela aberta (a CPU depende da faixa: 4–13% de um núcleo), ~225 MB de RAM e ~4% de um núcleo na bandeja, cerca de 2 s para abrir, instalador de ~4,5 MB. Numa sessão longa na bandeja a memória ainda cresce (em investigação). Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
+- **Leve.** Usa o runtime WebView2 que já vem no Windows em vez de embutir um Chromium, como fazem os apps Electron. Medido (árvore de processos, tocando, no início da sessão): ~510 MB de memória privada com a janela aberta (a CPU depende da faixa: 4–13% de um núcleo), ~225 MB de RAM e ~4% de um núcleo na bandeja, cerca de 2 s para abrir, instalador de ~4,2 MB. Numa sessão longa na bandeja a memória ainda cresce (em investigação). Detalhes em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md).
 - **Um app de desktop, não uma aba do navegador.** Barra de título própria nas cores do álbum, ícone na bandeja, teclas de mídia e o flyout de mídia do Windows, um mini player sempre no topo e redução de memória enquanto escondido.
 - **Letra que acompanha a voz.** Letra sincronizada palavra por palavra de quatro fontes abertas, traduzida linha a linha, também flutuando sobre a área de trabalho.
 - **O site oficial, intocado.** Você faz login no próprio site. Anúncios nunca são bloqueados nem alterados, e o áudio nunca é baixado.

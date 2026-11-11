@@ -199,7 +199,7 @@ Para o mantenedor, com o app rodando e uma conta logada:
 
 ## Lançamentos
 
-Android: um APK anexado ao release do GitHub (feito pelo job `android` do CI a cada tag `v*`, assinado sempre com a mesma chave de debug para instalar por cima do anterior), talvez uma loja depois. iOS: EAS Build mais TestFlight exige a conta de desenvolvedor Apple do mantenedor; até lá, só Android. A versão de `mobile/` é separada da do desktop; o que precisa bater é a faixa `min`..`v` da mensagem `hello`.
+Android: um APK anexado ao release do GitHub (feito pelo job `android` do CI numa tag `v*` que mudou `mobile/`, senão o anterior anexado de novo, assinado sempre com a mesma chave de debug para instalar por cima do anterior), talvez uma loja depois. iOS: EAS Build mais TestFlight exige a conta de desenvolvedor Apple do mantenedor; até lá, só Android. A versão de `mobile/` é separada da do desktop; o que precisa bater é a faixa `min`..`v` da mensagem `hello`.
 
 ## Como ajudar
 

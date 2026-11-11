@@ -199,7 +199,7 @@ For the maintainer, with the running app and a signed-in account:
 
 ## Releases
 
-Android: an APK attached to the GitHub release (built by the CI `android` job on each `v*` tag, signed with the same debug key every time so it installs over the last one), and maybe a store later. iOS: EAS Build plus TestFlight needs the maintainer's Apple developer account; until then, Android only. Version numbers of `mobile/` are separate from the desktop's; what must match is the `hello` message's `min`..`v` range.
+Android: an APK attached to the GitHub release (built by the CI `android` job on a `v*` tag that changed `mobile/`, else the previous one attached again, signed with the same debug key every time so it installs over the last one), and maybe a store later. iOS: EAS Build plus TestFlight needs the maintainer's Apple developer account; until then, Android only. Version numbers of `mobile/` are separate from the desktop's; what must match is the `hello` message's `min`..`v` range.
 
 ## How to help
 

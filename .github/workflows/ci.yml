@@ -98,15 +98,11 @@ jobs:
       - run: pnpm test
 
   # Fully optimized exe and the NSIS installer (Tauri CLI, `--profile dist`), downloadable from the
-  # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock. On a `v*`
-  # tag it also publishes a GitHub release with the installer (the tag must match the app version), its
-  # notes taken from that version's section of CHANGELOG.md.
+  # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock. It builds
+  # alongside `check`; `release` publishes only once both passed.
   dist:
     if: github.event_name != 'pull_request'
-    needs: check
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -128,9 +124,22 @@ jobs:
             app/target/dist/feathertune.exe
             app/target/dist/bundle/nsis/*-setup.exe
           retention-days: 14
-      - if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        env:
+
+  # On a `v*` tag, once `check` and `dist` passed: the GitHub release with the installer (the tag must
+  # match the app version), its notes taken from that version's section of CHANGELOG.md.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, dist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: feathertune-${{ github.sha }}
+          path: app/out
+      - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
@@ -138,13 +147,15 @@ jobs:
           if [ "$TAG" != "v$version" ]; then echo "tag $TAG does not match version $version"; exit 1; fi
           awk -v v="$version" '/^## /{on = ($2 == v); next} on' ../CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "no CHANGELOG.md section for $version"; exit 1; fi
-          gh release create "$TAG" target/dist/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md
+          gh release create "$TAG" out/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md
 
-  # The phone remote's Android APK, attached to the release that `dist` creates (only on a `v*` tag). It builds
-  # alongside `dist` and waits for the release only to upload. arm64-v8a only (every current phone): the native
-  # code builds once instead of four times. The Gradle cache is written on tags too, since this job never runs
-  # on main. Signed with the debug key of Expo's template, the one every earlier APK used, so a new one
-  # installs over the old; the hash check stops the job if the template ever ships another key.
+  # The phone remote's Android APK, attached to the release that `release` creates (only on a `v*` tag). It
+  # builds alongside `dist` and waits for the release only to upload. When mobile/ did not change since the
+  # previous tag, the previous release's APK is attached again instead of building it (the build is the
+  # longest job). arm64-v8a only (every current phone): the native code builds once instead of four times. The
+  # Gradle cache is written on tags too, since this job never runs on main. Signed with the debug key of Expo's
+  # template, the one every earlier APK used, so a new one installs over the old; the hash check stops the job
+  # if the template ever ships another key.
   android:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -155,32 +166,55 @@ jobs:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+        with:
+          fetch-depth: 0
+      - id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          if [ -n "$prev" ] && git diff --quiet "$prev" HEAD -- . \
+            && gh release download "$prev" --pattern 'feathertune-remote-*.apk' --dir prev; then
+            echo "apk=$(ls prev/*.apk)" >> "$GITHUB_OUTPUT"
+            echo "mobile/ unchanged since $prev: reusing its APK"
+          fi
+      - if: steps.reuse.outputs.apk == ''
+        uses: pnpm/action-setup@v6
         with:
           version: 12
-      - uses: actions/setup-node@v7
+      - if: steps.reuse.outputs.apk == ''
+        uses: actions/setup-node@v7
         with:
           node-version-file: mobile/.nvmrc
           cache: pnpm
           cache-dependency-path: mobile/pnpm-lock.yaml
-      - uses: actions/setup-java@v5
+      - if: steps.reuse.outputs.apk == ''
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec expo prebuild --platform android --clean --no-install
-      - run: echo "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58  android/app/debug.keystore" | sha256sum -c -
-      - uses: gradle/actions/setup-gradle@v5
+      - if: steps.reuse.outputs.apk == ''
+        run: pnpm install --frozen-lockfile
+      - if: steps.reuse.outputs.apk == ''
+        run: pnpm exec expo prebuild --platform android --clean --no-install
+      - if: steps.reuse.outputs.apk == ''
+        run: echo "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58  android/app/debug.keystore" | sha256sum -c -
+      - if: steps.reuse.outputs.apk == ''
+        uses: gradle/actions/setup-gradle@v5
         with:
           cache-read-only: false
-      - run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache --parallel
+      - if: steps.reuse.outputs.apk == ''
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache --parallel
         working-directory: mobile/android
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          REUSED: ${{ steps.reuse.outputs.apk }}
         run: |
           version=$(node -p "require('./app.json').expo.version")
-          cp android/app/build/outputs/apk/release/app-release.apk "feathertune-remote-$version.apk"
-          # `dist` creates the release; wait for it (up to 40 minutes).
+          if [ -n "$REUSED" ]; then cp "$REUSED" "feathertune-remote-$version.apk"
+          else cp android/app/build/outputs/apk/release/app-release.apk "feathertune-remote-$version.apk"; fi
+          # `release` creates the release; wait for it (up to 40 minutes).
           for i in $(seq 120); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 20; done
           gh release upload "$TAG" "feathertune-remote-$version.apk" --clobber

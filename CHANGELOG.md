@@ -2,6 +2,11 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.7.3 — 2026-11-11
+
+- **A smaller app.** The tracker filter no longer carries a full ad-filter engine for its ten hosts: the program is 1.2 MB smaller and builds faster. It blocks the same hosts. Extra rules in `privacy-list.txt` still work when they name a whole host (`||host^`); other kinds of rules are now ignored.
+- **The crossfade's second player lives for less time:** it opens 25 s before the fade instead of 40 s.
+
 ## 0.7.2 — 2026-11-11
 
 - **Crossfade that really overlaps (Experimental).** The two tracks now play together during every crossfade, not only in a playlist with its mix on: a hidden second player plays the start of the next track while the current one fades out. It follows your volume and mute, and when it cannot play the app falls back to the old fade. The crossfade settings show how the last transition went and why.

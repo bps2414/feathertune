@@ -2,6 +2,11 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.7.3 — 2026-11-11
+
+- **Um app menor.** O filtro de rastreadores não carrega mais um motor inteiro de filtros de anúncio para os seus dez hosts: o programa ficou 1,2 MB menor e compila mais rápido. Ele bloqueia os mesmos hosts. Regras extras em `privacy-list.txt` continuam valendo quando nomeiam um host inteiro (`||host^`); os outros tipos de regra agora são ignorados.
+- **O segundo player do crossfade vive menos tempo:** ele abre 25 s antes do fade em vez de 40 s.
+
 ## 0.7.2 — 2026-11-11
 
 - **Crossfade que sobrepõe de verdade (Experimental).** As duas faixas agora tocam juntas em todo crossfade, não só numa playlist com o mix ligado: um segundo player oculto toca o começo da próxima faixa enquanto a atual some. Ele acompanha seu volume e o mudo e, quando não consegue tocar, o app volta ao fade antigo. As configurações do crossfade mostram como foi a última transição e por quê.

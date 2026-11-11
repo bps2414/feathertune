@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.7.2 — 2026-11-11
+
+- **Crossfade que sobrepõe de verdade (Experimental).** As duas faixas agora tocam juntas em todo crossfade, não só numa playlist com o mix ligado: um segundo player oculto toca o começo da próxima faixa enquanto a atual some. Ele acompanha seu volume e o mudo e, quando não consegue tocar, o app volta ao fade antigo. As configurações do crossfade mostram como foi a última transição e por quê.
+- **Transições mais estáveis.** Um segundo player ainda carregando não conta mais como anúncio ou recusa nem desliga a sobreposição, o fade não se perde mais quando a duração da faixa muda perto do fim, e a playlist é encontrada também fora da página do player.
+- **A análise de faixas** também mede a faixa que entrou pelo segundo player, e a duração da faixa é conferida com a da fila.
+
 ## 0.7.1 — 2026-11-02
 
 - **O app não abre mais deslogado.** O Google amarrou o login a um cookie de curta duração ligado ao dispositivo, que o navegador embutido não renovava, então toda abertura mostrava "Fazer login" até você clicar. Agora o app pede os cookies de login comuns, de longa duração. Entre mais uma vez depois de atualizar; ele deve passar a ficar.

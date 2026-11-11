@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.7.2 — 2026-11-11
+
+- **Crossfade that really overlaps (Experimental).** The two tracks now play together during every crossfade, not only in a playlist with its mix on: a hidden second player plays the start of the next track while the current one fades out. It follows your volume and mute, and when it cannot play the app falls back to the old fade. The crossfade settings show how the last transition went and why.
+- **Steadier transitions.** A second player still loading no longer counts as an ad or a refusal and turns the overlap off, a fade is no longer lost when the track's length changes near its end, and the playlist is found away from the player page too.
+- **Track analysis** also measures a track that came in through the second player, and the track's length is checked against the queue's.
+
 ## 0.7.1 — 2026-11-02
 
 - **The app no longer opens signed out.** Google tied the sign-in to a short-lived, device-bound cookie that the embedded browser did not renew, so every start showed "Sign in" until you clicked it. The app now asks for the plain long-lived sign-in cookies. Sign in once more after updating; it should then stay.

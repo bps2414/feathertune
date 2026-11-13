@@ -11,271 +11,274 @@
   <div class="glows" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 
   <header>
-    <div class="top-row">
-      <h1>Settings</h1>
-      <input id="search" type="search" placeholder="Search" aria-label="Search settings" autocomplete="off" spellcheck="false">
-    </div>
-    <nav role="tablist" aria-label="Sections">
-      <button role="tab" type="button" data-tab="general" aria-selected="true">General</button>
-      <button role="tab" type="button" data-tab="look">Look</button>
-      <button role="tab" type="button" data-tab="lyrics">Lyrics</button>
-      <button role="tab" type="button" data-tab="audio">Audio</button>
-      <button role="tab" type="button" data-tab="experimental">Experimental</button>
-      <button role="tab" type="button" data-tab="extensions">Extensions</button>
-      <button role="tab" type="button" data-tab="integrations">Integrations</button>
-      <button role="tab" type="button" data-tab="stats">Stats</button>
-      <button role="tab" type="button" data-tab="shortcuts">Shortcuts</button>
-      <button role="tab" type="button" data-tab="advanced">Advanced</button>
-      <button role="tab" type="button" data-tab="whats-new">What's new</button>
+    <h1>Settings</h1>
+    <input id="search" type="search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false">
+    <nav role="tablist" aria-label="Sections" aria-orientation="vertical">
+      <button role="tab" type="button" data-tab="general" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span>General</span></button>
+      <button role="tab" type="button" data-tab="look"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" class="fill"/></svg><span>Appearance</span></button>
+      <button role="tab" type="button" data-tab="lyrics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h11M4 17h14"/></svg><span>Lyrics</span></button>
+      <button role="tab" type="button" data-tab="audio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6M9 5v14M13 8v8M17 4v16M21 10v4"/></svg><span>Audio</span></button>
+      <button role="tab" type="button" data-tab="mixes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c7 0 11 10 18 10M3 17c7 0 11-10 18-10"/></svg><span>Mixes</span></button>
+      <hr>
+      <button role="tab" type="button" data-tab="shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1M11 10h2M16 10h1M8 14h8"/></svg><span>Shortcuts</span></button>
+      <button role="tab" type="button" data-tab="integrations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Integrations</span></button>
+      <button role="tab" type="button" data-tab="phone"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg><span>Phone remote</span></button>
+      <button role="tab" type="button" data-tab="extensions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M16.5 13.5v6M13.5 16.5h6"/></svg><span>Extensions</span></button>
+      <hr>
+      <button role="tab" type="button" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M6 16v-5M11 16V6M16 16v-8M20 16v-3"/></svg><span>Stats</span></button>
+      <button role="tab" type="button" data-tab="about"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/></svg><span>About</span></button>
     </nav>
   </header>
 
   <main>
-    <p id="error" class="notice error" role="alert" hidden></p>
     <p id="no-results" class="notice" hidden>Nothing matches.</p>
 
+    <!-- A page: a title, a short line under it, then sections (a heading over one group of rows). Every
+         `[data-plugin]` item gets the plugin's name, summary, details and switch on top (settings.js); what
+         is inside it are the plugin's options, shown while it is on. -->
     <section role="tabpanel" data-panel="general">
-      <div class="card">
-        <label>Language
-          <select data-key="ui.language" id="language">
-            <option value="auto">Windows language</option>
-          </select>
-        </label>
-        <p class="hint">Applies after a restart.</p>
-      </div>
-      <div class="card">
-        <div class="row">
-          <div class="body">
-            <div class="name">Start with Windows</div>
-            <div class="description">Starts in the tray when you sign in.</div>
-          </div>
+      <h2>General</h2>
+      <h3>Startup</h3>
+      <div class="group">
+        <div class="setting">
+          <div class="body"><div class="name">Language</div><div class="desc">Applies after a restart.</div></div>
+          <select data-key="ui.language" id="language" aria-label="Language"><option value="auto">Windows language</option></select>
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Start with Windows</div><div class="desc">Starts in the tray when you sign in.</div></div>
           <input type="checkbox" class="switch" data-key="autostart" aria-label="Start with Windows">
         </div>
+        <div data-plugin="launcher"></div>
       </div>
-      <div class="card" data-plugin="mini_player">
-        <div class="actions"><button id="mini-player" type="button" class="secondary">Open mini player</button></div>
+      <h3>Window and tray</h3>
+      <div class="group">
+        <div data-plugin="mini_player">
+          <div class="setting">
+            <div class="body"><div class="name">Open it now</div></div>
+            <button id="mini-player" type="button" class="secondary">Open mini player</button>
+          </div>
+        </div>
+        <div data-plugin="navigation"></div>
+        <div data-plugin="taskbar_controls"></div>
+        <div data-plugin="themed_tray_menu"></div>
+        <div data-plugin="track_notifications"></div>
       </div>
-      <div class="card" data-plugin="taskbar_controls"></div>
-      <div class="card" data-plugin="themed_tray_menu"></div>
-      <div class="card" data-plugin="track_notifications"></div>
-      <div class="card" data-plugin="controls"></div>
-      <div class="card" data-plugin="tracker_filter"></div>
+      <h3>Player</h3>
+      <div class="group">
+        <div data-plugin="controls"></div>
+        <div data-plugin="song_mode"></div>
+        <div data-plugin="precise_volume"></div>
+        <div data-plugin="skip_disliked"></div>
+      </div>
+      <h3>Privacy</h3>
+      <div class="group">
+        <div data-plugin="tracker_filter"></div>
+      </div>
     </section>
 
     <section role="tabpanel" data-panel="look" hidden>
-      <div class="card" data-plugin="album_color"></div>
-      <div class="card" data-plugin="ambient_mode"></div>
-      <div class="card" data-plugin="animated_title_bar"></div>
+      <h2>Appearance</h2>
+      <div class="group">
+        <div data-plugin="album_color"></div>
+        <div data-plugin="ambient_mode"></div>
+        <div data-plugin="animated_title_bar"></div>
+      </div>
     </section>
 
     <section role="tabpanel" data-panel="lyrics" hidden>
-      <div class="card" data-plugin="synced_lyrics">
-        <div class="name small">Sources</div>
-        <p class="hint">Asked together. Lyrics timed word by word win over lines only, then the order here decides; the first answer shows at once and a better one replaces it. Also used by Floating and Share lyrics.</p>
-        <ol class="sources" id="lyrics-providers"></ol>
-        <p class="hint">Better Lyrics, Unison and lrcmux are timed word by word (Better Lyrics only for tracks it already has); LRCLIB mostly by line.</p>
-        <div class="option">
-          <div class="body">
-            <div class="name small">Estimate word timing</div>
-            <div class="hint">When a source times whole lines only, words light up at guessed times (from the song's pace). Turn off for line-only lyrics.</div>
-          </div>
-          <input type="checkbox" class="switch" data-key="lyrics.estimate_words" aria-label="Estimate word timing">
-        </div>
-        <label>Timing offset, ms (positive: later) <input data-key="lyrics.offset_ms" type="number" step="50" min="-5000" max="5000"></label>
-        <div class="option">
-          <div class="body">
-            <div class="name small">Romanization</div>
-            <div class="hint">Lines in other scripts (Japanese, Korean, Chinese...) show the source's Latin-letter version under them, when it has one.</div>
-          </div>
-          <input type="checkbox" class="switch" data-key="lyrics.romanize" aria-label="Romanization">
-        </div>
-        <label>Text size
-          <select data-key="lyrics.size">
+      <h2>Lyrics</h2>
+      <div class="group">
+        <div data-plugin="synced_lyrics"></div>
+      </div>
+      <h3>Look</h3>
+      <div class="group">
+        <div class="setting">
+          <div class="body"><div class="name">Text size</div></div>
+          <select data-key="lyrics.size" aria-label="Text size">
             <option value="small">Small</option>
             <option value="medium">Medium</option>
             <option value="large">Large</option>
           </select>
-        </label>
-        <label>Alignment
-          <select data-key="lyrics.align">
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Alignment</div></div>
+          <select data-key="lyrics.align" aria-label="Alignment">
             <option value="left">Left</option>
             <option value="center">Center</option>
             <option value="right">Right</option>
           </select>
-        </label>
-        <div class="option">
-          <div class="body">
-            <div class="name small">Duet layout</div>
-            <div class="hint">When the source names the singers: the first one's lines on the left, the second one's on the right, sung together in the middle.</div>
-          </div>
-          <input type="checkbox" class="switch" data-key="lyrics.duets" aria-label="Duet layout">
         </div>
-        <label>Glow
-          <select data-key="lyrics.glow">
+        <div class="setting">
+          <div class="body"><div class="name">Glow</div></div>
+          <select data-key="lyrics.glow" aria-label="Glow">
             <option value="off">Off (lightest)</option>
             <option value="normal">Normal</option>
             <option value="strong">Strong</option>
           </select>
-        </label>
-      </div>
-      <div class="card" data-plugin="lyric_effects"></div>
-      <div class="card" data-plugin="lyrics_translation">
-        <label>Translate to
-          <select data-key="lyrics.translate_to">
-            <option value="auto">Windows language</option>
-            <option value="off">Off</option>
-            <option value="pt">Português</option>
-            <option value="en">English</option>
-            <option value="es">Español</option>
-            <option value="fr">Français</option>
-            <option value="de">Deutsch</option>
-            <option value="it">Italiano</option>
-            <option value="ja">日本語</option>
-            <option value="ko">한국어</option>
-          </select>
-        </label>
-        <p class="hint">A new language applies from the next track. Off hides the translation at once.</p>
-      </div>
-      <div class="card" data-plugin="desktop_lyrics">
-        <div class="actions">
-          <button id="desktop-lyrics" type="button" class="secondary">Show floating lyrics</button>
-          <button id="desktop-lyrics-lock" type="button" class="secondary" hidden>Unlock to move</button>
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Duet layout</div><div class="desc">Each singer on their own side.</div></div>
+          <input type="checkbox" class="switch" data-key="lyrics.duets" aria-label="Duet layout">
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Romanization</div><div class="desc">Latin letters under Japanese, Korean or Chinese lines.</div></div>
+          <input type="checkbox" class="switch" data-key="lyrics.romanize" aria-label="Romanization">
         </div>
       </div>
-      <div class="card" data-plugin="share_lyrics">
-        <div class="actions">
-          <button id="share-lyrics" type="button" class="secondary">Make a lyrics card</button>
+      <h3>Sources and timing</h3>
+      <div class="group">
+        <div class="setting column">
+          <div class="body"><div class="name">Sources</div><div class="desc">Word-timed lyrics win; then this order.</div></div>
+          <ol class="sources" id="lyrics-providers"></ol>
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Estimate word timing</div><div class="desc">Lights words up when a source only times lines.</div></div>
+          <input type="checkbox" class="switch" data-key="lyrics.estimate_words" aria-label="Estimate word timing">
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Timing offset (ms)</div><div class="desc">Positive shows lines later.</div></div>
+          <input data-key="lyrics.offset_ms" type="number" step="50" min="-5000" max="5000" aria-label="Timing offset (ms)">
+        </div>
+      </div>
+      <h3>Translation</h3>
+      <div class="group">
+        <div data-plugin="lyrics_translation">
+          <div class="setting">
+            <div class="body"><div class="name">Translate to</div><div class="desc">Applies from the next track.</div></div>
+            <select data-key="lyrics.translate_to" aria-label="Translate to">
+              <option value="auto">Windows language</option>
+              <option value="off">Off</option>
+              <option value="pt">Português</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <h3>Effects</h3>
+      <div class="group">
+        <div data-plugin="lyric_effects"></div>
+        <div data-plugin="lyric_colors"></div>
+        <div data-plugin="lyric_pulse"></div>
+      </div>
+      <h3>Outside the window</h3>
+      <div class="group">
+        <div data-plugin="desktop_lyrics">
+          <div class="setting">
+            <div class="body"><div class="name">Floating lyrics window</div></div>
+            <div class="buttons">
+              <button id="desktop-lyrics-lock" type="button" class="secondary" hidden>Unlock to move</button>
+              <button id="desktop-lyrics" type="button" class="secondary">Show floating lyrics</button>
+            </div>
+          </div>
+        </div>
+        <div data-plugin="share_lyrics">
+          <div class="setting">
+            <div class="body"><div class="name">Lyrics card</div></div>
+            <button id="share-lyrics" type="button" class="secondary">Make a lyrics card</button>
+          </div>
         </div>
       </div>
     </section>
 
     <section role="tabpanel" data-panel="audio" hidden>
-      <p class="hint">Effects on the page's own sound, on this PC only. Every effect is bypassed while an ad plays.</p>
-      <div class="card" data-plugin="equalizer">
-        <label>Preset <select data-key="audio.eq_preset" id="eq-preset"></select></label>
-        <div class="eq" id="eq-bands"></div>
-        <p class="hint">Moving a band switches to Custom. A band at 0 dB is left out of the sound path, and the level is lowered by the largest boost so the sound never clips.</p>
+      <h2>Audio</h2>
+      <p class="lead">Effects change the sound on this PC only, and switch off while an ad plays.</p>
+      <div class="group">
+        <div data-plugin="equalizer">
+          <div class="setting">
+            <div class="body"><div class="name">Preset</div><div class="desc">Moving a band switches to Custom.</div></div>
+            <select data-key="audio.eq_preset" id="eq-preset" aria-label="Preset"></select>
+          </div>
+          <div class="eq" id="eq-bands"></div>
+        </div>
+        <div data-plugin="compressor">
+          <div class="setting">
+            <div class="body"><div class="name">Preset</div></div>
+            <select data-key="audio.compressor" aria-label="Preset">
+              <option value="none">None</option>
+              <option value="soft">Soft</option>
+              <option value="night">Night (quiet listening)</option>
+              <option value="strong">Strong</option>
+            </select>
+          </div>
+        </div>
+        <div data-plugin="visualizer">
+          <div class="setting">
+            <div class="body"><div class="name">Style</div></div>
+            <select data-key="audio.visualizer" aria-label="Style">
+              <option value="bars">Bars</option>
+              <option value="wave">Wave</option>
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="card" data-plugin="visualizer">
-        <label>Style
-          <select data-key="audio.visualizer">
-            <option value="bars">Bars</option>
-            <option value="wave">Wave</option>
-          </select>
-        </label>
-      </div>
-      <div class="card" data-plugin="compressor">
-        <label>Preset
-          <select data-key="audio.compressor">
-            <option value="none">None</option>
-            <option value="soft">Soft</option>
-            <option value="night">Night (quiet listening)</option>
-            <option value="strong">Strong</option>
-          </select>
-        </label>
+      <h3>Between tracks</h3>
+      <div class="group">
+        <div data-plugin="crossfade">
+          <div class="setting">
+            <div class="body"><div class="name">Length</div><div class="desc">0 s turns the fade off.</div></div>
+            <div class="range"><input type="range" data-key="audio.crossfade_ms" min="0" max="12000" step="500" aria-label="Length"><span class="value" data-seconds></span></div>
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Curve</div></div>
+            <select data-key="audio.curve" aria-label="Curve">
+              <option value="equal_power">Equal power (steady loudness)</option>
+              <option value="linear">Linear</option>
+              <option value="s_curve">S-curve (holds, then drops)</option>
+              <option value="exponential">Exponential (drops early)</option>
+            </select>
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Fade into the next track</div><div class="desc">Only when the two cannot overlap.</div></div>
+            <div class="range"><input type="range" data-key="audio.fade_in_ms" min="0" max="5000" step="250" aria-label="Fade into the next track"><span class="value" data-seconds></span></div>
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Echo out</div><div class="desc">An echo on the end of the track, in time with its beat.</div></div>
+            <input type="checkbox" class="switch" data-key="audio.echo_out" aria-label="Echo out">
+          </div>
+          <p id="last-transition" class="status" role="status" hidden></p>
+        </div>
+        <div data-plugin="skip_silence"></div>
+        <div data-plugin="track_analysis"></div>
       </div>
     </section>
 
-    <section role="tabpanel" data-panel="experimental" hidden>
-      <p class="notice">New and still rough: these may misbehave or break playback, so they start off. Every effect is bypassed while an ad plays.</p>
-      <div class="card" data-plugin="crossfade">
-        <label>Length <span class="value" data-seconds></span>
-          <input type="range" data-key="audio.crossfade_ms" min="0" max="12000" step="500">
-        </label>
-        <label>Curve
-          <select data-key="audio.curve">
-            <option value="equal_power">Equal power (steady loudness)</option>
-            <option value="linear">Linear</option>
-            <option value="s_curve">S-curve (holds, then drops)</option>
-            <option value="exponential">Exponential (drops early)</option>
-          </select>
-        </label>
-        <label>Fade into the next track <span class="value" data-seconds></span>
-          <input type="range" data-key="audio.fade_in_ms" min="0" max="5000" step="250">
-        </label>
-        <div class="option">
-          <div class="body">
-            <div class="name small">Echo out</div>
-            <div class="hint">An echo on the end of the track that fades out, in time with its beat when known.</div>
-          </div>
-          <input type="checkbox" class="switch" data-key="audio.echo_out" aria-label="Echo out">
-        </div>
-        <p class="hint">0 s turns the fade off. Tracks shorter than three fades, repeat-one and ads are never faded. The fade into the next track only applies when the two cannot overlap.</p>
-        <p id="last-transition" class="hint" role="status" hidden></p>
-      </div>
-      <div class="card" data-plugin="track_analysis"></div>
-      <div class="card" data-plugin="lyric_colors"></div>
-      <div class="card" data-plugin="lyric_pulse"></div>
-      <div class="card" data-plugin="skip_silence"></div>
-      <div class="card" data-plugin="remote">
-        <div id="remote-box">
-          <p id="remote-off" class="notice error" hidden>The phone remote is not listening, so no phone can connect. The port may be in use: change port under [remote] in config.toml and restart.</p>
-          <label>PC name <input data-key="remote.name" maxlength="32" placeholder="feathertune" autocomplete="off" spellcheck="false"></label>
-          <p class="hint">Phones see this name when they connect. It is never the Windows name of this PC.</p>
-
-          <div class="pair">
-            <div id="pair-idle">
-              <button id="pair-start" type="button">Pair a phone</button>
-              <p class="hint">Open feathertune on the phone and scan the code. It works for 2 minutes and for one phone.</p>
-            </div>
-            <div id="pair-open" class="pair-open" hidden>
-              <div id="pair-qr" class="qr" hidden></div>
-              <div class="pair-side">
-                <div id="pair-title" class="name" role="status"></div>
-                <p id="pair-hint" class="hint"></p>
-                <div id="pair-left" class="countdown"></div>
-                <button id="pair-cancel" type="button" class="secondary">Cancel</button>
-              </div>
-            </div>
-            <div id="pair-ask" hidden>
-              <div id="pair-ask-title" class="name" role="alert"></div>
-              <div id="pair-code" class="code"></div>
-              <p class="hint">Check that the phone shows the same code. Allow it only if they match.</p>
-              <div class="actions">
-                <button id="pair-allow" type="button">Allow</button>
-                <button id="pair-deny" type="button" class="secondary">Deny</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="name small">Paired phones</div>
-          <ul class="devices" id="remote-devices"></ul>
-          <div class="actions"><button id="remote-forget" type="button" class="secondary">Forget all devices</button></div>
-          <p class="hint">A phone can't find this PC? Windows blocks connections from other devices on a network marked Public. Open Windows Settings, go to Network &amp; internet, choose Wi-Fi or Ethernet, open this network and set Network profile type to Private.</p>
-        </div>
-      </div>
-      <h2>Mix</h2>
-      <p class="hint">Transitions for a playlist and for each pair of its tracks, kept on this PC. They use the Crossfade switch; ads are never mixed.</p>
+    <section role="tabpanel" data-panel="mixes" hidden>
+      <h2>Mixes</h2>
+      <p class="lead">Your own transitions for a playlist and for each pair of its tracks.</p>
+      <p id="mix-crossfade-off" class="notice" hidden>Mixes play only with Crossfade on (Audio).</p>
       <p id="mix-none" class="notice" hidden>Play a playlist once to list its tracks here.</p>
       <div id="mix-body">
-        <div class="card">
-          <label>Playlist <select id="mix-list"></select></label>
-          <div class="option">
-            <div class="body">
-              <div class="name small">Mix this playlist</div>
-              <div class="hint">Off: the Crossfade settings above.</div>
-            </div>
+        <div class="group">
+          <div class="setting">
+            <div class="body"><div class="name">Playlist</div></div>
+            <select id="mix-list" aria-label="Playlist"></select>
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Mix this playlist</div><div class="desc">Off: the Crossfade settings.</div></div>
             <input type="checkbox" class="switch" id="mix-enabled" aria-label="Mix this playlist">
           </div>
-          <div class="name small">Every other pair</div>
-          <div class="option">
-            <div class="body">
-              <div class="name small">Auto</div>
-              <div class="hint">16 beats of the outgoing track, ending before its final silence, into the start of the next track's sound. Needs both tracks measured; otherwise 6 s from the end.</div>
-            </div>
-            <input type="checkbox" class="switch" id="mix-auto" aria-label="Auto">
+          <div class="setting">
+            <div class="body"><div class="name">Automatic transitions</div><div class="desc">For every pair you did not edit: 16 beats, timed from the track analysis.</div></div>
+            <input type="checkbox" class="switch" id="mix-auto" aria-label="Automatic transitions">
           </div>
-          <div id="mix-defaults"></div>
+          <div id="mix-defaults" class="fields"></div>
         </div>
-        <div class="card">
-          <div class="name">Transitions</div>
+        <h3>Transitions</h3>
+        <div class="group">
           <ol class="mix-pairs" id="mix-pairs"></ol>
         </div>
-        <div class="card" id="mix-editor" hidden>
+        <div class="group editor" id="mix-editor" hidden>
           <div class="name" id="mix-title"></div>
-          <div class="hint" id="mix-keys"></div>
+          <div class="desc" id="mix-keys"></div>
           <canvas id="mix-canvas" width="560" height="150" aria-label="The end of the first track over the start of the next"></canvas>
-          <p class="hint">Click or drag on the top lane to set where the first track starts to fade, on the bottom lane where the next one starts.</p>
+          <p class="desc">Top lane: where the first track starts to fade. Bottom lane: where the next one starts.</p>
           <div class="segmented" id="mix-presets" role="group" aria-label="Presets">
             <button type="button" data-preset="fade">Fade</button>
             <button type="button" data-preset="rise">Rise</button>
@@ -283,18 +286,20 @@
             <button type="button" data-preset="echo_out">Echo out</button>
             <button type="button" data-preset="auto">Auto</button>
           </div>
-          <div id="mix-pair-fields"></div>
+          <div id="mix-pair-fields" class="fields"></div>
           <div class="actions">
             <button id="mix-save" type="button">Save</button>
             <button id="mix-preview" type="button" class="secondary">Preview</button>
             <button id="mix-delete" type="button" class="secondary">Back to auto</button>
           </div>
         </div>
-        <div class="card">
-          <div class="actions">
+        <h3>Share</h3>
+        <div class="group">
+          <div class="setting">
+            <div class="body"><div class="name">Export</div><div class="desc">Saves this playlist's mix to Downloads.</div></div>
             <button id="mix-export" type="button" class="secondary">Export</button>
           </div>
-          <details>
+          <details class="setting column">
             <summary>Import</summary>
             <textarea id="mix-import-text" rows="4" spellcheck="false" placeholder="Paste a mix's JSON"></textarea>
             <div class="actions"><button id="mix-import" type="button" class="secondary">Replace this playlist's mix</button></div>
@@ -303,46 +308,121 @@
       </div>
     </section>
 
+    <section role="tabpanel" data-panel="shortcuts" hidden>
+      <h2>Shortcuts</h2>
+      <p class="lead">Click a field and press the keys. Backspace clears it, Esc cancels.</p>
+      <div class="group">
+        <div data-plugin="global_shortcuts"></div>
+      </div>
+      <div class="group keys">
+        <div class="setting"><div class="body"><div class="name">Play / pause</div></div><input data-key="shortcuts.play_pause" data-shortcut readonly aria-label="Play / pause"></div>
+        <div class="setting"><div class="body"><div class="name">Next</div></div><input data-key="shortcuts.next" data-shortcut readonly aria-label="Next"></div>
+        <div class="setting"><div class="body"><div class="name">Previous</div></div><input data-key="shortcuts.previous" data-shortcut readonly aria-label="Previous"></div>
+        <div class="setting"><div class="body"><div class="name">Mini player</div></div><input data-key="shortcuts.mini_player" data-shortcut readonly aria-label="Mini player"></div>
+        <div class="setting"><div class="body"><div class="name">Volume up</div></div><input data-key="shortcuts.volume_up" data-shortcut readonly aria-label="Volume up"></div>
+        <div class="setting"><div class="body"><div class="name">Volume down</div></div><input data-key="shortcuts.volume_down" data-shortcut readonly aria-label="Volume down"></div>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="integrations" hidden>
+      <h2>Integrations</h2>
+      <div class="group">
+        <div data-plugin="lastfm">
+          <div class="setting">
+            <div class="body"><div class="name status-row"><span class="dot" id="lastfm-dot"></span><span id="lastfm-status">…</span></div></div>
+            <button id="lastfm-button" type="button" hidden></button>
+          </div>
+          <details class="setting column">
+            <summary>Your own API keys</summary>
+            <p class="desc" id="lastfm-keys"></p>
+            <label>API key <input data-key="lastfm.api_key" autocomplete="off" spellcheck="false"></label>
+            <label>API secret <input data-key="lastfm.api_secret" type="password" autocomplete="off" spellcheck="false"></label>
+          </details>
+        </div>
+        <div data-plugin="discord">
+          <div class="setting">
+            <div class="body"><div class="name">Application id</div><div class="desc"><span id="discord-id"></span> Discord must be open on this PC.</div></div>
+            <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Digits only" aria-label="Application id">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section role="tabpanel" data-panel="phone" hidden>
+      <h2>Phone remote</h2>
+      <div class="group">
+        <div data-plugin="remote">
+          <div id="remote-box">
+            <p id="remote-off" class="notice error" hidden>The phone remote is not listening, so no phone can connect. The port may be in use: change port under [remote] in config.toml and restart.</p>
+            <div class="setting">
+              <div class="body"><div class="name">PC name</div><div class="desc">What phones see. Never the Windows name of this PC.</div></div>
+              <input data-key="remote.name" maxlength="32" placeholder="feathertune" autocomplete="off" spellcheck="false" aria-label="PC name">
+            </div>
+            <div class="pair">
+              <div id="pair-idle" class="pair-idle">
+                <div class="body">
+                  <div class="name">Pair a phone</div>
+                  <p class="desc">Open feathertune on the phone and scan the code. It works for 2 minutes and for one phone.</p>
+                </div>
+                <button id="pair-start" type="button">Pair a phone</button>
+              </div>
+              <div id="pair-open" class="pair-open" hidden>
+                <div id="pair-qr" class="qr" hidden></div>
+                <div class="pair-side">
+                  <div id="pair-title" class="name" role="status"></div>
+                  <p id="pair-hint" class="desc"></p>
+                  <div id="pair-left" class="countdown"></div>
+                  <button id="pair-cancel" type="button" class="secondary">Cancel</button>
+                </div>
+              </div>
+              <div id="pair-ask" hidden>
+                <div id="pair-ask-title" class="name" role="alert"></div>
+                <div id="pair-code" class="code"></div>
+                <p class="desc">Check that the phone shows the same code. Allow it only if they match.</p>
+                <div class="actions">
+                  <button id="pair-allow" type="button">Allow</button>
+                  <button id="pair-deny" type="button" class="secondary">Deny</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <h3>Paired phones</h3>
+      <div class="group">
+        <ul class="devices" id="remote-devices"></ul>
+        <div class="setting" id="remote-forget-row">
+          <div class="body"><div class="name">Forget all devices</div><div class="desc">Each phone has to be paired again.</div></div>
+          <button id="remote-forget" type="button" class="secondary">Forget all</button>
+        </div>
+      </div>
+      <details class="help">
+        <summary>A phone can't find this PC?</summary>
+        <p>Windows blocks connections from other devices on a network marked Public. Open Windows Settings, go to Network &amp; internet, choose Wi-Fi or Ethernet, open this network and set Network profile type to Private.</p>
+      </details>
+    </section>
+
     <section role="tabpanel" data-panel="extensions" hidden>
-      <div class="card" id="ext-import">
-        <div class="name">Import an extension</div>
-        <p class="hint">A folder or a .zip with a plugin.json, or a single .js or .css file. Drop it here or pick it. Extensions are made by other people and run inside the player page with your signed-in account: import only what you trust. feathertune does not review them.</p>
+      <h2>Extensions</h2>
+      <p class="lead">Made by other people and run inside the player page with your account: import only what you trust.</p>
+      <div class="drop" id="ext-import">
+        <div class="name">Drop a folder, .zip, .js or .css here</div>
         <div class="actions">
-          <button id="ext-pick-file" type="button">Pick a file (.zip, .js, .css)</button>
+          <button id="ext-pick-file" type="button">Pick a file</button>
           <button id="ext-pick-folder" type="button" class="secondary">Pick a folder</button>
           <button id="ext-open-folder" type="button" class="secondary">Open the extensions folder</button>
         </div>
         <input id="ext-file" type="file" accept=".zip,.js,.css" hidden>
         <input id="ext-folder" type="file" webkitdirectory hidden>
-        <p class="hint">Importing, switching one on or off and removing apply after a restart; settings apply at once.</p>
+        <p class="desc">Importing, turning on or off and removing apply after a restart.</p>
         <p id="ext-status" class="notice" hidden></p>
       </div>
       <div id="ext-list"></div>
       <div id="ext-broken"></div>
     </section>
 
-    <section role="tabpanel" data-panel="integrations" hidden>
-      <div class="card" data-plugin="lastfm">
-        <div class="status-row">
-          <span class="dot" id="lastfm-dot"></span>
-          <span id="lastfm-status">…</span>
-          <button id="lastfm-button" type="button" hidden></button>
-        </div>
-        <p class="hint">Connecting opens Last.fm in your browser; the session key stays in the Windows Credential Manager.</p>
-        <details>
-          <summary>Your own API keys</summary>
-          <p class="hint" id="lastfm-keys"></p>
-          <label>API key <input data-key="lastfm.api_key" autocomplete="off" spellcheck="false"></label>
-          <label>API secret <input data-key="lastfm.api_secret" type="password" autocomplete="off" spellcheck="false"></label>
-        </details>
-      </div>
-      <div class="card" data-plugin="discord">
-        <label>Application id <input data-key="discord.client_id" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Digits only"></label>
-        <p class="hint"><span id="discord-id"></span> Discord must be open on this PC.</p>
-      </div>
-    </section>
-
     <section role="tabpanel" data-panel="stats" hidden>
+      <h2>Stats</h2>
       <div class="segmented" id="stats-range" role="group" aria-label="Period">
         <button type="button" data-range="week">7 days</button>
         <button type="button" data-range="month" aria-pressed="true">30 days</button>
@@ -364,46 +444,48 @@
         <div class="card"><div class="name">Top tracks</div><ol class="top" id="stats-tracks"></ol></div>
         <div class="card"><div class="name">Top albums</div><ol class="top" id="stats-albums"></ol></div>
       </div>
-      <div class="card" data-plugin="listening_stats">
-        <div class="actions">
-          <button id="stats-export" type="button" class="secondary">Export CSV</button>
-          <button id="stats-clear" type="button" class="secondary">Clear history</button>
+      <h3>History</h3>
+      <div class="group">
+        <div data-plugin="listening_stats">
+          <div class="setting">
+            <div class="body"><div class="name">Your history</div></div>
+            <div class="buttons">
+              <button id="stats-export" type="button" class="secondary">Export CSV</button>
+              <button id="stats-clear" type="button" class="secondary">Clear history</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
-    <section role="tabpanel" data-panel="shortcuts" hidden>
-      <div class="card" data-plugin="global_shortcuts">
-        <p class="hint">Click a field and press the keys. Backspace clears it, Esc cancels.</p>
-        <label class="key">Play / pause <input data-key="shortcuts.play_pause" data-shortcut readonly></label>
-        <label class="key">Next <input data-key="shortcuts.next" data-shortcut readonly></label>
-        <label class="key">Previous <input data-key="shortcuts.previous" data-shortcut readonly></label>
-        <label class="key">Mini player <input data-key="shortcuts.mini_player" data-shortcut readonly></label>
-        <label class="key">Volume up <input data-key="shortcuts.volume_up" data-shortcut readonly></label>
-        <label class="key">Volume down <input data-key="shortcuts.volume_down" data-shortcut readonly></label>
+    <section role="tabpanel" data-panel="about" hidden>
+      <h2>About</h2>
+      <h3>Troubleshooting</h3>
+      <div class="group">
+        <div class="setting">
+          <div class="body"><div class="name">Export diagnostics</div><div class="desc">A text file in Downloads for reporting a problem: versions, settings and what the app did, with the tracks played. Nothing is sent.</div></div>
+          <button id="diagnostics-export" type="button" class="secondary">Export</button>
+        </div>
+        <div class="setting">
+          <div class="body"><div class="name">Extra Chromium features to turn off</div><div class="desc">Experiments only. Restart to apply.</div></div>
+          <input data-key="browser.disable_features" data-list placeholder="Name1, Name2" autocomplete="off" spellcheck="false" aria-label="Extra Chromium features to turn off">
+        </div>
       </div>
-    </section>
-
-    <section role="tabpanel" data-panel="advanced" hidden>
-      <div class="card">
-        <label>Extra Chromium features to turn off <input data-key="browser.disable_features" data-list placeholder="Name1, Name2" autocomplete="off" spellcheck="false"></label>
-        <p class="hint">Experiments only (see docs/DESIGN.md). Restart to apply.</p>
+      <div id="other-section" hidden>
+        <h3>Other</h3>
+        <div class="group" id="other-plugins"></div>
       </div>
-      <div class="card">
-        <div class="actions"><button id="diagnostics-export" type="button" class="secondary">Export diagnostics</button></div>
-        <p class="hint">Saves a text file to Downloads for reporting a problem: versions, settings and what the app did since it started (lyrics lookups, with the tracks played). Nothing is sent; you choose whom to send it to.</p>
-      </div>
-      <div id="other-plugins"></div>
-    </section>
-
-    <section role="tabpanel" data-panel="whats-new" hidden>
+      <h3>What's new</h3>
       <div id="changelog"></div>
     </section>
   </main>
 
-  <footer id="restart" hidden>
-    <span>Some changes apply after a restart.</span>
-    <button id="restart-button" type="button">Restart now</button>
-  </footer>
+  <div class="toasts">
+    <p id="error" class="toast error" role="alert" hidden></p>
+    <div id="restart" class="toast" hidden>
+      <span>Some changes apply after a restart.</span>
+      <button id="restart-button" type="button">Restart now</button>
+    </div>
+  </div>
 </body>
 </html>

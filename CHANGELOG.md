@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 0.7.5 — 2026-11-13
+
+- **Settings, redesigned.** The settings are now pages in a sidebar with icons (General, Appearance, Lyrics, Audio, Mixes, Shortcuts, Integrations, Phone remote, Extensions, Stats, About), grouped by subject. Each feature is one row: its name, one short line and its switch; the full description and its cost are behind the "i" button, and its options show only while it is on. Experimental features sit on the page of their subject with an Experimental mark, instead of a tab of their own. Search shows the matching rows of every page.
+- **The settings window opens centered over the player** and belongs to it: no second button on the taskbar, it stays above the player and minimizes with it. Opened from the tray with the player hidden, it opens centered on the screen.
+- **The lyrics' glow no longer flickers on the beat** (Lyrics on the beat, Experimental): it dipped and jumped back to full at every beat, and jumped again whenever a word lit up. It now dips and rises back smoothly.
+
 ## 0.7.3 — 2026-11-11
 
 - **A smaller app.** The tracker filter no longer carries a full ad-filter engine for its ten hosts: the program is 1.2 MB smaller and builds faster. It blocks the same hosts. Extra rules in `privacy-list.txt` still work when they name a whole host (`||host^`); other kinds of rules are now ignored.

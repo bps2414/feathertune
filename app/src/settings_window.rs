@@ -129,19 +129,30 @@ fn open_tab(app: &AppHandle, tab: &str) {
     let url: Url = format!("{ORIGIN}/#{tab}").parse().expect("static URL");
     std::thread::spawn(move || {
         let live = app.state::<Live>();
-        let result = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::CustomProtocol(url))
+        // While the main window is on screen, this one belongs to it: no taskbar button of its own,
+        // always above it, minimized with it. Opened from the tray with the main window hidden, it
+        // stands alone.
+        let main =
+            app.get_window("main").filter(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false));
+        let mut builder = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::CustomProtocol(url))
             .title(t("feathertune settings"))
-            .inner_size(740.0, 720.0)
+            .inner_size(900.0, 680.0)
             .min_inner_size(420.0, 400.0)
+            .visible(false)
             .theme(Some(tauri::Theme::Dark))
             .data_directory(live.profile.clone())
             .additional_browser_args(&live.browser_args)
             .on_navigation(|url| url.origin().ascii_serialization() == ORIGIN)
-            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-            .build();
-        match result {
+            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny);
+        if let Some(hwnd) = main.as_ref().and_then(|w| w.hwnd().ok()) {
+            builder = builder.owner_raw(hwnd);
+        }
+        match builder.build() {
             // The pairing QR is only good while this window is open.
             Ok(window) => {
+                place(&window, main.as_ref());
+                let _ = window.show();
+                let _ = window.set_focus();
                 let app = app.clone();
                 window.on_window_event(move |event| {
                     if matches!(event, WindowEvent::Destroyed)
@@ -154,6 +165,34 @@ fn open_tab(app: &AppHandle, tab: &str) {
             Err(e) => eprintln!("settings window: {e}"),
         }
     });
+}
+
+/// Centered over the main window, kept inside its monitor's work area (and no larger than it); without
+/// the main window on screen, centered on the screen.
+fn place(window: &tauri::WebviewWindow, main: Option<&tauri::Window>) {
+    let Some(main) = main else {
+        let _ = window.center();
+        return;
+    };
+    let (Ok(at), Ok(outer), Ok(size)) = (main.outer_position(), main.outer_size(), window.outer_size()) else {
+        let _ = window.center();
+        return;
+    };
+    let (mut w, mut h) = (size.width as i32, size.height as i32);
+    let mut x = at.x + (outer.width as i32 - w) / 2;
+    let mut y = at.y + (outer.height as i32 - h) / 2;
+    if let Ok(Some(monitor)) = main.current_monitor() {
+        let area = monitor.work_area();
+        let (left, top) = (area.position.x, area.position.y);
+        let (right, bottom) = (left + area.size.width as i32, top + area.size.height as i32);
+        if w > right - left || h > bottom - top {
+            (w, h) = (w.min(right - left), h.min(bottom - top));
+            let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+        }
+        x = x.clamp(left, right - w);
+        y = y.clamp(top, bottom - h);
+    }
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 /// The remote changed (the pairing window, a phone asking to pair, the paired list, a connection): the
@@ -172,10 +211,13 @@ fn guard(webview: &Webview) -> Result<(), String> {
 struct PluginView {
     id: &'static str,
     name: &'static str,
+    summary: &'static str,
     description: &'static str,
     cost: &'static str,
     on: bool,
     live: bool,
+    /// Off by default until reliable (docs/DESIGN.md, Plugins): marked Experimental where it is listed.
+    experimental: bool,
 }
 
 /// Everything the window shows.
@@ -189,10 +231,12 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         .map(|p| PluginView {
             id: p.id,
             name: t(p.name),
+            summary: t(p.summary),
             description: t(p.description),
             cost: t(p.cost),
             on: s.plugin(p.id),
             live: p.live,
+            experimental: !p.default_on,
         })
         .collect();
     let lastfm = app.try_state::<LastFm>().map(|l| l.connected());
@@ -534,7 +578,7 @@ pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i
 const NOT_LISTENING: &str = "The phone remote is not listening, so no phone can connect. The port may be in use: \
                              change port under [remote] in config.toml and restart.";
 
-/// The Remote section of the Experimental tab. `op`: `get`, `pair_start` (opens the pairing window and
+/// The Phone remote page. `op`: `get`, `pair_start` (opens the pairing window and
 /// returns its QR as `{ size, modules, left }`, `modules` being `size`² characters of 0 and 1, row by
 /// row), `pair_stop`, `answer` ({allow, code}: the code is the one the page showed), `remove` ({key})
 /// and `forget_all`. Only the settings window may call it.

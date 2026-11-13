@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 0.7.5 — 2026-11-13
+
+- **Configurações redesenhadas.** As configurações agora são páginas num menu lateral com ícones (Geral, Aparência, Letras, Áudio, Mixagens, Atalhos, Integrações, Controle pelo celular, Extensões, Estatísticas, Sobre), agrupadas por assunto. Cada recurso é uma linha: o nome, uma frase curta e o interruptor; a descrição completa e o custo ficam no botão "i", e as opções só aparecem com ele ligado. Os recursos experimentais ficam na página do seu assunto com a marca Experimental, em vez de numa aba própria. A busca mostra as linhas que batem em todas as páginas.
+- **A janela de configurações abre centralizada sobre o player** e pertence a ele: sem um segundo botão na barra de tarefas, fica acima do player e minimiza junto. Aberta pela bandeja com o player oculto, abre no centro da tela.
+- **O brilho da letra não pisca mais na batida** (Letra na batida, Experimental): ele caía e voltava de uma vez ao máximo a cada batida, e pulava de novo sempre que uma palavra acendia. Agora desce e volta suave.
+
 ## 0.7.3 — 2026-11-11
 
 - **Um app menor.** O filtro de rastreadores não carrega mais um motor inteiro de filtros de anúncio para os seus dez hosts: o programa ficou 1,2 MB menor e compila mais rápido. Ele bloqueia os mesmos hosts. Regras extras em `privacy-list.txt` continuam valendo quando nomeiam um host inteiro (`||host^`); os outros tipos de regra agora são ignorados.

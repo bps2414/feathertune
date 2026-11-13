@@ -10,6 +10,8 @@
 pub struct Plugin {
     pub id: &'static str,
     pub name: &'static str,
+    /// One short line, shown next to the switch; `description` is behind its details button.
+    pub summary: &'static str,
     pub description: &'static str,
     /// What it costs, from the measurements in docs/DESIGN.md.
     pub cost: &'static str,
@@ -25,6 +27,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "launcher",
         name: "Launcher",
+        summary: "A start screen that installs updates when the app opens.",
         description: "A start screen that says what the app is doing while it opens. It checks for a newer \
                       release and installs it (the app restarts), then shows the window once the player has \
                       loaded. Without it the window opens at once and nothing is checked.",
@@ -37,6 +40,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "controls",
         name: "Player controls",
+        summary: "Lets the tray, media keys and mini player control playback.",
         description: "Page module that presses the player's buttons for the tray, media keys, shortcuts and the \
                       mini player. Without it those only show the track.",
         cost: "Inside the noise: +2.0 points of CPU and -3 MB private against off (3 runs).",
@@ -47,6 +51,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "tracker_filter",
         name: "Tracker filter",
+        summary: "Blocks analytics and session recording (never ads).",
         description: "Blocks third-party analytics and session-recording requests (privacy lists only, never ads).",
         cost: "Saves memory: -8 MB private and -8 MB WS against off (3 runs); CPU inside the noise.",
         default_on: true,
@@ -56,6 +61,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "track_notifications",
         name: "Track notifications",
+        summary: "A notification on each new track while the window is hidden.",
         description: "A notification when the track changes while the window is hidden.",
         cost: "Inside the noise: +0.2 points of CPU and -3 MB private against off (3 runs).",
         default_on: true,
@@ -65,6 +71,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "global_shortcuts",
         name: "Global shortcuts",
+        summary: "Control the player from any app with the keys below.",
         description: "Play/pause, next, previous and the mini player from anywhere (keys below).",
         cost: "Inside the noise: +0.8 points of CPU and -4 MB private against off (3 runs).",
         default_on: true,
@@ -74,6 +81,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "discord",
         name: "Discord Rich Presence",
+        summary: "Shows what you play on your Discord profile.",
         description: "Shows the track on Discord with its artwork, links and a time bar. Release builds carry an application id; others need yours below.",
         cost: "Inside the noise (3 runs), but the profile had no application id, so nothing ran: one idle thread, a \
                local message to Discord per track (not measured with an id).",
@@ -84,6 +92,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "lastfm",
         name: "Last.fm scrobbling",
+        summary: "Records what you play on your Last.fm account.",
         description: "Now playing and scrobbles on Last.fm. Connect your account below.",
         cost: "Inside the noise (3 runs), but the profile had no keys or account, so nothing ran: one idle thread, two \
                small HTTPS requests per track (not measured connected).",
@@ -94,6 +103,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "mini_player",
         name: "Mini player",
+        summary: "A small always-on-top player.",
         description: "A small always-on-top window with the artwork and the controls; opening it hides the main \
                       window. Its lyrics button adds the current line of the synced lyrics and the next one (when \
                       Synced, Floating or Share lyrics is on).",
@@ -106,6 +116,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "themed_tray_menu",
         name: "Themed tray menu",
+        summary: "The tray menu in the app's look, with the track on top.",
         description: "The tray icon's right-click menu in the app's look, with the track and its controls on \
                       top. Off: the Windows menu, which screen readers read as a menu.",
         cost: "Inside the noise while closed: -2.2 points of CPU and -4 MB private against off (3 runs); a small \
@@ -117,6 +128,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "taskbar_controls",
         name: "Taskbar controls",
+        summary: "Player buttons and the track's progress on the taskbar.",
         description: "Previous, play/pause and next on the window's taskbar thumbnail, and the track's progress \
                       on its taskbar button (yellow while paused).",
         cost: "Inside the noise: +1.5 points of CPU and +1 MB private against off (3 runs); a progress update every \
@@ -128,6 +140,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "desktop_lyrics",
         name: "Floating lyrics",
+        summary: "The line being sung, over the desktop.",
         description: "The current line of the synced lyrics (and the next one) over the desktop, in a window that \
                       clicks pass through. Open it from the tray or below; unlock it in the tray to move it. \
                       Uses the same lyrics sources as Synced lyrics, even with that one off.",
@@ -140,6 +153,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "listening_stats",
         name: "Listening stats",
+        summary: "Keeps a history of what you play, on this PC only.",
         description: "Keeps a history of what you play (only on this PC, in the profile) and shows it in the \
                       Stats tab: listening time, top artists, tracks and albums, when you listen and streaks.",
         cost: "Inside the noise: 0.0 points of CPU and -2 MB private against off (3 runs); one idle thread and one \
@@ -151,6 +165,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "share_lyrics",
         name: "Share lyrics",
+        summary: "Turns lines of a song into a picture to share.",
         description: "Makes a picture card of the synced lyrics: pick any lines (skipped ones are marked), choose \
                       a look (cover colors, album ink, dark or paper), then copy it or save it as a PNG. Open it \
                       from the title bar, the tray or below. Uses the same lyrics sources as Synced lyrics, even \
@@ -164,6 +179,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "animated_title_bar",
         name: "Animated title bar",
+        summary: "The title bar's colors drift slowly.",
         description: "The colors of the title bar drift slowly. Pauses while the window is hidden, minimized or \
                       in the background.",
         cost: "Inside the noise: +3.8 points of CPU and +1 MB private against off (3 runs, at 30 frames a second); the \
@@ -175,6 +191,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "album_color",
         name: "Album color",
+        summary: "Colors the app with the current cover.",
         description: "Colors the title bar, the mini player and the site's player with the colors of the current \
                       cover. Taken once per track; text stays readable.",
         cost: "Inside the noise: +2.6 points of CPU and +1 MB private against off (3 runs).",
@@ -185,6 +202,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "synced_lyrics",
         name: "Synced lyrics",
+        summary: "Lyrics that light up in time with the song.",
         description: "Shows time-synced lyrics in the site's Lyrics tab, from four open sources (below), with \
                       the current line and word highlighted; sources timed word by word win, and word times are \
                       estimated when none has them. Lines cross-fade and the list scrolls slowly in time with \
@@ -200,6 +218,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "lyrics_translation",
         name: "Lyrics translation",
+        summary: "A translation under each line.",
         description: "A translation under each synced line (the line itself still lights word by word), in the \
                       language chosen below: the source's own when it has one, else Unison's machine translation \
                       made for lyrics (the lines' text is sent, nothing else). Lines already in that language get \
@@ -213,6 +232,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "lyric_effects",
         name: "Lyric effects",
+        summary: "Dots that fill up during instrumental breaks.",
         description: "In the Lyrics tab: dots that fill up during the intro and instrumental breaks.",
         cost: "Not measured yet. The dots are transform and opacity animations the compositor runs, only while \
                a break is lit.",
@@ -223,6 +243,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "ambient_mode",
         name: "Ambient mode",
+        summary: "A soft glow of the cover behind the player.",
         description: "A blurred, glowing copy of the cover behind the site. It drifts slowly; paused while the \
                       window is hidden or minimized.",
         cost: "+56 MB private and +8 MB WS against off, and +4.3 points of CPU (3 runs).",
@@ -233,6 +254,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "navigation",
         name: "Back and forward",
+        summary: "Back and forward buttons on the title bar.",
         description: "Back and forward buttons on the title bar, dimmed when there is nowhere to go. They use the \
                       browser's own history (Alt+Left and Alt+Right work too).",
         cost: "Inside the noise: +0.3 points of CPU and -4 MB private against off (3 runs).",
@@ -243,6 +265,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "song_mode",
         name: "Song mode",
+        summary: "Plays the song instead of the video when there are both.",
         description: "When a track comes in both a song and a video version, picks the song one (the site's own \
                       Song / Video switch), so the video is not decoded. Choosing Video yourself holds until the \
                       next track.",
@@ -255,6 +278,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "precise_volume",
         name: "Precise volume",
+        summary: "The mouse wheel over the player changes the volume in 2% steps.",
         description: "The mouse wheel over the player bar or the expanded player changes the volume by 2% (10% \
                       with Shift), with a small percentage that fades. Optional global keys under Shortcuts.",
         cost: "Inside the noise: -0.4 points of CPU and -2 MB private against off (3 runs).",
@@ -265,6 +289,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "skip_disliked",
         name: "Skip disliked tracks",
+        summary: "Skips tracks you marked with a dislike.",
         description: "Skips a track that starts already marked with the site's dislike. Never during an ad, at \
                       most one skip per track and five in a row.",
         cost: "Inside the noise: +1.1 points of CPU and -4 MB private against off (3 runs).",
@@ -275,6 +300,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "equalizer",
         name: "Equalizer",
+        summary: "Ten bands, with presets.",
         description: "A 10-band equalizer with presets (Audio tab), on the page's own audio and only on this PC. \
                       Flat (the default) leaves it out of the sound path. Every audio effect is bypassed while an \
                       ad plays.",
@@ -287,6 +313,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "compressor",
         name: "Compressor",
+        summary: "Evens out loud and quiet parts.",
         description: "Evens out loud and quiet parts (soft, night or strong; Audio tab). \"None\" (the default) \
                       leaves it out of the sound path. Bypassed while an ad plays.",
         cost: "Inside the noise: +1.2 points of CPU and -5 MB private against off (3 runs).",
@@ -297,7 +324,8 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "crossfade",
         name: "Crossfade",
-        description: "Fades each track into the next (6 s, equal power by default; Experimental tab, with the mixes). \
+        summary: "Blends each track into the next.",
+        description: "Fades each track into the next (6 s, equal power by default; the mixes are on their own page). \
                       A hidden second player plays the start of the next track during the fade, so the two overlap; \
                       when it cannot, the track fades out and the next one fades in. The site still picks the next \
                       track, so repeat, shuffle and autoplay work as usual. Never over or into an ad, never on \
@@ -312,6 +340,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "track_analysis",
         name: "Track analysis",
+        summary: "Measures tempo, key and loudness for the crossfade and mixes.",
         description: "The first time a track plays from its start, measures its tempo, key (an estimate), where \
                       its sound starts and ends, and a loudness outline, on this PC only. Only those numbers are \
                       kept (in the profile), never audio. The crossfade, skip silence and the mixes use them.",
@@ -325,6 +354,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "lyric_colors",
         name: "Lyric colors",
+        summary: "Words named after a color glow in that color.",
         description: "A sung word named after a color (red, azul, violeta...) glows in that color, in the Lyrics \
                       tab, the floating lyrics and the mini player, and each verse of the Lyrics tab glows in one \
                       of the album's colors (with Album color on).",
@@ -337,6 +367,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "lyric_pulse",
         name: "Lyrics on the beat",
+        summary: "The line being sung pulses on the beat.",
         description: "The glow of the line being sung pulses softly on the beat, in the Lyrics tab, once the \
                       track analysis has measured the track's tempo (from its second play). Off while paused.",
         cost: "Not measured yet. While it pulses the compositor draws every frame, which the resting lyrics \
@@ -349,6 +380,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "skip_silence",
         name: "Skip silence",
+        summary: "Skips silence at the start and end of tracks.",
         description: "Skips silence at the start and the end of a track (never in the middle), using the track \
                       analysis when there is one. Never during an ad or after you seek in the track.",
         cost: "Inside the noise: +0.9 points of CPU and -3 MB private against off (3 runs).",
@@ -360,6 +392,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "remote",
         name: "Phone remote",
+        summary: "Control the player from your phone, on the same network.",
         description: "Lets phones you pair show what plays, the queue and the volume, and control them over the \
                       local network (never while an ad plays, except pause). Off, no port is open; on, only \
                       paired phones get anything, through an encrypted channel.",
@@ -372,6 +405,7 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "visualizer",
         name: "Visualizer",
+        summary: "Bars or a wave under the artwork of the expanded player.",
         description: "Bars or a wave of the music under the artwork on the expanded player page, in the album's \
                       colors (Audio tab). Hidden while an ad plays.",
         cost: "Inside the noise with the expanded player closed: -1.1 points of CPU and -6 MB private against off \

@@ -445,13 +445,14 @@ const DOT_FRAMES = [
   { opacity: 1, transform: 'scale(1)' },
 ];
 // Keeps an animation of line `i` on the song's clock: its time is the song's since the line started, and
-// it runs, pauses and changes rate with the video.
-const onClock = (a, video, i, ms) => {
+// it runs, pauses and changes rate with the video. It is set back only past `drift` ms apart: every set is
+// a jump on screen.
+const onClock = (a, video, i, ms, drift = DRIFT_MS) => {
   const running = !video.paused && video.playbackRate > 0;
   if (running && a.playbackRate !== video.playbackRate) a.playbackRate = video.playbackRate;
   if (running && a.playState === 'paused') a.play();
   if (!running && a.playState === 'running') a.pause();
-  if (Math.abs((a.currentTime ?? 0) - (ms - lines[i].ms)) > DRIFT_MS) a.currentTime = ms - lines[i].ms;
+  if (Math.abs((a.currentTime ?? 0) - (ms - lines[i].ms)) > drift) a.currentTime = ms - lines[i].ms;
 };
 
 const dotsAt = (i, video, ms) => {
@@ -465,7 +466,15 @@ const dotsAt = (i, video, ms) => {
 // The glow of a lit line breathes on the beat (lyric_pulse, with the track's measured tempo): its opacity
 // eases down over each beat from its peak on it, from PULSE_AFTER_MS after the line lit (before that and
 // once it dims, the line's own transition shows). Only at the normal rate, where the beat is the song's.
-const PULSE_FRAMES = [{ opacity: 1 }, { opacity: 0.55 }];
+// Each beat ends where the next starts (a dip and a rise back, no jump from low to full: that read as the
+// glow flickering), and the clock is set back only past PULSE_DRIFT_MS, since the beat's place is not
+// sharper than that and every set was a jump in the glow at a word.
+const PULSE_FRAMES = [
+  { opacity: 1, easing: 'ease-out' },
+  { opacity: 0.7, offset: 0.55, easing: 'ease-in-out' },
+  { opacity: 1 },
+];
+const PULSE_DRIFT_MS = 150;
 const pulseAt = (i, video, ms) => {
   const b = meta.beat;
   if (!b || !lines[i].text || video.playbackRate !== 1 || meta.look?.glow === 'off') {
@@ -480,10 +489,9 @@ const pulseAt = (i, video, ms) => {
     duration: b.period,
     delay,
     iterations: Infinity,
-    easing: 'ease-out',
     pseudoElement: '::before',
   });
-  onClock(pulses[i], video, i, ms);
+  onClock(pulses[i], video, i, ms, PULSE_DRIFT_MS);
 };
 
 const dim = (i) => {

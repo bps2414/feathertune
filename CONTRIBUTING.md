@@ -71,7 +71,7 @@ Builds are slow and I want them not to repeat for nothing. Timings after a one-f
   - keep GPU resources (brushes, layouts, bitmaps) between frames;
   - any animation has a plugin switch, runs on **one** timer only while something is on screen to move, stops when the window is hidden, minimized or in the background, and resumes where it stopped;
   - Windows animation effects and `prefers-reduced-motion` do not turn it off; the plugin switch does.
-- **New plugins:** on by default, except those in the Experimental tab (off until reliable). Write the cost in `plugins.rs` and `docs/DESIGN.md`, or "not measured yet" if you did not measure it. The real measurement (`measure.ps1`) is run by me.
+- **New plugins:** on by default, except those marked Experimental (off until reliable). Give each one a one-line `summary` too: the settings show it next to the switch. Write the cost in `plugins.rs` and `docs/DESIGN.md`, or "not measured yet" if you did not measure it. The real measurement (`measure.ps1`) is run by me.
 - **Tests:** tests live inside the modules (`#[cfg(test)]`). If you fix a bug in pure logic (lyrics, mixes, privacy, settings), a test that reproduces it is very welcome.
 - **Docs in pairs:** docs exist in English and pt-BR. If you change one, change its pair (`README.md` and `README.pt-BR.md`, `docs/DESIGN.md` and `docs/DESIGN.pt-BR.md`, `CONTRIBUTING.md` and `CONTRIBUTING.pt-BR.md`). If you do not write one of the languages, say so in the PR and I will write the other version.
 - **Version and CHANGELOG are not yours:** do not change `version` in `Cargo.toml` and `tauri.conf.json`, nor `CHANGELOG.md` and `CHANGELOG.pt-BR.md`, and do not create tags. I make releases. Describe what changed for the user in the PR and I will write the entry.

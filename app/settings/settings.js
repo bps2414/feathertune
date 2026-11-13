@@ -62,46 +62,72 @@ let qr = null; // the QR on screen: { size, modules }
 let pairUntil = 0; // when the open pairing window ends (Date.now() ms)
 let pairTimer = 0;
 
-// Tabs.
-const tabs =[...document.querySelectorAll('[role="tab"]')];
+// Pages (the sidebar's tabs).
+const tabs = [...document.querySelectorAll('[role="tab"]')];
 const panels = [...document.querySelectorAll('[role="tabpanel"]')];
 let currentTab = 'general';
 const showTab = (name) => {
   currentTab = name;
   for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of panels) p.hidden = p.dataset.panel !== name;
+  window.scrollTo(0, 0);
   if (name === 'stats') loadStats();
   if (name === 'extensions') loadExtensions();
+  if (name === 'mixes') loadMix();
   syncPairing();
 };
 for (const t of tabs) {
   t.addEventListener('click', () => {
     clearSearch();
     showTab(t.dataset.tab);
-    if (t.dataset.tab === 'experimental') loadMix();
   });
 }
-// After an update the app opens the window on What's new (`#whats-new`).
-if (tabs.some((t) => t.dataset.tab === location.hash.slice(1))) showTab(location.hash.slice(1));
+// Up and down move between pages, as in a list.
+$('search').nextElementSibling.addEventListener('keydown', (e) => {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return;
+  e.preventDefault();
+  const i = tabs.indexOf(document.activeElement);
+  const next = tabs[(i + (e.key === 'ArrowDown' ? 1 : tabs.length - 1)) % tabs.length];
+  next.focus();
+  next.click();
+});
+// After an update the app opens the window on What's new (`#whats-new`), which is on About.
+{
+  const hash = location.hash.slice(1) === 'whats-new' ? 'about' : location.hash.slice(1);
+  if (tabs.some((t) => t.dataset.tab === hash)) showTab(hash);
+}
 
-// Search: the cards of every tab whose text has the query; empty, back to the current tab.
+// Search: the rows of every page whose text (with the plugins' details) has the query, under their page's
+// title; empty, back to the current page. A row is a child of a group; a page without groups (stats,
+// extensions) shows only when its title matches. Search hides with the `nomatch` class, so it never
+// touches what the page itself hides.
+const WHOLE = '.lead, .notice:not(.error), #stats-range, #stats-body, .drop, #ext-list, #ext-broken, #changelog';
 const search = () => {
   const q = $('search').value.trim().toLowerCase();
   document.body.classList.toggle('searching', !!q);
+  for (const x of document.querySelectorAll('main .nomatch')) x.classList.remove('nomatch');
   if (!q) {
-    for (const c of document.querySelectorAll('main .card')) c.hidden = false;
     $('no-results').hidden = true;
     showTab(currentTab);
     return;
   }
   let any = false;
   for (const p of panels) {
-    let shown = false;
-    for (const c of p.querySelectorAll('.card')) {
-      const match = c.textContent.toLowerCase().includes(q);
-      c.hidden = !match;
-      shown ||= match;
+    const title = p.querySelector('h2').textContent.toLowerCase().includes(q);
+    let shown = title;
+    for (const c of p.querySelectorAll('.group > *, .help')) {
+      const match = title || c.textContent.toLowerCase().includes(q);
+      c.classList.toggle('nomatch', !match);
+      shown ||= match && !c.hidden;
     }
+    // A group with no match hides, with the heading right before it.
+    for (const g of p.querySelectorAll('.group')) {
+      const empty = ![...g.children].some((c) => !c.hidden && !c.classList.contains('nomatch'));
+      g.classList.toggle('nomatch', empty);
+      const h = g.previousElementSibling;
+      if (h?.tagName === 'H3') h.classList.toggle('nomatch', empty);
+    }
+    if (!title) for (const x of p.querySelectorAll(WHOLE)) x.classList.add('nomatch');
     p.hidden = !shown;
     any ||= shown;
   }
@@ -124,36 +150,53 @@ const applyTheme = (theme) => {
   theme.glows.forEach((c, i) => root.setProperty(`--g${i + 1}`, c));
 };
 
-// Plugin cards: each `[data-plugin]` card gets the plugin's switch, name, description and cost on top,
-// with its own fields below. Plugins without a card go to Advanced.
+// Plugins: each `[data-plugin]` item gets a row with the plugin's name, one-line summary, an "i" button
+// for its full description and cost, and its switch; what the item held becomes its options, shown
+// while it is on. Plugins without an item go to About > Other.
 const switches = new Map();
+const showPluginState = (id, on) => {
+  switches.get(id).closest('[data-plugin]').classList.toggle('off', !on);
+  if (id === 'crossfade') $('mix-crossfade-off').hidden = on;
+};
 const buildPlugins = (plugins) => {
   for (const p of plugins) {
-    let card = document.querySelector(`[data-plugin="${p.id}"]`);
-    if (!card) {
-      card = el('div', 'card');
-      card.dataset.plugin = p.id;
-      $('other-plugins').append(card);
+    let item = document.querySelector(`[data-plugin="${p.id}"]`);
+    if (!item) {
+      item = el('div');
+      item.dataset.plugin = p.id;
+      $('other-plugins').append(item);
+      $('other-section').hidden = false;
     }
-    const extra = el('div', 'extra');
-    extra.append(...card.childNodes);
+    const options = el('div', 'options');
+    options.append(...item.childNodes);
     const name = el('div', 'name', p.name);
-    if (!p.live) name.append(el('span', 'badge', t('restart')));
+    if (p.experimental) name.append(el('span', 'badge exp', t('Experimental')));
     const body = el('div', 'body');
-    const cost = el('details', 'cost');
-    cost.append(el('summary', '', t('Cost')), document.createTextNode(p.cost));
-    body.append(name, el('div', 'description', p.description), cost);
+    body.append(name, el('div', 'desc', p.summary));
+    const details = el('div', 'details');
+    details.hidden = true;
+    const cost = el('p', 'cost', `${t('Cost')}: ${p.cost}`);
+    details.append(el('p', '', p.description), cost);
+    const info = el('button', 'info', 'i');
+    info.type = 'button';
+    info.setAttribute('aria-expanded', 'false');
+    info.setAttribute('aria-label', tf('More about {}', p.name));
+    info.title = t('More');
+    info.addEventListener('click', () => {
+      details.hidden = !details.hidden;
+      info.setAttribute('aria-expanded', String(!details.hidden));
+    });
     const toggle = el('input', 'switch');
     toggle.type = 'checkbox';
     toggle.setAttribute('aria-label', p.name);
     toggle.addEventListener('change', async () => {
       if (!(await set(`plugins.${p.id}`, toggle.checked, null))) toggle.checked = !toggle.checked;
-      card.classList.toggle('off', !toggle.checked);
+      showPluginState(p.id, toggle.checked);
       if (p.id === 'remote') loadRemote();
     });
-    const row = el('div', 'row');
-    row.append(body, toggle);
-    card.replaceChildren(row, extra);
+    const row = el('div', 'plugin');
+    row.append(body, info, toggle);
+    item.replaceChildren(row, details, ...(options.childNodes.length ? [options] : []));
     switches.set(p.id, toggle);
   }
 };
@@ -161,9 +204,8 @@ const buildPlugins = (plugins) => {
 const renderPlugins = (plugins) => {
   if (!switches.size) buildPlugins(plugins);
   for (const p of plugins) {
-    const toggle = switches.get(p.id);
-    toggle.checked = p.on;
-    toggle.closest('.card').classList.toggle('off', !p.on);
+    switches.get(p.id).checked = p.on;
+    showPluginState(p.id, p.on);
   }
 };
 
@@ -520,7 +562,10 @@ const renderMix = (m) => {
   if (m.open && m.open.list === m.list) {
     const a = items.find((x) => x.id === m.open.from) || { id: m.open.from, title: '' };
     const b = items.find((x) => x.id === m.open.to) || { id: m.open.to, title: '' };
-    showTab('experimental');
+    if (currentTab !== 'mixes' || document.body.classList.contains('searching')) {
+      clearSearch();
+      showTab('mixes');
+    }
     editPair(a, b);
   } else if (editing) {
     $('mix-editor').hidden = false;
@@ -735,7 +780,7 @@ const renderChangelog = (text, since) => {
     } else if (!card || !line.trim()) {
       list = null;
     } else if (line.startsWith('### ')) {
-      card.append(inline(el('h3'), line.slice(4)));
+      card.append(inline(el('h4'), line.slice(4)));
       list = null;
     } else if (line.startsWith('- ')) {
       if (!list) card.append((list = el('ul')));
@@ -882,7 +927,7 @@ const renderRemote = (r) => {
     $('pair-code').setAttribute('aria-label', tf('Code {}', r.pending.code.split('').join(' ')));
   }
   $('remote-devices').replaceChildren(...(r.devices.length ? r.devices.map(deviceRow) : [el('li', 'empty', t('No phones paired yet.'))]));
-  $('remote-forget').hidden = !r.devices.length;
+  $('remote-forget-row').hidden = !r.devices.length;
   syncTimer();
 };
 

@@ -41,7 +41,7 @@
 //! echo_out = false                 # an echo on the tail of the track that fades out
 //! visualizer = "bars"              # bars, wave
 //!
-//! [remote]                         # the phone remote (Experimental tab)
+//! [remote]                         # the phone remote (Phone remote page)
 //! port = 47652                     # TCP, 1024 to 65535; local network sources only
 //! name = "feathertune"             # what paired phones call this PC (never the Windows name)
 //!

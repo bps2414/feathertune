@@ -963,7 +963,7 @@ impl Share {
             }
             let first = (scroll / ROW) as usize;
             let visible = ((clip.bottom - clip.top) / ROW) as usize + 2;
-            for i in first..(first + visible).min(snap.rows.len()) {
+            for (i, row) in snap.rows.iter().enumerate().skip(first).take(visible) {
                 let top = clip.top + i as f32 * ROW - scroll;
                 let r = rect(clip.left, top + 1.0, clip.right, top + ROW - 1.0);
                 let picked = picks.contains(&i);
@@ -985,7 +985,7 @@ impl Share {
                     c.pill(inner, 7.5, with_alpha(text, 0.045));
                 }
                 let color = if picked { text } else { with_alpha(text, 0.82) };
-                c.text(&snap.rows[i].1, &f.row, rect(r.left + 42.0, r.top, r.right - 10.0, r.bottom), color);
+                c.text(&row.1, &f.row, rect(r.left + 42.0, r.top, r.right - 10.0, r.bottom), color);
             }
             unsafe { c.target.PopAxisAlignedClip() };
 

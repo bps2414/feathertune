@@ -59,7 +59,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 **Som**
 - Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas, com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
 - Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
-- Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na seção Mix da aba Experimental da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
+- Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
 
 **O que você ouve**
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
@@ -72,11 +72,11 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados na aba Experimental. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 **Além do PC**
 - Controle remoto pelo celular (prévia altamente experimental): um app Android, pareado uma vez por um QR code confirmado no PC, mostra o que toca, a capa e a fila, e controla play/pause, anterior/próxima, busca, volume ao vivo, tocar ao toque, edição da fila (tocar a seguir, remover) e tocar uma playlist da sua biblioteca. Só na rede local, criptografado de ponta a ponta (Noise Protocol), nunca durante um anúncio, exceto pausar. O APK vai anexado a cada release; o app está em [mobile/](mobile/README.pt-BR.md), o protocolo em [docs/REMOTE.pt-BR.md](docs/REMOTE.pt-BR.md).
-- Extensões: importe plugins feitos por outras pessoas (ou por você) a partir de uma pasta, um .zip ou um único arquivo .js ou .css, na aba Extensões da janela de configurações. Elas são escolha sua: o app não as revisa. Como escrever uma: [docs/EXTENSIONS.pt-BR.md](docs/EXTENSIONS.pt-BR.md).
+- Extensões: importe plugins feitos por outras pessoas (ou por você) a partir de uma pasta, um .zip ou um único arquivo .js ou .css, na página Extensões da janela de configurações. Elas são escolha sua: o app não as revisa. Como escrever uma: [docs/EXTENSIONS.pt-BR.md](docs/EXTENSIONS.pt-BR.md).
 
 O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md#ainda-não-conferido).
 
@@ -84,7 +84,7 @@ O que ainda não foi conferido está em [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR
 
 Baixe `feathertune_<versão>_x64-setup.exe` nos [releases](https://github.com/bps2414/feathertune/releases) e rode: por usuário, sem admin, Windows 10/11. Ao desinstalar, ele pergunta se também apaga seus dados (login, `config.toml`); ficam guardados se a caixa não for marcada.
 
-O APK Android do controle remoto (`feathertune-remote-<versão>.apk`) vai anexado a toda release (refeito só quando ele muda). Ligue o Controle pelo celular na aba Experimental das configurações, no PC, e escaneie o QR code com o app do celular.
+O APK Android do controle remoto (`feathertune-remote-<versão>.apk`) vai anexado a toda release (refeito só quando ele muda). Ligue o Controle pelo celular na página Controle pelo celular das configurações, no PC, e escaneie o QR code com o app do celular.
 
 O que mudou em cada versão: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md).
 
@@ -127,7 +127,7 @@ taskbar_controls = true       # botões na miniatura da barra de tarefas, progre
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
 desktop_lyrics = true         # letra flutuante sobre a área de trabalho (abra pela bandeja)
 share_lyrics = true           # cartões de letra em imagem (abra pela bandeja)
-listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na aba Stats
+listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na página Estatísticas das configurações
 navigation = true             # botões de voltar e avançar na barra de título
 song_mode = true              # escolhe a versão só áudio de uma faixa que também tem vídeo
 precise_volume = true         # roda do mouse sobre o player: volume em 2% (Shift: 10%)
@@ -168,7 +168,7 @@ align = "left"               # left, center ou right
 duets = false                # um dueto por voz: a primeira à esquerda, a segunda à direita
 glow = "normal"              # off (mais leve), normal, strong
 
-[audio]                      # a aba Áudio; os mixes ficam em mixes/<playlist>.json no perfil (aba Experimental)
+[audio]                      # a página Áudio; os mixes ficam em mixes/<playlist>.json no perfil (página Mixagens)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB de -12 a 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (fora do caminho do som), soft, night, strong
@@ -178,7 +178,7 @@ fade_in_ms = 1500            # 0 a 5000, entrando na próxima faixa
 echo_out = false             # um eco no fim da faixa que some
 visualizer = "bars"          # bars, wave
 
-[remote]                     # o controle remoto pelo celular (aba Experimental)
+[remote]                     # o controle remoto pelo celular (página Controle pelo celular)
 port = 47652                 # TCP, 1024 a 65535; só origens da rede local
 name = "feathertune"         # como os celulares pareados chamam este PC (nunca o nome do Windows)
 

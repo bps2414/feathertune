@@ -21,7 +21,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-24292f" alt="Licença MIT"></a>
 </p>
 
-> **Estável para uso diário.** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Não há suporte formal.
+> **Estável desde a 1.0.** Um projeto pessoal, usado todo dia e atualizado pelos releases do GitHub; o app instala as versões novas sozinho. Em toda a 1.x, seu perfil, as chaves do `config.toml` e a API 1 de extensões continuam funcionando; os recursos marcados como Experimental ainda podem mudar ou sair. Não há suporte formal.
 
 ## Por que o feathertune
 
@@ -57,9 +57,9 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
-- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas, com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa e um visualizer embaixo da capa.
-- Análise de faixa: tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
-- Mixes: por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
+- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (experimental), com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa (experimental) e um visualizer embaixo da capa.
+- Análise de faixa (experimental): tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
+- Mixes (experimental, junto com o crossfade): por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
 
 **O que você ouve**
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
@@ -72,7 +72,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade, mixes, pular silêncio, análise de faixa, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 **Além do PC**
 - Controle remoto pelo celular (prévia altamente experimental): um app Android, pareado uma vez por um QR code confirmado no PC, mostra o que toca, a capa e a fila, e controla play/pause, anterior/próxima, busca, volume ao vivo, tocar ao toque, edição da fila (tocar a seguir, remover) e tocar uma playlist da sua biblioteca. Só na rede local, criptografado de ponta a ponta (Noise Protocol), nunca durante um anúncio, exceto pausar. O APK vai anexado a cada release; o app está em [mobile/](mobile/README.pt-BR.md), o protocolo em [docs/REMOTE.pt-BR.md](docs/REMOTE.pt-BR.md).

@@ -21,7 +21,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-24292f" alt="MIT license"></a>
 </p>
 
-> **Stable for daily use.** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. There is no formal support.
+> **Stable since 1.0.** A personal project, used every day and updated through GitHub releases; the app installs new versions on its own. Across 1.x, your profile, the `config.toml` keys and the extension API 1 keep working; features marked Experimental may still change or go. There is no formal support.
 
 ## Why feathertune
 
@@ -57,9 +57,9 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**
-- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks, both playing at once during the fade (with an optional echo out), skipping silence at the start and end of a track, and a visualizer under the artwork.
-- Track analysis: the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
-- Mixes: per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) on the settings window's Mixes page. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
+- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (experimental), both playing at once during the fade (with an optional echo out), skipping silence at the start and end of a track (experimental), and a visualizer under the artwork.
+- Track analysis (experimental): the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
+- Mixes (experimental, with the crossfade): per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) on the settings window's Mixes page. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
 
 **Your listening**
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
@@ -72,7 +72,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
 - A privacy filter for third-party analytics (never ads).
 - Export diagnostics (Settings > Advanced): a text file to send when something goes wrong.
-- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade, mixes, skip silence, track analysis, phone remote), which start off and are marked Experimental on the page of their subject. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
+- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, phone remote), which start off and are marked Experimental on the page of their subject. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 **Beyond the PC**
 - Phone remote (highly experimental preview): an Android app, paired once with a QR code confirmed on the PC, shows what plays, the artwork and the queue, and controls play/pause, next/previous, seek, live volume, tap-to-play, queue editing (play next, remove) and playing a playlist of your library. Local network only, end-to-end encrypted (Noise Protocol), never during an ad except pause. The APK is attached to each release; the app is in [mobile/](mobile/README.md), the protocol in [docs/REMOTE.md](docs/REMOTE.md).

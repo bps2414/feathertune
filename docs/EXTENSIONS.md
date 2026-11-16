@@ -53,7 +53,7 @@ An imported extension is off until you switch it on (the dialog lists what it as
 
 - `id`: two or more parts separated by dots, each of `a-z`, `0-9`, `_` and `-`; 3 to 64 characters. The folder it is imported into takes this name.
 - `name` (1 to 64 characters), `version` (like `1.2.0`), `author`, `description` (up to 500).
-- `api`: the version of the extension API it needs (now `1`); an app with an older one refuses it.
+- `api`: the version of the extension API it needs (now `1`); an app with an older one refuses it. Within an API version, changes only add (new events, requests, fields and permissions); anything that would break an extension raises the number, and an extension written for API 1 keeps working across feathertune 1.x. The site's own page is not part of the API: selectors and markup your CSS or page code reads can change whenever the site changes.
 - `i18n`: language tag (`pt-BR`) → English text → translation, for the name, description and setting labels and hints.
 
 ### Permissions

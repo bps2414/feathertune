@@ -53,7 +53,7 @@ Uma extensão importada fica desligada até você ligá-la (o diálogo lista o q
 
 - `id`: duas ou mais partes separadas por pontos, cada uma de `a-z`, `0-9`, `_` e `-`; 3 a 64 caracteres. A pasta em que ela é importada recebe esse nome.
 - `name` (1 a 64 caracteres), `version` (como `1.2.0`), `author`, `description` (até 500).
-- `api`: a versão da API de extensões de que ela precisa (hoje `1`); um app com uma mais antiga a recusa.
+- `api`: a versão da API de extensões de que ela precisa (hoje `1`); um app com uma mais antiga a recusa. Dentro de uma versão da API, as mudanças só acrescentam (eventos, pedidos, campos e permissões novos); o que quebraria uma extensão sobe o número, e uma extensão feita para a API 1 continua funcionando em todo o feathertune 1.x. A página do próprio site não faz parte da API: seletores e marcação que seu CSS ou código de página leem podem mudar sempre que o site mudar.
 - `i18n`: idioma (`pt-BR`) → texto em inglês → tradução, para o nome, a descrição e os rótulos e dicas das configurações.
 
 ### Permissões

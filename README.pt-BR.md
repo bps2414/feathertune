@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/bps2414/feathertune/releases/latest"><img src="https://img.shields.io/github/v/release/bps2414/feathertune?label=release&color=24292f" alt="Versão mais recente"></a>
+  <a href="https://github.com/bps2414/feathertune/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/bps2414/feathertune/ci.yml?branch=main&label=CI" alt="Status da CI"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-24292f" alt="Windows 10 e 11">
   <img src="https://img.shields.io/badge/Rust-Tauri%202-24292f" alt="Rust e Tauri 2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-24292f" alt="Licença MIT"></a>

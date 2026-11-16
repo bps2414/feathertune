@@ -2,6 +2,11 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.0.0 — 2026-11-16
+
+- **feathertune 1.0: the first stable release.** Nothing new to learn: it is 0.7.5 made official. From here on, every 1.x keeps your profile, the `config.toml` keys and extensions written for API 1 working. Features marked Experimental (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, phone remote) stay off by default and may still change.
+- **Clearer docs:** the README marks every experimental feature, the extension guide says what the API promises, and the security policy covers extensions and the phone remote.
+
 ## 0.7.5 — 2026-11-13
 
 - **Settings, redesigned.** The settings are now pages in a sidebar with icons (General, Appearance, Lyrics, Audio, Mixes, Shortcuts, Integrations, Phone remote, Extensions, Stats, About), grouped by subject. Each feature is one row: its name, one short line and its switch; the full description and its cost are behind the "i" button, and its options show only while it is on. Experimental features sit on the page of their subject with an Experimental mark, instead of a tab of their own. Search shows the matching rows of every page.

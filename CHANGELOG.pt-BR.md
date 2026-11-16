@@ -2,6 +2,11 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.0.0 — 2026-11-16
+
+- **feathertune 1.0: a primeira versão estável.** Nada novo para aprender: é a 0.7.5 oficializada. Daqui em diante, toda 1.x mantém funcionando seu perfil, as chaves do `config.toml` e as extensões feitas para a API 1. Os recursos marcados como Experimental (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, controle pelo celular) continuam desligados por padrão e ainda podem mudar.
+- **Docs mais claras:** o README marca cada recurso experimental, o guia de extensões diz o que a API promete e a política de segurança cobre extensões e o controle pelo celular.
+
 ## 0.7.5 — 2026-11-13
 
 - **Configurações redesenhadas.** As configurações agora são páginas num menu lateral com ícones (Geral, Aparência, Letras, Áudio, Mixagens, Atalhos, Integrações, Controle pelo celular, Extensões, Estatísticas, Sobre), agrupadas por assunto. Cada recurso é uma linha: o nome, uma frase curta e o interruptor; a descrição completa e o custo ficam no botão "i", e as opções só aparecem com ele ligado. Os recursos experimentais ficam na página do seu assunto com a marca Experimental, em vez de numa aba própria. A busca mostra as linhas que batem em todas as páginas.

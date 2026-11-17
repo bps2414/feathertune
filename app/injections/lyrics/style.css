@@ -61,6 +61,11 @@ html[data-feathertune-light] #feathertune-lyrics .ft-line:not(.ft-current):not([
   transform: scale(0.94);
 }
 
+/* A font of the user's (`[lyrics] font`, loaded by page.js), with the site's as the fallback. */
+html[data-feathertune-font] #feathertune-lyrics {
+  font-family: 'feathertune-lyrics', Roboto, Arial, sans-serif;
+}
+
 #feathertune-lyrics .ft-line.ft-gap {
   min-height: 1.35em;
   cursor: default;

@@ -58,7 +58,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
-- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, efeitos sonoros (8D, reverb, estéreo amplo, karaokê, mono), crossfade entre faixas (experimental), com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa (experimental) e um visualizer embaixo da capa.
+- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, efeitos sonoros combináveis (8D, reverb, festa no outro cômodo, estéreo amplo, karaokê, mono), crossfade entre faixas (experimental), com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa (experimental) e um visualizer embaixo da capa.
 - Análise de faixa (experimental): tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
 - Mixes (experimental, junto com o crossfade): por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o fim da faixa toca numa segunda voz oculta enquanto o player já passa para a próxima, e as duas se sobrepõem; senão a faixa some e a próxima entra.
 
@@ -136,7 +136,7 @@ skip_disliked = true          # pula uma faixa que começa marcada com "não gos
 sleep_timer = true            # pausa depois de 15-60 min ou no fim da faixa (menu da bandeja; precisa de controls)
 equalizer = true              # plugins de áudio: um grafo Web Audio na página, em bypass durante anúncio
 compressor = true
-sound_effects = true          # 8D, reverb, estéreo amplo, karaokê ou mono (ver [audio] effect)
+sound_effects = true          # 8D, reverb, festa, estéreo amplo, karaokê, mono (ver [audio] effect)
 crossfade = false             # experimental (desligado por padrão); também os mixes e a voz de transição
 track_analysis = false        # experimental; tempo, tom e contorno de volume em audio-facts/ no perfil
 skip_silence = false          # experimental
@@ -165,6 +165,7 @@ providers = ["betterlyrics", "unison", "lrcmux", "lrclib"]  # fontes de letras; 
 estimate_words = true        # estima o tempo das palavras quando a fonte só marca linhas inteiras
 offset_ms = 0                # move a letra no tempo; positivo: mais tarde
 translate_to = "auto"        # idioma da tradução: auto (idioma do Windows), off, pt, en, es, fr, de, it, ja, ko
+font = ""                    # fonte da aba Letras, da pasta fonts do perfil (página Letras: biblioteca ou importar); "": a do site
 romanize = false             # a romanização da fonte (ex.: japonês, coreano) embaixo da linha
 size = "medium"              # texto da aba Letra: small, medium, large
 align = "left"               # left, center ou right
@@ -175,7 +176,7 @@ glow = "normal"              # off (mais leve), normal, strong
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB de -12 a 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (fora do caminho do som), soft, night, strong
-effect = "none"              # none (fora do caminho do som), 8d, reverb, wide, karaoke, mono
+effect = "none"              # none, ou 8d, reverb, wide, karaoke, mono, party separados por vírgula
 crossfade_ms = 6000          # 0 a 12000; 0: desligado
 curve = "equal_power"        # linear, equal_power, s_curve, exponential
 fade_in_ms = 1500            # 0 a 5000, entrando na próxima faixa

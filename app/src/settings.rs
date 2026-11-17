@@ -31,12 +31,14 @@
 //! estimate_words = true            # word times for lines timed only as a whole
 //! offset_ms = 0                    # moves the lyrics in time; positive: later
 //! translate_to = "auto"            # a line-by-line translation: auto (Windows' language), off, pt, en, es...
+//! font = ""                        # the Lyrics tab's font, from the profile's fonts folder; "": the site's
 //!
 //! [audio]                          # the audio plugins (Audio tab); every effect is bypassed during ads
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
 //! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
 //! compressor = "none"              # none (out of the sound path), soft, night, strong
-//! effect = "none"                  # none (out of the sound path), 8d, reverb, wide, karaoke, mono
+//! effect = "none"                  # none (out of the sound path), or any of 8d, reverb, wide, karaoke,
+//!                                  # mono, party, joined by commas: "party,reverb"
 //! crossfade_ms = 6000              # 0 to 12000; 0: off
 //! curve = "equal_power"            # linear, equal_power, s_curve, exponential
 //! fade_in_ms = 1500                # 0 to 5000, into the next track
@@ -163,6 +165,8 @@ pub struct LyricsSettings {
     pub glow: String,
     /// Lay a duet out: the first singer's lines on the left, the others' on the right, a group's centered.
     pub duets: bool,
+    /// The Lyrics tab's font: a font in the profile's `fonts` folder (fonts.rs), "" for the site's own.
+    pub font: String,
 }
 
 pub const LYRICS_SIZES: &[&str] = &["small", "medium", "large"];
@@ -181,6 +185,7 @@ impl Default for LyricsSettings {
             align: "left".into(),
             glow: "normal".into(),
             duets: false,
+            font: String::new(),
         }
     }
 }

@@ -151,11 +151,11 @@ const compressor = () => (on('compressor') ? COMPRESSORS[data?.compressor] : nul
 
 // --- sound effects ---
 //
-// One at a time, between the equalizer and the compressor (which keeps a louder effect in check). Each
-// is a unit: `in` → dry → `out` and `in` → the effect → wet → `out`, wired inside once, built the first
-// time the effect is chosen and kept. Neutral is dry 1, wet 0: it comes and goes in 30 ms and leaves
-// the chain like any node (and during an ad, like every effect).
-const EFFECTS = ['8d', 'reverb', 'wide', 'karaoke', 'mono'];
+// One or several, between the equalizer and the compressor (which keeps a louder effect in check), in
+// this fixed order. Each is a unit: `in` → dry → `out` and `in` → the effect → wet → `out`, wired
+// inside once, built the first time the effect is chosen and kept. Neutral is dry 1, wet 0: it comes
+// and goes in 30 ms and leaves the chain like any node (and during an ad, like every effect).
+const EFFECTS = ['karaoke', 'mono', 'wide', 'party', '8d', 'reverb'];
 // 8D: the sound circles once every 8 s, almost from one side to the other.
 const CIRCLE_HZ = 0.125;
 const CIRCLE_DEPTH = 0.9;
@@ -166,11 +166,18 @@ const REVERB_WET = 0.35;
 const WIDE = 1.6;
 // Karaoke: the middle (L + R, where the voice is) cancelled, the lows kept.
 const KARAOKE_LOW_HZ = 150;
+// Party in the next room (a bathroom, a garage): the music through a wall. Mono, the highs gone
+// (two low-passes, 24 dB per octave), the bass thumping a little more, in a small tiled room.
+const PARTY_LOW_PASS_HZ = 420;
+const PARTY_BASS_HZ = 110;
+const PARTY_BASS_DB = 5;
+const PARTY_ROOM_S = 0.7;
+const PARTY_ROOM_WET = 0.45;
 const units = {};
-const effectUnit = () => {
-  const kind = data?.effect;
-  if (!nodes || !on('sound_effects') || !EFFECTS.includes(kind)) return null;
-  return (units[kind] ||= makeUnit(kind));
+const effectUnits = () => {
+  const kinds = Array.isArray(data?.effects) ? data.effects : [];
+  if (!nodes || !on('sound_effects')) return [];
+  return EFFECTS.filter((k) => kinds.includes(k)).map((k) => (units[k] ||= makeUnit(k)));
 };
 // A node that mixes what it gets down to one channel (or up to two: `channels` 2).
 const channels = (node, n) => {
@@ -179,9 +186,9 @@ const channels = (node, n) => {
   node.channelInterpretation = 'speakers';
   return node;
 };
-// A hall's impulse response: noise decaying to -60 dB over REVERB_S, a different one per side.
-const impulse = () => {
-  const n = Math.round(REVERB_S * ctx.sampleRate);
+// A room's impulse response: noise decaying to -60 dB over `seconds`, a different one per side.
+const impulse = (seconds) => {
+  const n = Math.round(seconds * ctx.sampleRate);
   const buffer = ctx.createBuffer(2, n, ctx.sampleRate);
   for (let c = 0; c < 2; c++) {
     const d = buffer.getChannelData(c);
@@ -210,8 +217,28 @@ const makeUnit = (kind) => {
     u.in.connect(pan).connect(u.wet);
   } else if (kind === 'reverb') {
     const convolver = ctx.createConvolver();
-    convolver.buffer = impulse();
+    convolver.buffer = impulse(REVERB_S);
     u.in.connect(convolver).connect(u.wet);
+  } else if (kind === 'party') {
+    let wall = u.in.connect(channels(ctx.createGain(), 1));
+    for (let i = 0; i < 2; i++) {
+      const low = ctx.createBiquadFilter();
+      low.type = 'lowpass';
+      low.frequency.value = PARTY_LOW_PASS_HZ;
+      low.Q.value = 0.7;
+      wall = wall.connect(low);
+    }
+    const bass = ctx.createBiquadFilter();
+    bass.type = 'lowshelf';
+    bass.frequency.value = PARTY_BASS_HZ;
+    bass.gain.value = PARTY_BASS_DB;
+    wall = wall.connect(bass);
+    wall.connect(u.wet);
+    const room = ctx.createConvolver();
+    room.buffer = impulse(PARTY_ROOM_S);
+    const roomWet = ctx.createGain();
+    roomWet.gain.value = PARTY_ROOM_WET;
+    wall.connect(room).connect(roomWet).connect(u.wet);
   } else if (kind === 'wide') {
     const split = ctx.createChannelSplitter(2);
     const merge = ctx.createChannelMerger(2);
@@ -249,15 +276,20 @@ const wanted = () => {
   if (ad) return [];
   const list = [];
   eqGains().forEach((g, i) => g && list.push(nodes.eq[i]));
-  const fx = effectUnit();
-  if (fx) list.push(fx);
+  list.push(...effectUnits());
   if (compressor()) list.push(nodes.compressor);
   if (bassCut.on) list.push(nodes.bass);
   if (sweep.on) list.push(nodes.sweep);
   return list;
 };
 // The fixed order of every effect node.
-const order = () => [...nodes.eq, ...Object.values(units), nodes.compressor, nodes.bass, nodes.sweep];
+const order = () => [
+  ...nodes.eq,
+  ...EFFECTS.map((k) => units[k]).filter(Boolean),
+  nodes.compressor,
+  nodes.bass,
+  nodes.sweep,
+];
 
 const neutralize = (node) => {
   if (node.unit) {
@@ -580,6 +612,7 @@ const planFade = (v) => {
   const name = m ? m.curve : c.curve;
   const curveName = CURVES[name] ? name : 'equal_power';
   return {
+    length,
     out,
     dur,
     curve: CURVES[curveName],
@@ -753,6 +786,17 @@ const onTime = (v) => {
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
   if (faded && t < 2) startTrack(v, id);
   if (!fade || overlap) return;
+  // The length can change late, also once the fade is armed (the player's 154 s becomes the track's
+  // 153.6 s): planned again, and re-armed from where it is, so the fade ends with the track and its
+  // tail never lands on the start of the next one (which then jumped up from the fade's level).
+  if (!faded && Math.abs(songLength(v) - fade.length) > 0.05) {
+    fade = planFade(v);
+    if (armed) {
+      if (fade) arm(v);
+      else cancelFade();
+    }
+    if (!fade) return;
+  }
   if (!armed && inWindow(t)) arm(v);
   // The fade is over: let the track end by itself (unless the fade already ends with it).
   if (armed && !faded && t >= fade.out + fade.dur - 0.05) {
@@ -1761,7 +1805,7 @@ feathertune.audio = Object.freeze({
           }
         : null,
       // A sound effect is not copied by the voice: Rust keeps to the one-player fade meanwhile.
-      fx: !!effectUnit(),
+      fx: effectUnits().length > 0,
       overlap: !!overlap,
       swapped: !!overlap?.swapped,
     };

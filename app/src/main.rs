@@ -27,6 +27,7 @@ mod diag;
 mod discord;
 mod extension_api;
 mod extensions;
+mod fonts;
 mod game_mode;
 mod gfx;
 mod i18n;
@@ -184,6 +185,7 @@ fn main() {
             mixes::settings_mix,
             settings_window::settings_remote,
             settings_window::settings_extensions,
+            settings_window::settings_fonts,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -261,6 +263,10 @@ fn main() {
             let page_lyrics = live.plugin("synced_lyrics");
             if page_lyrics || live.plugin("desktop_lyrics") || live.plugin("share_lyrics") {
                 lyrics::start(app.handle(), &profile, page_lyrics);
+            }
+            if page_lyrics && !live.get().lyrics.font.is_empty() {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || fonts::push(&handle));
             }
             desktop_lyrics::start(app.handle());
             audio::start(app.handle());

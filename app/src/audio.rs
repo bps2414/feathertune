@@ -18,8 +18,15 @@ use crate::settings::{Live, Settings};
 pub const PLUGINS: &[&str] =
     &["equalizer", "compressor", "sound_effects", "crossfade", "track_analysis", "skip_silence", "visualizer"];
 
-/// Sound effects (built in the page module); "none" leaves the effect out of the path.
-pub const EFFECTS: &[&str] = &["none", "8d", "reverb", "wide", "karaoke", "mono"];
+/// Sound effects (built in the page module); "none" leaves them out of the path. `[audio] effect` holds
+/// one or several, joined by commas ("8d,reverb").
+pub const EFFECTS: &[&str] = &["none", "8d", "reverb", "wide", "karaoke", "mono", "party"];
+
+/// The known effects in `[audio] effect`, each once, in `EFFECTS` order ("none" and unknown ones left out).
+pub fn effects(value: &str) -> Vec<&'static str> {
+    let given: Vec<&str> = value.split(',').map(str::trim).collect();
+    EFFECTS.iter().skip(1).copied().filter(|e| given.contains(e)).collect()
+}
 
 /// Visualizer styles (drawn in the page module).
 pub const VISUALIZERS: &[&str] = &["bars", "wave"];
@@ -127,10 +134,9 @@ fn payload(s: &Settings) -> Value {
         })
     });
     let visualizer = if VISUALIZERS.contains(&a.visualizer.as_str()) { a.visualizer.as_str() } else { "bars" };
-    let effect = if EFFECTS.contains(&a.effect.as_str()) { a.effect.as_str() } else { "none" };
     json!({
         "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade,
-        "visualizer": visualizer, "effect": effect,
+        "visualizer": visualizer, "effects": effects(&a.effect),
         // The mix buttons' texts, in the app's language.
         "labels": {
             "edited": crate::i18n::t("Edited"),

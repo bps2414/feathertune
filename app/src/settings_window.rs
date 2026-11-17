@@ -288,6 +288,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "align": s.lyrics.align,
             "glow": s.lyrics.glow,
             "duets": s.lyrics.duets,
+            "font": s.lyrics.font,
         },
         "audio": {
             "eq_preset": s.audio.eq_preset,
@@ -425,6 +426,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             live.write("lyrics", name, toml_edit::value(ids), None, false)?;
             Ok(false)
         }
+        ("lyrics", "font") => {
+            let font = value.as_str().filter(|f| f.is_empty() || crate::fonts::valid_name(f)).ok_or("unknown font")?;
+            live.write("lyrics", name, toml_edit::value(font), None, false)?;
+            crate::fonts::push(&app);
+            Ok(false)
+        }
         ("lyrics", "size" | "align" | "glow") => {
             let v = value.as_str().ok_or("expected a value")?;
             let allowed = match name {
@@ -534,7 +541,13 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             Ok(false)
         }
         ("audio", "effect") => {
-            let effect = value.as_str().filter(|e| crate::audio::EFFECTS.contains(e)).ok_or("unknown effect")?;
+            // One or several, joined by commas; "none" (or nothing) turns them all off.
+            let given = value.as_str().ok_or("expected effects")?;
+            if given.split(',').map(str::trim).any(|e| !e.is_empty() && !crate::audio::EFFECTS.contains(&e)) {
+                return Err("unknown effect".into());
+            }
+            let list = crate::audio::effects(given);
+            let effect = if list.is_empty() { "none".to_owned() } else { list.join(",") };
             live.write("audio", name, toml_edit::value(effect), None, false)?;
             crate::audio::push(&app);
             Ok(false)
@@ -647,6 +660,47 @@ pub fn settings_remote(webview: Webview, app: AppHandle, op: String, arg: Value)
         "forget_all" => remote.forget_all().map(|()| Value::Null),
         _ => Err("unknown operation".into()),
     }
+}
+
+/// The Lyrics tab's fonts (fonts.rs). `op`: `list`; `import` ({file, data: base64}); `download` ({id}, from the
+/// library); `remove` ({name}; the chosen one goes back to the site's font). Each returns the list (and the
+/// font `added`). Only the
+/// settings window may call it; it runs off the main thread (a download takes a moment).
+#[tauri::command]
+pub async fn settings_fonts(webview: Webview, app: AppHandle, op: String, arg: Value) -> Result<Value, String> {
+    use base64::Engine;
+
+    guard(&webview)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let field = |k: &str| arg.get(k).and_then(Value::as_str).ok_or_else(|| format!("expected {k}"));
+        let mut added = None;
+        match op.as_str() {
+            "list" => {}
+            "import" => {
+                let data = field("data")?;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+                added = Some(crate::fonts::import(&app, field("file")?, &bytes)?);
+            }
+            "download" => {
+                added = Some(crate::fonts::download(&app, field("id")?)?);
+            }
+            "remove" => {
+                let name = field("name")?;
+                crate::fonts::remove(&app, name)?;
+                let live = app.state::<Live>();
+                if live.get().lyrics.font == name {
+                    live.write("lyrics", "font", toml_edit::value(""), None, false)?;
+                    crate::fonts::push(&app);
+                }
+            }
+            _ => return Err("unknown operation".into()),
+        }
+        let mut view = crate::fonts::view(&app);
+        view["added"] = json!(added);
+        Ok(view)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The Extensions tab. `op`: `list`; `import` ({files: {path: base64}}, what the user picked; returns what the

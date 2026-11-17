@@ -324,11 +324,12 @@ pub const PLUGINS: &[Plugin] = &[
     Plugin {
         id: "sound_effects",
         name: "Sound effects",
-        summary: "8D, reverb, wide stereo, karaoke or mono.",
-        description: "One effect on the page's own audio (Audio tab): 8D (the sound circles around you), reverb (a \
-                      hall), wide stereo, karaoke (the voice in the middle goes down) or mono. \"None\" (the \
-                      default) leaves it out of the sound path. Bypassed while an ad plays. While an effect is on, \
-                      the crossfade does not overlap the tracks.",
+        summary: "8D, reverb, party in the next room, wide stereo, karaoke or mono, alone or together.",
+        description: "Effects on the page's own audio (Audio tab), one or several at once: 8D (the sound circles \
+                      around you), reverb (a hall), party in the next room (muffled through a wall, like from the \
+                      bathroom or the garage), wide stereo, karaoke (the voice in the middle goes down) or mono. \
+                      With none on (the default) they are out of the sound path. Bypassed while an ad plays. While \
+                      an effect is on, the crossfade does not overlap the tracks.",
         cost: "Not measured yet.",
         default_on: true,
         live: true,

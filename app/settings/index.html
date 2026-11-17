@@ -126,6 +126,19 @@
           </select>
         </div>
         <div class="setting">
+          <div class="body"><div class="name">Font</div><div class="desc">Download a free font below, or import a font file.</div></div>
+          <select id="lyrics-font" aria-label="Font"><option value="">The site's own</option></select>
+        </div>
+        <div class="setting column">
+          <div class="body"><div class="name">Font library</div><div class="desc">Free fonts (Open Font License), downloaded once and kept on this PC. A downloaded font is chosen at once.</div></div>
+          <div id="font-library"></div>
+          <div class="buttons">
+            <button id="font-import" type="button">Import a font file</button>
+            <button id="font-remove" type="button" class="secondary" disabled>Remove the chosen font</button>
+          </div>
+          <input id="font-file" type="file" accept=".ttf,.otf,.woff,.woff2" hidden>
+        </div>
+        <div class="setting">
           <div class="body"><div class="name">Duet layout</div><div class="desc">Each singer on their own side.</div></div>
           <input type="checkbox" class="switch" data-key="lyrics.duets" aria-label="Duet layout">
         </div>
@@ -219,15 +232,28 @@
         </div>
         <div data-plugin="sound_effects">
           <div class="setting">
-            <div class="body"><div class="name">Effect</div></div>
-            <select data-key="audio.effect" aria-label="Effect">
-              <option value="none">None</option>
-              <option value="8d">8D (circles around you)</option>
-              <option value="reverb">Reverb (a hall)</option>
-              <option value="wide">Wide stereo</option>
-              <option value="karaoke">Karaoke (voice down)</option>
-              <option value="mono">Mono</option>
-            </select>
+            <div class="body"><div class="name">8D (circles around you)</div></div>
+            <input type="checkbox" class="switch" data-effect="8d" aria-label="8D (circles around you)">
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Reverb (a hall)</div></div>
+            <input type="checkbox" class="switch" data-effect="reverb" aria-label="Reverb (a hall)">
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Party in the next room</div><div class="desc">Muffled, through the wall, like from the bathroom or the garage.</div></div>
+            <input type="checkbox" class="switch" data-effect="party" aria-label="Party in the next room">
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Wide stereo</div></div>
+            <input type="checkbox" class="switch" data-effect="wide" aria-label="Wide stereo">
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Karaoke (voice down)</div></div>
+            <input type="checkbox" class="switch" data-effect="karaoke" aria-label="Karaoke (voice down)">
+          </div>
+          <div class="setting">
+            <div class="body"><div class="name">Mono</div><div class="desc">Effects can be combined.</div></div>
+            <input type="checkbox" class="switch" data-effect="mono" aria-label="Mono">
           </div>
         </div>
         <div data-plugin="visualizer">

@@ -475,12 +475,14 @@ const dotsAt = (i, video, ms) => {
 // Each beat ends where the next starts (a dip and a rise back, no jump from low to full: that read as the
 // glow flickering), and the clock is set back only past PULSE_DRIFT_MS, since the beat's place is not
 // sharper than that and every set was a jump in the glow at a word.
+// The dip is shallow and the clock is set back only past a third of a second: a deeper dip and a tighter
+// clock (0.7 and 150 ms until 1.1.0) read as the glow twinkling.
 const PULSE_FRAMES = [
-  { opacity: 1, easing: 'ease-out' },
-  { opacity: 0.7, offset: 0.55, easing: 'ease-in-out' },
+  { opacity: 1, easing: 'ease-in-out' },
+  { opacity: 0.88, offset: 0.5, easing: 'ease-in-out' },
   { opacity: 1 },
 ];
-const PULSE_DRIFT_MS = 150;
+const PULSE_DRIFT_MS = 300;
 const pulseAt = (i, video, ms) => {
   const b = meta.beat;
   // Not with the light effects: a pulse keeps the compositor drawing every frame.
@@ -912,6 +914,34 @@ document.addEventListener(
   },
   true,
 );
+
+// The Lyrics tab's font (`[lyrics] font`, fonts.rs): { name, data } with the file's bytes in base64, or null
+// for the site's own. Loaded with the FontFace API, so the page fetches nothing; one weight range covers
+// every weight the lyrics use (no synthetic bold).
+let lyricsFace = null;
+feathertune.lyricsFont = Object.freeze({
+  set(data) {
+    if (lyricsFace) document.fonts.delete(lyricsFace);
+    lyricsFace = null;
+    document.documentElement.removeAttribute('data-feathertune-font');
+    if (!data || typeof data.data !== 'string') return;
+    try {
+      const bytes = Uint8Array.from(atob(data.data), (c) => c.charCodeAt(0));
+      const face = new FontFace('feathertune-lyrics', bytes.buffer, { weight: '100 900' });
+      lyricsFace = face;
+      face
+        .load()
+        .then(() => {
+          if (lyricsFace !== face) return;
+          document.fonts.add(face);
+          document.documentElement.setAttribute('data-feathertune-font', '');
+        })
+        .catch((e) => console.warn('feathertune: the lyrics font did not load', e));
+    } catch (e) {
+      console.warn('feathertune: the lyrics font did not load', e);
+    }
+  },
+});
 
 feathertune.lyrics = Object.freeze({
   set(data) {

@@ -978,6 +978,8 @@ const load = async () => {
     );
     renderDesktopLyrics(s.desktop_lyrics);
     renderAudio(s.audio);
+    renderEffects(s.audio.effect);
+    renderLyricsFont(s.lyrics.font);
     // The Mix tab, and a pair the site asked to open (mix_open).
     loadMix();
     if (!$('lyrics-providers').contains(document.activeElement)) renderSources(s.lyrics);
@@ -1013,6 +1015,97 @@ function showSeconds(input) {
 for (const input of document.querySelectorAll('input[type="range"][data-key]')) {
   input.addEventListener('input', () => showSeconds(input));
 }
+
+// Sound effects: one switch each, saved together as `audio.effect` ("party,reverb", "none" for none).
+const effectSwitches = [...document.querySelectorAll('input[data-effect]')];
+const renderEffects = (effect) => {
+  const on = String(effect || '').split(',');
+  for (const input of effectSwitches) input.checked = on.includes(input.dataset.effect);
+};
+for (const input of effectSwitches) {
+  input.addEventListener('change', () => {
+    const list = effectSwitches.filter((i) => i.checked).map((i) => i.dataset.effect);
+    set('audio.effect', list.length ? list.join(',') : 'none', input);
+  });
+}
+
+// The Lyrics tab's font (settings_fonts): the installed fonts, the free library and imported files.
+const FONT_KINDS = { script: 'Cursive', handwriting: 'Handwriting', display: 'Display', sans: 'Sans serif', serif: 'Serif' };
+const fontCall = (op, arg) => invoke('settings_fonts', { op, arg: arg ?? null });
+let lyricsFont = '';
+let fontsLoaded = false;
+const renderFonts = (v) => {
+  const select = $('lyrics-font');
+  const none = el('option', '', t("The site's own"));
+  none.value = '';
+  select.replaceChildren(
+    none,
+    ...v.installed.map((name) => {
+      const o = el('option', '', name);
+      o.value = name;
+      return o;
+    }),
+  );
+  select.value = v.installed.includes(lyricsFont) ? lyricsFont : '';
+  $('font-remove').disabled = !select.value;
+  const rows = Object.entries(FONT_KINDS).map(([kind, english]) => {
+    const row = el('div', 'setting');
+    const body = el('div', 'body');
+    body.append(el('div', 'desc', t(english)));
+    const buttons = el('div', 'buttons');
+    for (const f of v.library.filter((f) => f.kind === kind)) {
+      const b = el('button', 'secondary', f.installed ? `✓ ${f.name}` : f.name);
+      b.type = 'button';
+      b.disabled = f.installed;
+      b.addEventListener('click', () => fontOp(b, 'download', { id: f.id }));
+      buttons.append(b);
+    }
+    row.append(body, buttons);
+    return row;
+  });
+  $('font-library').replaceChildren(...rows);
+};
+// Runs a fonts operation; a font it added becomes the chosen one.
+const fontOp = async (button, op, arg) => {
+  if (button) button.disabled = true;
+  try {
+    const v = await fontCall(op, arg);
+    showError('');
+    if (v.added && (await set('lyrics.font', v.added))) lyricsFont = v.added;
+    if (op === 'remove' && arg?.name === lyricsFont) lyricsFont = '';
+    renderFonts(v);
+  } catch (e) {
+    showError(String(e));
+    if (button) button.disabled = false;
+  }
+};
+const renderLyricsFont = (font) => {
+  lyricsFont = font || '';
+  if (!fontsLoaded) {
+    fontsLoaded = true;
+    fontOp(null, 'list');
+  } else if ($('lyrics-font') !== document.activeElement) {
+    $('lyrics-font').value = lyricsFont;
+    $('font-remove').disabled = !lyricsFont;
+  }
+};
+$('lyrics-font').addEventListener('change', async (e) => {
+  if (await set('lyrics.font', e.target.value, e.target)) lyricsFont = e.target.value;
+  $('font-remove').disabled = !lyricsFont;
+});
+$('font-remove').addEventListener('click', (e) => lyricsFont && fontOp(e.target, 'remove', { name: lyricsFont }));
+$('font-import').addEventListener('click', () => $('font-file').click());
+$('font-file').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  fontOp($('font-import'), 'import', { file: file.name, data: btoa(binary) }).then(() => {
+    $('font-import').disabled = false;
+  });
+});
 
 // Shortcut fields record the keys pressed, in the names the shortcut parser takes (Ctrl+Alt+P).
 const keyName = (code) => {

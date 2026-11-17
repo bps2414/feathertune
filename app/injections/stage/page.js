@@ -1,16 +1,26 @@
 // Stage (plugin `stage`, see src/stage.rs): plays the script Rust wrote for the track as a full-screen show,
 // in a fixed layer over the site. Rust sends `{ open: true, id, script, lines, translation, field, texts }`
 // while the stage is open (again when any of them changes) and `{ open: false }` when it closes (Esc, the
-// leave button, hiding or minimizing the window, game mode, the switch); the display font comes once, as
-// `stageFont` `{ data }` (the file in base64). The page asks Rust for nothing.
+// leave button, hiding or minimizing the window, game mode, the switch); the display fonts come once, as
+// `stageFont` `{ fonts: [{ family, data }] }` (the files in base64). The page asks Rust for nothing.
 // - Never over an ad: while the core's ad flag is up (`feathertune.ad`) the layer is gone at once (not
 //   painted, no mouse) and the site shows; when the ad ends it comes back on the scene of that moment.
 // - Under the layer the site's app is `visibility: hidden` (not painted) and `feathertune.covered` is set,
 //   which pauses the lyrics' glide and the visualizer.
+// - Every line fits on screen: its words are measured once (in a hidden box, with the loaded font, at the
+//   axes they end at), then the layout the director chose sets them as big as the safe area (SAFE) allows,
+//   breaking into more rows rather than overflowing; titles narrow through the width axis first. The rows
+//   as laid out are checked once against what was computed, and the block shrinks if they came out wider.
+// - The type: the song's voice (a face and its axes) from the script; a word lights at its time and grows
+//   to its lit axes over the time it is held (font-variation-settings on that word only), blooms (a copy
+//   of the line painted once as glow, each word faded in by opacity), and the emphasis word gets the
+//   accent. Lines enter (rise, letters, skew, track) and leave (slide, scatter, fold, zoom, sink) as the
+//   script says; the chorus' anthem has echoes, more each time it comes back.
 // - One animation frame loop, only while open, the page visible, the track playing and no ad. Paused, it
-//   draws one frame and stops; the CSS animations hold too (`ft-still`). Only transform and opacity move;
-//   only the current line (and the close-up's next one) is in the DOM. With the light effects
-//   (`html[data-feathertune-light]`) there is no grain, echo, flash or camera breath.
+//   draws one frame and stops; the CSS animations and the axis animations hold too. Per frame only
+//   transform and opacity are written, and only when they change; only the current line (and the one
+//   leaving, for its exit) is in the DOM. With the light effects (`html[data-feathertune-light]`) there is
+//   no glow, echo, grain, flash, letter stagger, 3D or camera breath, and lit words take their axes at once.
 // - Without the track analysis the light follows the audio module's live level, read only while the
 //   stage plays. Every text goes in as textContent; the data from Rust is checked before use.
 if (window.top !== window) return;
@@ -21,12 +31,25 @@ const IDLE_MS = 2000;
 const KINDS = ['opening', 'close', 'editorial', 'chorus', 'instrumental', 'credits'];
 const TEXT_KINDS = new Set(['close', 'editorial', 'chorus']);
 const RELIEF_KINDS = new Set(['opening', 'instrumental', 'credits']);
+const LAYOUTS = ['stack', 'rag', 'cascade', 'hero', 'grid', 'vertical', 'split', 'tilt', 'anthem'];
+const ENTERS = ['rise', 'letters', 'skew', 'track'];
+const EXITS = ['slide', 'scatter', 'fold', 'zoom', 'sink'];
+const CAMERAS = ['push', 'pull', 'left', 'right', 'rise', 'roll'];
 const MAX_LINES = 2000;
 const MAX_LIGHT = 9000;
+// Where text may go, as shares of the window: nothing is set outside it (the HUD and the subtitles
+// have the space below it).
+const SAFE = { x: 0.06, y: 0.1, w: 0.88, h: 0.7 };
+// Per-letter entrances only for lines up to this many letters (each letter is an element while it moves).
+const MAX_LETTERS = 48;
 // The live level (dBFS) mapped onto 0..1, and how fast the light follows it.
 const LIVE_DB = { FLOOR: -42, RANGE: 34, FOLLOW: 0.15 };
-const EASE_IN_OUT = 'cubic-bezier(.7, 0, .2, 1)';
-const EASE_OUT = 'cubic-bezier(.2, .7, .2, 1)';
+const EASE_IN_OUT = 'cubic-bezier(.76, 0, .24, 1)';
+const EASE_OUT = 'cubic-bezier(.16, 1, .3, 1)';
+// A word grows to its lit axes over the time it is held, within these.
+const HOLD_MS = { MIN: 160, MAX: 2600 };
+const EXIT_MS = 700;
+const FONT_WAIT_MS = 800;
 const FIELD = /^data:image\/png;base64,[A-Za-z0-9+/=]{1,400000}$/;
 const TEXTS = {
   leave: 'Leave the stage',
@@ -38,26 +61,100 @@ const TEXTS = {
   listened: 'You listened to',
   next: 'Up next',
 };
+// The fonts the page accepts, with their axes' ranges.
+const FACES = {
+  'ft-anybody': { weight: '100 900', stretch: '50% 150%' },
+  'ft-unbounded': { weight: '200 900' },
+  'ft-syne': { weight: '400 800' },
+};
+// The voices (src/stage.rs, `Voice`): the face, row pitch, word gap and tracking (em), the case, and the
+// axes of an unlit word, a lit one, the emphasis word, the small words around a hero; `narrow` is how far
+// the width axis may close to fit a title or a hero (none without the axis).
+const VOICES = {
+  compressed: {
+    face: "'ft-anybody'",
+    lh: 0.86,
+    gap: 0.2,
+    track: -0.005,
+    kase: 'upper',
+    heroCase: 'upper',
+    base: [['wdth', 62], ['wght', 640]],
+    lit: [['wdth', 74], ['wght', 860]],
+    key: [['wdth', 86], ['wght', 900]],
+    small: [['wdth', 100], ['wght', 420]],
+    smallLit: [['wdth', 104], ['wght', 640]],
+    narrow: 50,
+  },
+  expanded: {
+    face: "'ft-anybody'",
+    lh: 1.02,
+    gap: 0.26,
+    track: 0,
+    kase: 'asis',
+    heroCase: 'upper',
+    base: [['wdth', 132], ['wght', 160]],
+    lit: [['wdth', 146], ['wght', 380]],
+    key: [['wdth', 150], ['wght', 620]],
+    small: [['wdth', 118], ['wght', 280]],
+    smallLit: [['wdth', 122], ['wght', 420]],
+    narrow: 96,
+  },
+  round: {
+    face: "'ft-unbounded'",
+    lh: 1.06,
+    gap: 0.22,
+    track: -0.03,
+    kase: 'lower',
+    heroCase: 'lower',
+    base: [['wght', 240]],
+    lit: [['wght', 620]],
+    key: [['wght', 880]],
+    small: [['wght', 360]],
+    smallLit: [['wght', 520]],
+    narrow: null,
+  },
+  quirk: {
+    face: "'ft-syne'",
+    lh: 1.0,
+    gap: 0.24,
+    track: -0.02,
+    kase: 'asis',
+    heroCase: 'upper',
+    base: [['wght', 400]],
+    lit: [['wght', 700]],
+    key: [['wght', 800]],
+    small: [['wght', 440]],
+    smallLit: [['wght', 620]],
+    narrow: null,
+  },
+};
 
 const st = {
   open: false,
   ad: false,
   raf: 0,
+  still: false,
   // The checked data (`check`) and the key of its sections (the same keeps the scene on screen).
   v: null,
   key: '',
   sec: -1,
   line: -2,
   scene: null,
+  block: null,
   words: [],
+  anims: new Set(),
   dots: null,
   e: 0.5,
   live: false,
+  // The display fonts are in (feathertune.stageFont), and when the stage last opened.
+  fonts: false,
+  opened: 0,
   // The track's length (s), read on the media events rather than at every frame.
   total: 0,
   relief: null,
   idle: 0,
-  shown: { time: '', paused: null, transform: '', vignette: '', flash: '', played: -1 },
+  resize: 0,
+  shown: {},
 };
 let ui = null;
 
@@ -70,6 +167,12 @@ const fmt = (s) => {
   const t = Math.max(0, Math.floor(s || 0));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
+const fvs = (axes) => axes.map(([k, v]) => `'${k}' ${Math.round(v * 10) / 10}`).join(', ');
+const withWidth = (axes, t) => axes.map(([k, v]) => [k, k === 'wdth' && t != null ? t : v]);
+const widthOf = (axes) => axes.find(([k]) => k === 'wdth')?.[1] ?? null;
+const cased = (s, kase) => (kase === 'upper' ? s.toLocaleUpperCase() : kase === 'lower' ? s.toLocaleLowerCase() : s);
+// A small stable hash, for choices the script does not make (which side the opening's cover is on).
+const hash = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 
 const el = (tag, cls, parent, content) => {
   const e = document.createElement(tag);
@@ -101,17 +204,33 @@ const check = (d) => {
     return { ms: num(l[0]) ? l[0] : 0, text: text(l[1]), words: words?.length ? words : null };
   });
   const n = lines.length;
+  const sign = (x) => (num(x) ? clamp(Math.round(x), -1, 1) : 0);
+  const shot = (x) => ({
+    layout: LAYOUTS.includes(x?.layout) ? x.layout : 'stack',
+    x: sign(x?.x),
+    y: sign(x?.y),
+    hero: Number.isInteger(x?.hero) && x.hero >= 0 ? x.hero : -1,
+    enter: ENTERS.includes(x?.enter) ? x.enter : 'rise',
+    exit: EXITS.includes(x?.exit) ? x.exit : 'sink',
+    level: Number.isInteger(x?.level) ? clamp(x.level, 0, 3) : 0,
+  });
   const sections = s.sections
     .filter((x) => x && KINDS.includes(x.kind) && num(x.from_ms) && num(x.to_ms))
     .slice(0, 400)
-    .map((x) => ({
-      kind: x.kind,
-      from: x.from_ms,
-      to: x.to_ms,
-      lines: Array.isArray(x.lines) ? x.lines.filter((i) => Number.isInteger(i) && i >= 0 && i < n) : [],
-      right: x.align === 'right',
-      chorus: Number.isInteger(x.chorus_no) ? clamp(x.chorus_no, 0, 99) : 0,
-    }));
+    .map((x) => {
+      const ls = Array.isArray(x.lines) ? x.lines : [];
+      const shots = Array.isArray(x.shots) ? x.shots : [];
+      const pairs = ls.map((i, j) => [i, shot(shots[j])]).filter(([i]) => Number.isInteger(i) && i >= 0 && i < n);
+      return {
+        kind: x.kind,
+        from: x.from_ms,
+        to: x.to_ms,
+        lines: pairs.map((p) => p[0]),
+        shots: pairs.map((p) => p[1]),
+        camera: CAMERAS.includes(x.camera) ? x.camera : 'push',
+        chorus: Number.isInteger(x.chorus_no) ? clamp(x.chorus_no, 0, 99) : 0,
+      };
+    });
   if (!sections.length) return null;
   const grid = s.grid && num(s.grid.bpm) && s.grid.bpm > 0 && num(s.grid.offset_ms) ? { beat: 60000 / s.grid.bpm, off: s.grid.offset_ms } : null;
   const light = Float32Array.from(Array.isArray(s.light) ? s.light.slice(0, MAX_LIGHT) : [], (x) => (num(x) ? clamp(x, 0, 255) / 255 : 0));
@@ -128,6 +247,7 @@ const check = (d) => {
     id: text(d.id, 64),
     duration: s.duration_ms,
     sections,
+    voice: Object.hasOwn(VOICES, s.voice) ? s.voice : 'quirk',
     grid,
     light,
     lines,
@@ -141,18 +261,18 @@ const check = (d) => {
 };
 
 // The words of line `i` with their times; a line timed as a whole gets them spread over its length by
-// their letters.
+// their letters (as src/stage.rs does, so the emphasis word it chose is the same one).
 const wordsOf = (i) => {
   const { lines, ends } = st.v;
   const l = lines[i];
-  if (l.words) return l.words;
-  const parts = l.text.match(/\S+\s*/g) || [];
+  if (l.words) return l.words.map((w) => ({ ms: w.ms, text: w.text.trim() })).filter((w) => w.text);
+  const parts = l.text.match(/\S+/g) || [];
   const span = Math.max(300, ends[i] - l.ms) * 0.85;
-  const total = parts.reduce((a, p) => a + p.trim().length, 0) || 1;
+  const total = parts.reduce((a, p) => a + p.length, 0) || 1;
   let at = l.ms;
   return parts.map((p) => {
     const w = { ms: Math.round(at), text: p };
-    at += (span * p.trim().length) / total;
+    at += (span * p.length) / total;
     return w;
   });
 };
@@ -178,14 +298,23 @@ const build = () => {
   root.hidden = true;
   const field = el('div', 'ft-field', root);
   const fieldPicture = el('div', 'ft-field-picture', field);
+  const lamp2 = el('div', 'ft-lamp ft-lamp2', root);
+  const lamp2Core = el('div', 'ft-lamp-core', lamp2);
+  const beam = el('div', 'ft-beam', root);
+  const beamCore = el('div', 'ft-beam-core', beam);
+  const lamp = el('div', 'ft-lamp', root);
+  const lampCore = el('div', 'ft-lamp-core', lamp);
   const flash = el('div', 'ft-flash', root);
-  const camera = el('div', 'ft-camera', root);
   const vignette = el('div', 'ft-vignette', root);
+  const camera = el('div', 'ft-camera', root);
+  const lines = el('div', 'ft-lines', camera);
+  const kicker = el('div', 'ft-kicker ft-label', root);
   el('div', 'ft-grain', root);
   el('div', 'ft-bar ft-top', root);
   el('div', 'ft-bar ft-bottom', root);
   const relief = el('div', 'ft-relief', root);
   const subtitle = el('div', 'ft-subtitle ft-off', root);
+  const measure = el('div', 'ft-measure', root);
   const hud = el('div', 'ft-hud', root);
   const timeline = el('div', 'ft-timeline', hud);
   const segments = el('div', 'ft-segments', timeline);
@@ -199,7 +328,7 @@ const build = () => {
   el('span', 'ft-grow', controls);
   const hint = el('span', 'ft-hint', controls);
   const leave = el('button', 'ft-button', controls);
-  el('span', 'ft-icon', leave, '');
+  el('span', 'ft-icon', leave, '');
   const leaveLabel = el('span', null, leave);
 
   press(play, () => {
@@ -227,10 +356,37 @@ const build = () => {
   // The site under it does not scroll.
   root.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
   document.documentElement.append(root);
-  ui = { root, field, fieldPicture, flash, camera, vignette, relief, subtitle, segments, played, head, play, playIcon, playLabel, time, hint, leaveLabel };
+  ui = {
+    root,
+    field,
+    fieldPicture,
+    lamp,
+    lampCore,
+    lamp2,
+    lamp2Core,
+    beam,
+    beamCore,
+    flash,
+    camera,
+    lines,
+    kicker,
+    vignette,
+    relief,
+    subtitle,
+    measure,
+    segments,
+    played,
+    head,
+    play,
+    playIcon,
+    playLabel,
+    time,
+    hint,
+    leaveLabel,
+  };
 };
 
-// The HUD and the cursor go after IDLE_MS without the mouse moving.
+// The HUD and the cursor go after IDLE_MS without the mouse moving (the subtitles step down into its place).
 const wake = () => {
   if (!ui) return;
   ui.root.classList.remove('ft-idle');
@@ -280,6 +436,331 @@ const setField = () => {
   ui.field.classList.toggle('ft-has-picture', !!f);
 };
 
+const setVoice = () => {
+  const V = VOICES[st.v.voice];
+  ui.root.dataset.voice = st.v.voice;
+  ui.root.style.setProperty('--ft-face', V.face);
+  ui.root.style.setProperty('--ft-lh', String(V.lh));
+  ui.root.style.setProperty('--ft-gap', `${V.gap}em`);
+  ui.root.style.setProperty('--ft-track', `${V.track}em`);
+};
+
+// ---------- fitting ----------
+
+// The safe area in pixels.
+const safeBox = () => ({ x: innerWidth * SAFE.x, y: innerHeight * SAFE.y, w: innerWidth * SAFE.w, h: innerHeight * SAFE.h });
+
+const span = (w, a, b, gap) => {
+  let s = 0;
+  for (let k = a; k < b; k++) s += w[k];
+  return s + gap * Math.max(0, b - a - 1);
+};
+
+// Words of widths `w` (em) in `R` rows, in order, the widest row as narrow as it can be: [[from, to), ...].
+const balance = (w, R, gap) => {
+  const n = w.length;
+  R = clamp(R, 1, Math.max(1, n));
+  const best = Array.from({ length: R + 1 }, () => new Float64Array(n + 1).fill(Infinity));
+  const cut = Array.from({ length: R + 1 }, () => new Int32Array(n + 1));
+  best[0][0] = 0;
+  for (let r = 1; r <= R; r++) {
+    for (let i = r; i <= n; i++) {
+      for (let k = r - 1; k < i; k++) {
+        const v = Math.max(best[r - 1][k], span(w, k, i, gap));
+        if (v < best[r][i]) {
+          best[r][i] = v;
+          cut[r][i] = k;
+        }
+      }
+    }
+  }
+  const rows = [];
+  for (let r = R, i = n; r > 0; r--) {
+    const k = cut[r][i];
+    rows.unshift([k, i]);
+    i = k;
+  }
+  return rows;
+};
+
+// The rows (between `minRows` and `maxRows`) and the size (px) that set words of widths `w` biggest within
+// maxW × maxH, at most `cap`; a row more must earn 6%. With `wn` (the widths at the narrowest width axis)
+// a row too wide narrows the axis before the size drops: `t` is the share of the way from narrow (0) to
+// lit (1).
+const fit = (w, gap, lh, maxW, maxH, cap, maxRows = 6, minRows = 1, wn = null) => {
+  let best = null;
+  const n = w.length;
+  for (let R = Math.min(minRows, n); R <= Math.min(maxRows, n); R++) {
+    const rows = balance(w, R, gap);
+    const widest = Math.max(...rows.map(([a, b]) => span(w, a, b, gap)));
+    let size = Math.min(maxH / (R * lh), cap);
+    let t = 1;
+    if (widest * size > maxW) {
+      const narrowest = wn ? Math.max(...rows.map(([a, b]) => span(wn, a, b, gap))) : widest;
+      if (narrowest < widest && narrowest * size <= maxW) t = (maxW / size - narrowest) / (widest - narrowest);
+      else if (narrowest < widest) {
+        t = 0;
+        size = maxW / narrowest;
+      } else size = maxW / widest;
+    }
+    if (!best || size > best.size * 1.06) best = { rows, size, t };
+  }
+  best.w = wn ? w.map((x, k) => wn[k] + (x - wn[k]) * best.t) : w;
+  return best;
+};
+
+// Where a block bw × bh sits in `box` for the place (x, y) the script gave (-1, 0 or 1 each way).
+const anchor = (box, bw, bh, x, y) => ({ left: box.x + ((box.w - bw) * (x + 1)) / 2, top: box.y + ((box.h - bh) * (y + 1)) / 2 });
+
+// Rows laid out from a fit: each `{ idx, size, left, top, width }`, aligned 'l', 'c' or 'r' in the block.
+const stackRows = (c, f, align, x, y, box = c.box) => {
+  const widths = f.rows.map(([a, b]) => span(f.w, a, b, c.gap) * f.size);
+  const bw = Math.max(...widths);
+  const bh = f.rows.length * c.lh * f.size;
+  const at = anchor(box, bw, bh, x, y);
+  return f.rows.map(([a, b], r) => ({
+    idx: range(a, b),
+    size: f.size,
+    width: widths[r],
+    left: align === 'c' ? at.left + (bw - widths[r]) / 2 : align === 'r' ? at.left + bw - widths[r] : at.left,
+    top: at.top + r * c.lh * f.size,
+  }));
+};
+
+const range = (a, b) => Array.from({ length: Math.max(0, b - a) }, (_, k) => a + k);
+
+// Each layout (src/stage.rs, `Layout`): from the words' widths `c.w` (em) and the shot, the rows in
+// pixels, all inside `c.box`. A row may turn (`rot`, degrees about its center) or take the second tone.
+const LAYOUT = {
+  stack(c) {
+    return { rows: stackRows(c, fit(c.w, c.gap, c.lh, c.box.w, c.box.h, c.cap), 'c', c.shot.x, c.shot.y) };
+  },
+  rag(c) {
+    const wide = c.w.length >= 3 ? 0.72 : 1;
+    const f = fit(c.w, c.gap, c.lh, c.box.w * wide, c.box.h, c.cap, 5, Math.min(2, c.w.length));
+    return { rows: stackRows(c, f, c.shot.x > 0 ? 'r' : 'l', c.shot.x, c.shot.y) };
+  },
+  cascade(c) {
+    const step = c.box.w * 0.07;
+    let best = null;
+    for (let R = 2; R <= Math.min(5, c.w.length); R++) {
+      const rows = balance(c.w, R, c.gap);
+      const widest = Math.max(...rows.map(([a, b]) => span(c.w, a, b, c.gap)));
+      const size = Math.min((c.box.w - (R - 1) * step) / widest, c.box.h / (R * c.lh), c.cap);
+      if (!best || size > best.size * 1.06) best = { rows, size };
+    }
+    const dir = c.shot.x < 0 ? -1 : 1;
+    const widths = best.rows.map(([a, b]) => span(c.w, a, b, c.gap) * best.size);
+    const reach = Math.max(...widths.map((w, r) => r * step + w));
+    const bh = best.rows.length * c.lh * best.size;
+    const at = anchor(c.box, reach, bh, 0, c.shot.y);
+    return {
+      rows: best.rows.map(([a, b], r) => ({
+        idx: range(a, b),
+        size: best.size,
+        width: widths[r],
+        left: dir > 0 ? at.left + r * step : at.left + reach - r * step - widths[r],
+        top: at.top + r * c.lh * best.size,
+      })),
+    };
+  },
+  hero(c) {
+    const h = c.hero;
+    const before = range(0, h);
+    const after = range(h + 1, c.w.length);
+    const small = (idx) => idx.map((k) => c.w[k]);
+    // The hero as big as half the height allows, narrowing first; the rest about a third of it.
+    const hf = fit([c.w[h]], 0, c.lh, c.box.w, c.box.h * 0.52, c.box.h * 0.5, 1, 1, c.wn ? [c.wn[h]] : null);
+    let sh = hf.size;
+    const parts = [before, after].filter((p) => p.length);
+    const fits = parts.map((p) => fit(small(p), c.gap, c.slh, c.box.w * 0.9, c.box.h * 0.22, sh * 0.3, 2));
+    let s2 = Math.min(sh * 0.3, ...fits.map((f) => f.size));
+    const height = () => sh * c.lh + parts.reduce((a, _, k) => a + fits[k].rows.length * c.slh * s2, 0) + parts.length * s2 * 0.3;
+    const over = height() / c.box.h;
+    if (over > 1) {
+      sh /= over;
+      s2 /= over;
+    }
+    const heroW = hf.w[0] * sh;
+    const widths = fits.map((f) => f.rows.map(([a, b]) => span(f.w, a, b, c.gap) * s2));
+    const bw = Math.max(heroW, ...widths.flat());
+    const at = anchor(c.box, bw, height(), c.shot.x, c.shot.y);
+    const align = (w) => (c.shot.x > 0 ? at.left + bw - w : c.shot.x < 0 ? at.left : at.left + (bw - w) / 2);
+    const rows = [];
+    let top = at.top;
+    const put = (idx, k) => {
+      fits[k].rows.forEach(([a, b], r) => {
+        rows.push({ idx: idx.slice(a, b), size: s2, width: widths[k][r], left: align(widths[k][r]), top, small: true });
+        top += c.slh * s2;
+      });
+      top += s2 * 0.3;
+    };
+    if (before.length) put(before, 0);
+    rows.push({ idx: [h], size: sh, width: heroW, left: align(heroW), top, t: hf.t });
+    top += sh * c.lh + s2 * 0.3;
+    if (after.length) put(after, parts.length - 1);
+    return { rows };
+  },
+  grid(c) {
+    const n = c.w.length;
+    const cols = n <= 4 ? 2 : 3;
+    const R = Math.ceil(n / cols);
+    const cell = c.box.w / cols;
+    const pitch = c.lh * 1.12;
+    const size = Math.min(...c.w.map((w) => (cell * 0.94) / w), c.box.h / ((R + 0.35) * pitch), c.cap);
+    const gh = (R + 0.35) * pitch * size;
+    const top0 = anchor(c.box, c.box.w, gh, 0, c.shot.y).top;
+    return {
+      rows: c.w.map((w, k) => {
+        const col = k % cols;
+        const row = Math.floor(k / cols);
+        const width = w * size;
+        const left = c.box.x + col * cell + (col === 0 ? 0 : col === cols - 1 ? cell - width : (cell - width) / 2);
+        return { idx: [k], size, width, left, top: top0 + row * pitch * size + (col % 2) * 0.35 * pitch * size };
+      }),
+    };
+  },
+  vertical(c) {
+    const h = c.hero;
+    // The hero along an edge, reading upward, as long as the height and a quarter of the width allow.
+    const hf = fit([c.w[h]], 0, c.lh, c.box.h, c.box.w * 0.26, c.cap * 1.5, 1, 1, c.wn ? [c.wn[h]] : null);
+    const sv = hf.size;
+    const L = hf.w[0] * sv;
+    const T = c.lh * sv;
+    const side = c.shot.x > 0 ? 1 : -1;
+    const cx = side < 0 ? c.box.x + T / 2 : c.box.x + c.box.w - T / 2;
+    const cy = c.box.y + c.box.h / 2;
+    const gap = c.box.w * 0.03;
+    const rest = range(0, c.w.length).filter((k) => k !== h);
+    const area = { x: side < 0 ? c.box.x + T + gap : c.box.x, y: c.box.y, w: c.box.w - T - gap, h: c.box.h };
+    const f = fit(
+      rest.map((k) => c.w[k]),
+      c.gap,
+      c.slh,
+      area.w,
+      area.h,
+      Math.min(c.cap, sv * 0.62),
+      4,
+    );
+    const rows = stackRows({ ...c, lh: c.slh }, f, side < 0 ? 'l' : 'r', side, c.shot.y, area).map((r) => ({
+      ...r,
+      idx: r.idx.map((k) => rest[k]),
+      small: true,
+    }));
+    rows.push({ idx: [h], size: sv, width: L, left: cx - L / 2, top: cy - T / 2, rot: -90, t: hf.t });
+    return { rows };
+  },
+  split(c) {
+    const f = fit(c.w, c.gap, c.lh, c.box.w * 0.84, c.box.h / 1.15, c.cap * 1.1, 2, 2);
+    const dir = c.shot.x > 0 ? -1 : 1;
+    const widths = f.rows.map(([a, b]) => span(c.w, a, b, c.gap) * f.size);
+    const lead = c.lh * f.size * 0.3;
+    const bh = 2 * c.lh * f.size + lead;
+    const top = anchor(c.box, c.box.w, bh, 0, c.shot.y).top;
+    const at = (w, r) => ((r === 0) === dir > 0 ? c.box.x : c.box.x + c.box.w - w);
+    const rows = f.rows.map(([a, b], r) => ({
+      idx: range(a, b),
+      size: f.size,
+      width: widths[r],
+      left: at(widths[r], r),
+      top: top + r * (c.lh * f.size + lead),
+      tone: r === 1,
+    }));
+    return { rows, rule: { top: top + c.lh * f.size + lead / 2, dir } };
+  },
+  tilt(c) {
+    // A stack on a plane turned toward the side it sits on; sized so its projection stays in the box.
+    const dir = c.shot.x !== 0 ? c.shot.x : c.shot.y >= 0 ? 1 : -1;
+    const ry = c.light ? 0 : -22 * dir;
+    const rx = c.light ? 0 : 9;
+    const rz = c.light ? -2.5 * dir : 0;
+    const persp = Math.max(900, innerWidth * 0.75);
+    let scale = 0.86;
+    let out = null;
+    for (let k = 0; k < 3; k++) {
+      const box = { x: c.box.x, y: c.box.y, w: c.box.w * scale, h: c.box.h * scale };
+      const f = fit(c.w, c.gap, c.lh, box.w, box.h, c.cap);
+      const widths = f.rows.map(([a, b]) => span(c.w, a, b, c.gap) * f.size);
+      const bw = Math.max(...widths);
+      const bh = f.rows.length * c.lh * f.size;
+      const p = project(bw, bh, rx, ry, rz, persp);
+      out = { f, widths, bw, bh, p };
+      const over = Math.max(p.w / c.box.w, p.h / c.box.h);
+      if (over <= 1) break;
+      scale /= over * 1.02;
+    }
+    const { f, widths, bw, bh, p } = out;
+    // The projection's box placed by the anchor, then the plane's own box from it.
+    const at = anchor(c.box, p.w, p.h, c.shot.x, c.shot.y);
+    const left = at.left - p.x0 - bw / 2;
+    const top = at.top - p.y0 - bh / 2;
+    return {
+      rows: f.rows.map(([a, b], r) => ({
+        idx: range(a, b),
+        size: f.size,
+        width: widths[r],
+        left: left + (bw - widths[r]) / 2,
+        top: top + r * c.lh * f.size,
+      })),
+      plane: { transform: `perspective(${persp}px) rotateX(${rx}deg) rotateY(${ry}deg) rotate(${rz}deg)`, cx: left + bw / 2, cy: top + bh / 2 },
+      bounds: { x: at.left, y: at.top, w: p.w, h: p.h },
+    };
+  },
+  anthem(c) {
+    // Bigger each time the chorus comes back.
+    const share = [0.8, 0.84, 0.92, 1][c.shot.level];
+    const box = { x: c.box.x + (c.box.w * (1 - share)) / 2, y: c.box.y + (c.box.h * (1 - share)) / 2, w: c.box.w * share, h: c.box.h * share };
+    const cap = c.cap * (1 + 0.12 * c.shot.level);
+    return { rows: stackRows(c, fit(c.w, c.gap, c.lh, box.w, box.h, cap, 5), 'c', 0, 0, box) };
+  },
+};
+
+// The box (relative to the plane's center) a bw × bh plane covers on screen once turned in perspective:
+// { w, h, x0, y0 } with x0/y0 the box's top left from the center.
+const project = (bw, bh, rx, ry, rz, persp) => {
+  const r = Math.PI / 180;
+  const pts = [
+    [-bw / 2, -bh / 2],
+    [bw / 2, -bh / 2],
+    [bw / 2, bh / 2],
+    [-bw / 2, bh / 2],
+  ].map(([x, y]) => {
+    // rotate(rz), then rotateY(ry), then rotateX(rx): the order CSS applies them to the element.
+    let X = x * Math.cos(rz * r) - y * Math.sin(rz * r);
+    let Y = x * Math.sin(rz * r) + y * Math.cos(rz * r);
+    let Z = -X * Math.sin(ry * r);
+    X *= Math.cos(ry * r);
+    const Y2 = Y * Math.cos(rx * r) - Z * Math.sin(rx * r);
+    Z = Y * Math.sin(rx * r) + Z * Math.cos(rx * r);
+    Y = Y2;
+    const k = persp / Math.max(1, persp - Z);
+    return [X * k, Y * k];
+  });
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  return { w: Math.max(...xs) - x0, h: Math.max(...ys) - y0, x0, y0 };
+};
+
+// The widths (em) of `items` ({ text, cls, fv, letters }) as they will be set, in one layout pass.
+const measure = (items) => {
+  const box = ui.measure;
+  box.replaceChildren();
+  const spans = items.map((it) => {
+    const s = el('span', it.cls, box);
+    s.style.fontVariationSettings = it.fv;
+    if (it.letters) for (const ch of it.text) el('span', 'ft-l', s, ch);
+    else s.textContent = it.text;
+    return s;
+  });
+  const out = spans.map((s) => s.getBoundingClientRect().width / 100);
+  box.replaceChildren();
+  return out;
+};
+
+// ---------- scenes ----------
+
 const art = (parent) => {
   const src = artwork();
   if (!src) return el('div', 'ft-art ft-art-empty', parent);
@@ -293,43 +774,115 @@ const art = (parent) => {
 const countdown = (parent) => {
   const box = el('div', 'ft-countdown', parent);
   st.dots = Array.from({ length: 4 }, () => ({ el: el('i', null, box), on: false }));
+  return box;
 };
 
-// A new scene: the section's frame (title, cover, credits); the text scenes get their lines in `renderLine`.
+// A title (the opening's, the credits') set in `area`: the voice's face at its lit axes, as big as fits,
+// narrowing the width axis first, letter by letter rising in from `delay` ms.
+const title = (parent, s, area, align, delay) => {
+  const V = VOICES[st.v.voice];
+  const words = cased(s, V.kase).match(/\S+/g) || [];
+  if (!words.length) return null;
+  const light = lightFx();
+  const narrow = V.narrow != null ? fvs(withWidth(V.key, V.narrow)) : null;
+  const items = words.map((t) => ({ text: t, cls: 'ft-mw', fv: fvs(V.key), letters: !light }));
+  const w = measure(items);
+  const wn = narrow ? measure(items.map((it) => ({ ...it, fv: narrow }))) : null;
+  const f = fit(w, V.gap, V.lh, area.w, area.h, area.h * 0.62, 3, 1, wn);
+  const fv = V.narrow != null ? fvs(withWidth(V.key, V.narrow + (widthOf(V.key) - V.narrow) * f.t)) : fvs(V.key);
+  const c = { gap: V.gap, lh: V.lh };
+  const rows = stackRows(c, f, align, align === 'l' ? -1 : align === 'r' ? 1 : 0, 0, area);
+  const box = el('div', 'ft-title', parent);
+  let n = 0;
+  for (const r of rows) {
+    const row = el('div', 'ft-row', box);
+    Object.assign(row.style, { left: `${r.left}px`, top: `${r.top}px`, fontSize: `${r.size}px` });
+    for (const k of r.idx) {
+      // The last word of a longer title in the accent.
+      const word = el('span', `ft-w ft-on${k === words.length - 1 && k > 0 ? ' ft-key' : ''}`, row);
+      word.style.width = `${f.w[k]}em`;
+      word.style.fontVariationSettings = fv;
+      if (light) word.textContent = words[k];
+      else
+        for (const ch of words[k]) {
+          const l = el('span', 'ft-l', word, ch);
+          l.style.animationDelay = `${delay + n++ * 28}ms`;
+        }
+    }
+  }
+  return box;
+};
+
+// The frame of a scene without lines (opening, instrumental, credits); the text scenes keep the lines'
+// layer, whose blocks come and go in `renderLine`.
 const mount = (k) => {
   const v = st.v;
   const sec = v.sections[k];
   st.sec = k;
   st.line = -2;
-  st.words = [];
   st.dots = null;
-  for (const old of [...ui.camera.children]) if (old !== st.scene) old.remove();
+  const lyric = TEXT_KINDS.has(sec.kind);
   if (st.scene) {
     const old = st.scene;
-    old.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(1.06)' }], { duration: 450, easing: EASE_OUT, fill: 'forwards' })
+    st.scene = null;
+    old.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(1.05)' }], { duration: 600, easing: EASE_IN_OUT, fill: 'forwards' })
       .finished.then(() => old.remove(), () => old.remove());
   }
-  const scene = el('div', `ft-scene ft-s-${sec.kind}${sec.right ? ' ft-right' : ''}`, ui.camera);
+  ui.root.dataset.scene = sec.kind;
+  ui.root.dataset.tone = String(k % 2);
+  // The chorus' label, with how many times it came.
+  ui.kicker.textContent = sec.kind === 'chorus' ? (sec.chorus > 1 ? `${v.texts.chorus}  ×${sec.chorus}` : v.texts.chorus) : '';
+  ui.kicker.classList.toggle('ft-off', sec.kind !== 'chorus');
+  showSubtitle('');
+  if (lyric) return;
+  leaveLine();
+  // The light back in the middle, behind the frame.
+  ui.lamp.style.transform = '';
+  ui.lamp2.style.transform = '';
+  ui.beam.style.transform = '';
+  const scene = el('div', `ft-scene ft-s-${sec.kind}`, ui.camera);
   const c = v.credits;
+  const W = innerWidth;
+  const H = innerHeight;
   if (sec.kind === 'opening') {
-    art(scene);
-    const title = el('div', 'ft-title ft-reveal', scene);
-    const h = el('h1', null, title);
-    const words = (c.title || '').split(/(\s+)/);
-    const last = words.length > 2 ? words.pop() : '';
-    h.textContent = words.join('');
-    if (last) el('span', 'ft-accent', h, last);
-    el('p', 'ft-label', title, [c.artist, c.album].filter(Boolean).join('  ·  '));
-    countdown(scene);
+    // A title sequence: the cover on one side, the title set big on the other, then the artist and album.
+    const wide = W / H > 1.15;
+    const side = hash(v.id || c.title) % 2 ? 1 : -1;
+    const size = wide ? Math.min(H * 0.46, W * 0.34) : Math.min(H * 0.32, W * 0.6);
+    const cover = art(scene);
+    cover.classList.add('ft-cover');
+    const box = safeBox();
+    let area;
+    if (wide) {
+      const cx = side < 0 ? box.x + size / 2 : box.x + box.w - size / 2;
+      Object.assign(cover.style, { width: `${size}px`, left: `${cx - size / 2}px`, top: `${box.y + (box.h - size) / 2}px` });
+      area = { x: side < 0 ? box.x + size + W * 0.05 : box.x, y: box.y + box.h * 0.2, w: box.w - size - W * 0.05, h: box.h * 0.48 };
+    } else {
+      Object.assign(cover.style, { width: `${size}px`, left: `${(W - size) / 2}px`, top: `${box.y}px` });
+      area = { x: box.x, y: box.y + size + H * 0.08, w: box.w, h: Math.max(H * 0.08, box.h - size - H * 0.16) };
+    }
+    const align = wide ? (side < 0 ? 'l' : 'r') : 'c';
+    const t = title(scene, c.title, area, align, 900);
+    const label = (s, top, cls) => {
+      const p = el('p', `ft-label ${cls}`, scene, s);
+      Object.assign(p.style, { top: `${top}px`, left: `${area.x}px`, width: `${area.w}px`, textAlign: { l: 'left', r: 'right', c: 'center' }[align] });
+    };
+    if (c.artist) label(c.artist, area.y - H * 0.05, 'ft-tracked');
+    if (c.album) label(c.album, area.y + area.h + H * 0.03, 'ft-late');
+    const dots = countdown(scene);
+    Object.assign(dots.style, { top: `${Math.min(area.y + area.h + H * 0.09, H * 0.74)}px`, bottom: 'auto', left: `${area.x + area.w / 2}px` });
+    if (!t) cover.classList.add('ft-alone');
+    scene.insertAdjacentElement('afterbegin', el('div', 'ft-sweep'));
   } else if (sec.kind === 'instrumental') {
     art(scene);
-    el('div', 'ft-label ft-caption', scene, v.texts.instrumental);
+    el('div', 'ft-label ft-caption ft-tracked', scene, v.texts.instrumental);
     countdown(scene);
   } else if (sec.kind === 'credits') {
-    const roll = el('div', 'ft-roll ft-reveal', scene);
-    el('small', 'ft-label', roll, v.texts.listened);
-    el('h2', null, roll, c.title);
-    el('small', 'ft-label', roll, [c.artist, c.album].filter(Boolean).join('  ·  '));
+    const box = safeBox();
+    el('small', 'ft-label ft-credit-label ft-tracked', scene, v.texts.listened).style.top = `${box.y + box.h * 0.04}px`;
+    title(scene, c.title, { x: box.x + box.w * 0.08, y: box.y + box.h * 0.14, w: box.w * 0.84, h: box.h * 0.4 }, 'c', 300);
+    const by = el('small', 'ft-label ft-credit-by ft-late', scene, [c.artist, c.album].filter(Boolean).join('  ·  '));
+    by.style.top = `${box.y + box.h * 0.6}px`;
     if (c.next) {
       const next = el('div', 'ft-up-next', scene);
       el('small', 'ft-label', next, v.texts.next);
@@ -337,10 +890,7 @@ const mount = (k) => {
       el('span', null, next, c.next.artist);
     }
   }
-  scene.animate([{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 600, easing: EASE_OUT });
   st.scene = scene;
-  ui.root.dataset.scene = sec.kind;
-  if (!TEXT_KINDS.has(sec.kind)) showSubtitle('');
 };
 
 const showSubtitle = (s) => {
@@ -355,54 +905,247 @@ const onDownbeat = (ms) => {
   return ph < 0.25 || ph > 3.75;
 };
 
-// The line `i` of a text scene (or nothing: -1), word by word.
-const renderLine = (sec, i) => {
-  const v = st.v;
-  st.line = i;
+// The line on screen leaves the way its shot says, and is removed once it has.
+const leaveLine = () => {
+  const b = st.block;
+  st.block = null;
+  // A word still growing keeps the axes it had reached while it leaves.
+  for (const a of st.anims) {
+    try {
+      a.commitStyles();
+    } catch {}
+    a.cancel();
+  }
+  st.anims.clear();
   st.words = [];
-  const scene = st.scene;
-  scene.replaceChildren();
+  st.shown.glow = null;
+  if (!b) return;
+  const { node, exit, dir } = b;
+  let kind = exit;
+  if (lightFx() && (kind === 'fold' || kind === 'scatter')) kind = 'sink';
+  node.style.setProperty('--ft-dir', String(dir));
+  if (kind === 'scatter') {
+    node.querySelectorAll('.ft-inks .ft-w').forEach((w, k) => {
+      w.style.setProperty('--sx', `${(((k * 73) % 17) - 8) * 0.9}vw`);
+      w.style.setProperty('--sy', `${(((k * 41) % 13) - 6) * 1.4}vh`);
+      w.style.setProperty('--sr', `${(((k * 29) % 11) - 5) * 7}deg`);
+    });
+  }
+  node.classList.add('ft-out', `ft-out-${kind}`);
+  setTimeout(() => node.remove(), EXIT_MS);
+};
+
+// The line `j` of a text scene, set by its shot: measured, fitted, laid out, then lit word by word.
+const renderLine = (sec, j) => {
+  const v = st.v;
+  const i = sec.lines[j];
+  st.line = i;
+  leaveLine();
   const l = v.lines[i];
   if (!l || !l.text.trim()) return showSubtitle('');
+  const shot = sec.shots[j] || { layout: 'stack', x: 0, y: 0, hero: -1, enter: 'rise', exit: 'sink', level: 0 };
+  const V = VOICES[v.voice];
+  const light = lightFx();
   const words = wordsOf(i);
-  const spans = [];
-  const put = (parent, w) => {
-    const span = el('span', 'ft-w', parent, w.text);
-    if (sec.kind === 'chorus' && onDownbeat(w.ms)) span.classList.add('ft-hit');
-    spans.push(span);
+  if (!words.length) return showSubtitle('');
+  const n = words.length;
+  const hero = shot.hero >= 0 && shot.hero < n ? shot.hero : -1;
+  let layout = shot.layout;
+  // The script checked the word counts; a line that came out otherwise falls back to a plain stack.
+  if (((layout === 'hero' || layout === 'vertical') && (hero < 0 || n < 2)) || (layout === 'grid' && n > 8) || (layout === 'cascade' && n < 3)) layout = 'stack';
+  const big = layout === 'hero' || layout === 'vertical';
+  const role = (k) => (k === hero ? (big ? 'hero' : 'key') : big ? 'small' : 'word');
+  const letterCount = words.reduce((a, w) => a + w.text.length, 0);
+  const letters = !light && (shot.enter === 'letters' || shot.enter === 'track') && letterCount <= MAX_LETTERS;
+  const shown = words.map((w, k) => cased(w.text, role(k) === 'hero' ? V.heroCase : V.kase));
+  const axes = (k) => {
+    const r = role(k);
+    return r === 'hero' || r === 'key' ? [V.base, V.key] : r === 'small' ? [V.small, V.smallLit] : [V.base, V.lit];
   };
-  const len = l.text.length;
-  if (sec.kind === 'close') {
-    const line = el('div', 'ft-line', scene);
-    line.style.setProperty('--ft-len', String(len));
-    for (const w of words) put(line, w);
-    const next = sec.lines.find((j) => j > i && v.lines[j].text.trim());
-    if (next != null) el('div', 'ft-next', scene, v.lines[next].text);
-  } else if (sec.kind === 'editorial') {
-    el('div', 'ft-index ft-label', scene, `${String(i + 1).padStart(2, '0')} / ${String(v.lines.length).padStart(2, '0')}`);
-    const stack = el('div', 'ft-stack', scene);
-    const rows = words.length > 8 ? 4 : words.length > 5 ? 3 : words.length > 1 ? 2 : 1;
-    const per = Math.ceil(words.length / rows);
-    let chars = 1;
-    for (let r = 0; r < rows; r++) {
-      const part = words.slice(r * per, (r + 1) * per);
-      if (!part.length) continue;
-      chars = Math.max(chars, part.reduce((a, w) => a + w.text.length, 0));
-      const row = el('span', 'ft-row', stack);
-      for (const w of part) put(row, w);
-    }
-    stack.style.setProperty('--ft-chars', String(chars));
-  } else {
-    el('div', 'ft-tag ft-label', scene, sec.chorus > 1 ? `${v.texts.chorus}  ×${sec.chorus}` : v.texts.chorus);
-    if (!lightFx()) {
-      for (let g = 0; g < Math.min(2, v.echoes[i]); g++) el('div', `ft-ghost${g ? ' ft-g2' : ''}`, scene, l.text.trim());
-    }
-    const line = el('div', 'ft-line', scene);
-    line.style.setProperty('--ft-len', String(len));
-    for (const w of words) put(line, w);
+  const cls = (k) => `ft-mw${role(k) === 'small' ? ' ft-small' : ''}`;
+  const items = words.map((_, k) => ({ text: shown[k], cls: cls(k), fv: fvs(axes(k)[1]), letters }));
+  const w = measure(items);
+  // The hero may narrow its width axis to stand bigger.
+  let wn = null;
+  if (big && V.narrow != null) {
+    wn = w.slice();
+    wn[hero] = measure([{ ...items[hero], fv: fvs(withWidth(V.key, V.narrow)) }])[0];
   }
-  st.words = spans.map((span, j) => ({ el: span, ms: words[j].ms, on: false }));
+  const box = safeBox();
+  const calm = sec.kind === 'close';
+  const c = {
+    w,
+    wn,
+    gap: V.gap,
+    lh: V.lh,
+    slh: Math.max(1.05, V.lh),
+    box,
+    cap: box.h * (calm ? 0.3 : 0.4),
+    shot,
+    hero,
+    light,
+  };
+  const g = LAYOUT[layout](c);
+  // The block: its rows, a copy of them as glow and, for the anthem, its echoes.
+  const node = el('div', `ft-block ft-l-${layout} ft-in-${letters ? shot.enter : shot.enter === 'skew' ? 'skew' : 'rise'}`, ui.lines);
+  const fitBox = el('div', 'ft-fit', node);
+  const plane = el('div', 'ft-plane', fitBox);
+  if (g.plane) {
+    plane.style.transform = g.plane.transform;
+    plane.style.transformOrigin = `${g.plane.cx}px ${g.plane.cy}px`;
+  }
+  const dir = shot.x !== 0 ? shot.x : shot.y >= 0 ? 1 : -1;
+  node.style.setProperty('--ft-dir', String(dir));
+  const fvOf = (k, lit) => {
+    const r = g.rows.find((row) => row.idx.includes(k));
+    const a = axes(k)[lit ? 1 : 0];
+    if (r?.t == null || V.narrow == null) return fvs(a);
+    // A narrowed hero keeps its width while it lights; only its weight grows.
+    const t = V.narrow + (widthOf(V.key) - V.narrow) * r.t;
+    return fvs(withWidth(a, t));
+  };
+  const widthEm = (k) => {
+    const r = g.rows.find((row) => row.idx.includes(k));
+    return r?.t != null && wn ? wn[k] + (w[k] - wn[k]) * r.t : w[k];
+  };
+  // One layer of the rows: [[word index, its element], ...].
+  const rowsOf = (layer, kind) => {
+    const holder = el('div', layer, plane);
+    return g.rows.flatMap((r, ri) => {
+      const row = el('div', `ft-row${r.small ? ' ft-small-row' : ''}${r.tone ? ' ft-tone' : ''}`, holder);
+      Object.assign(row.style, { left: `${r.left}px`, top: `${r.top}px`, fontSize: `${r.size}px`, lineHeight: String(r.small ? c.slh : V.lh) });
+      if (r.rot) row.style.transform = `rotate(${r.rot}deg)`;
+      row.style.setProperty('--r', String(ri));
+      return r.idx.map((k) => {
+        const word = el('span', kind === 'ink' ? cls(k).replace('ft-mw', 'ft-w') : 'ft-gw', row);
+        word.style.width = `${widthEm(k)}em`;
+        word.style.setProperty('--i', String(k));
+        if (role(k) === 'key' || role(k) === 'hero') word.classList.add('ft-key');
+        if (kind === 'ink') {
+          word.style.fontVariationSettings = fvOf(k, false);
+          if (letters) {
+            const mid = (shown[k].length - 1) / 2;
+            [...shown[k]].forEach((ch, q) => {
+              const s = el('span', 'ft-l', word, ch);
+              s.style.setProperty('--o', String(q - mid));
+              s.style.setProperty('--q', String(q));
+            });
+          } else word.textContent = shown[k];
+        } else {
+          word.style.fontVariationSettings = fvOf(k, true);
+          word.textContent = shown[k];
+        }
+        return [k, word];
+      });
+    });
+  };
+  // The anthem's echoes: the line again, outlined, a step further each, more each time the chorus returns.
+  if (!light && layout === 'anthem') {
+    const count = Math.min(3, Math.max(shot.level, v.echoes[i] > 0 ? 1 : 0));
+    for (let e = count; e >= 1; e--) rowsOf(`ft-ghost ft-g${e}`, 'ghost');
+  }
+  const glows = light ? null : rowsOf('ft-glows', 'glow');
+  const inks = rowsOf('ft-inks', 'ink');
+  if (g.rule && !light) {
+    const rule = el('i', 'ft-rule', plane);
+    Object.assign(rule.style, { top: `${g.rule.top}px`, left: `${box.x}px`, width: `${box.w}px` });
+  }
+  // The words as laid out, at their lit axes (the glow copy), against the boxes computed for them: a word
+  // that came out wider than its box (a font not loaded yet, rounding) shrinks the block about its center,
+  // so nothing leaves the safe area. One layout read for the line.
+  const bounds = g.bounds || bboxOf(g.rows);
+  let k = Math.min(1, box.w / bounds.w, box.h / bounds.h);
+  for (const [, gw] of glows || []) {
+    const got = gw.scrollWidth;
+    if (got > gw.clientWidth + 1) k = Math.min(k, gw.clientWidth / got);
+  }
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  fitBox.style.transformOrigin = `${cx}px ${cy}px`;
+  node.style.transformOrigin = `${cx}px ${cy}px`;
+  if (k < 0.999) fitBox.style.transform = `scale(${k.toFixed(4)})`;
+  // The light follows the line.
+  ui.lamp.style.transform = `translate(${(cx - innerWidth / 2).toFixed(0)}px, ${(cy - innerHeight / 2).toFixed(0)}px)`;
+  ui.lamp2.style.transform = `translate(${((innerWidth / 2 - cx) * 0.8).toFixed(0)}px, ${(innerHeight * 0.18).toFixed(0)}px)`;
+  ui.beam.style.transform = `translateX(${(cx - innerWidth / 2).toFixed(0)}px)`;
+  node.style.setProperty('--ft-level', String(shot.level));
+  node.dataset.level = String(shot.level);
+  const ends = (k) => (k + 1 < n ? words[k + 1].ms : v.ends[i]);
+  st.words = inks.map(([k, word]) => ({
+    el: word,
+    glow: glows?.find((x) => x[0] === k)?.[1] || null,
+    ms: words[k].ms,
+    end: ends(k),
+    base: fvOf(k, false),
+    lit: fvOf(k, true),
+    on: false,
+    anim: null,
+    hit: sec.kind === 'chorus' && onDownbeat(words[k].ms),
+  }));
+  st.block = { node, glows: node.querySelector('.ft-glows'), exit: shot.exit, dir, level: shot.level, chorus: sec.kind === 'chorus' };
   showSubtitle(v.translation?.[i] || '');
+};
+
+// The box around rows as laid out (a turned row covers its own box turned about its center).
+const bboxOf = (rows) => {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  const lh = VOICES[st.v.voice].lh;
+  for (const r of rows) {
+    const h = r.size * (r.small ? Math.max(1.05, lh) : lh);
+    let [l, t, w, hh] = [r.left, r.top, r.width, h];
+    if (r.rot) [l, t, w, hh] = [r.left + r.width / 2 - h / 2, r.top + h / 2 - r.width / 2, h, r.width];
+    x0 = Math.min(x0, l);
+    y0 = Math.min(y0, t);
+    x1 = Math.max(x1, l + w);
+    y1 = Math.max(y1, t + hh);
+  }
+  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+};
+
+// A word starts or stops being sung: it lights, grows to its lit axes over the time it is held (at once
+// with the light effects, or when it was already over) and blooms.
+const lightWord = (w, on, ms) => {
+  w.on = on;
+  w.el.classList.toggle('ft-on', on);
+  w.el.classList.toggle('ft-hit', on && w.hit);
+  w.glow?.classList.toggle('ft-on', on);
+  if (w.anim) {
+    st.anims.delete(w.anim);
+    w.anim.cancel();
+    w.anim = null;
+  }
+  if (!on) {
+    w.el.style.fontVariationSettings = w.base;
+    return;
+  }
+  const hold = clamp(w.end - w.ms, HOLD_MS.MIN, HOLD_MS.MAX);
+  if (lightFx() || ms - w.ms >= hold) {
+    w.el.style.fontVariationSettings = w.lit;
+    return;
+  }
+  const a = w.el.animate([{ fontVariationSettings: w.base }, { fontVariationSettings: w.lit }], {
+    duration: hold,
+    easing: 'cubic-bezier(.3, .1, .2, 1)',
+    fill: 'forwards',
+  });
+  a.currentTime = clamp(ms - w.ms, 0, hold);
+  if (st.still) a.pause();
+  w.anim = a;
+  st.anims.add(a);
+  a.finished.then(
+    () => {
+      st.anims.delete(a);
+      if (w.anim === a) {
+        w.el.style.fontVariationSettings = w.lit;
+        a.cancel();
+        w.anim = null;
+      }
+    },
+    () => st.anims.delete(a),
+  );
 };
 
 // The energy now, 0..1: the analysis' at 10 Hz, else the live level (while the stage plays only).
@@ -424,9 +1167,39 @@ const releaseLevel = () => {
 
 // Writes a style only when it changed.
 const setStyle = (node, key, prop, value) => {
-  if (st.shown[key] === value) return;
+  if (!node || st.shown[key] === value) return;
   st.shown[key] = value;
   node.style[prop] = value;
+};
+
+// The camera's move over a scene at progress p (0..1), with a breath on the beat.
+const cameraAt = (sec, p, breath) => {
+  const lvl = sec.kind === 'chorus' ? Math.min(3, sec.chorus) : 0;
+  let x = 0;
+  let y = 0;
+  let s = 1;
+  let r = 0;
+  switch (sec.camera) {
+    case 'push':
+      s = 1 + p * (sec.kind === 'chorus' ? 0.03 + 0.012 * lvl : 0.035);
+      break;
+    case 'pull':
+      s = 1.035 - p * 0.035;
+      break;
+    case 'left':
+    case 'right':
+      x = (sec.camera === 'left' ? -1 : 1) * (p - 0.5) * 1.6;
+      s = 1.012;
+      break;
+    case 'rise':
+      y = (0.5 - p) * 2.2;
+      break;
+    case 'roll':
+      r = (p - 0.5) * 1.4;
+      s = 1.02;
+      break;
+  }
+  return `translate(${x.toFixed(3)}vw, ${y.toFixed(3)}vh) rotate(${r.toFixed(3)}deg) scale(${(s + breath).toFixed(4)})`;
 };
 
 const draw = (v, playing) => {
@@ -438,17 +1211,15 @@ const draw = (v, playing) => {
   if (k < 0) k = ms < sections[0].from ? 0 : sections.length - 1;
   if (k !== st.sec) mount(k);
   const sec = sections[k];
-  if (TEXT_KINDS.has(sec.kind)) {
-    let i = -1;
-    for (const j of sec.lines) if (lines[j].ms <= ms) i = j;
-    if (i < 0) i = sec.lines[0] ?? -1;
-    if (i !== st.line) renderLine(sec, i);
+  if (TEXT_KINDS.has(sec.kind) && sec.lines.length) {
+    let j = 0;
+    sec.lines.forEach((li, jj) => {
+      if (lines[li].ms <= ms) j = jj;
+    });
+    if (sec.lines[j] !== st.line) renderLine(sec, j);
     for (const w of st.words) {
       const on = ms >= w.ms;
-      if (on !== w.on) {
-        w.on = on;
-        w.el.classList.toggle('ft-on', on);
-      }
+      if (on !== w.on) lightWord(w, on, ms);
     }
   } else if (st.dots) {
     // The dots fill over the last four beats (or seconds) before the next sung line.
@@ -465,17 +1236,28 @@ const draw = (v, playing) => {
   }
   const e = energy(t, playing);
   const light = lightFx();
-  // The camera: a slow push over the scene, a drift in the editorial and a breath on the beat.
+  const chorus = sec.kind === 'chorus';
+  const lvl = chorus ? Math.min(3, Math.max(1, sec.chorus)) : 0;
   const p = clamp((ms - sec.from) / Math.max(1000, sec.to - sec.from), 0, 1);
   const beatPh = grid ? ((((t - grid.off) / grid.beat) % 1) + 1) % 1 : 0.5;
-  const push = sec.kind === 'chorus' ? 0.05 : sec.kind === 'editorial' ? 0.03 : 0.015;
-  const breath = grid && !light ? Math.exp(-beatPh * 7) * 0.006 * e : 0;
-  const drift = sec.kind === 'editorial' ? (sec.right ? 1 : -1) * p * 1.5 : 0;
-  setStyle(ui.camera, 'transform', 'transform', `translateX(${drift.toFixed(3)}vw) scale(${(1 + p * push + breath).toFixed(4)})`);
-  // The light: the vignette opens with the energy; a flash on each bar line in the chorus.
-  setStyle(ui.vignette, 'vignette', 'opacity', (1 - e * 0.45).toFixed(3));
   const barPh = grid ? ((((t - grid.off) / (grid.beat * 4)) % 1) + 1) % 1 : 1;
-  setStyle(ui.flash, 'flash', 'opacity', sec.kind === 'chorus' && grid && !light ? (Math.exp(-barPh * 9) * 0.9 * e).toFixed(3) : '0');
+  const beat = grid ? Math.exp(-beatPh * 6) : 0;
+  const down = grid ? Math.exp(-barPh * 9) : 0;
+  setStyle(ui.camera, 'camera', 'transform', cameraAt(sec, p, grid && !light ? beat * 0.005 * e : 0));
+  // The light: the lamp behind the line breathes with the energy and kicks on the beat; the second color
+  // and the beam come up with it; the vignette opens.
+  const q = (x) => x.toFixed(2);
+  setStyle(ui.lampCore, 'lamp', 'opacity', q(clamp(0.35 + e * 0.55 + beat * 0.15 * e + lvl * 0.06, 0, 1)));
+  setStyle(ui.lampCore, 'lampScale', 'transform', `scale(${(0.9 + e * 0.2 + beat * 0.05 * e).toFixed(3)})`);
+  setStyle(ui.lamp2Core, 'lamp2', 'opacity', q(0.25 + e * 0.5));
+  setStyle(ui.beamCore, 'beam', 'opacity', q(clamp((chorus ? 0.35 + lvl * 0.15 : 0.12) + e * 0.35, 0, 1)));
+  setStyle(ui.vignette, 'vignette', 'opacity', q(0.95 - e * 0.45));
+  setStyle(ui.flash, 'flash', 'opacity', chorus && grid && !light ? q(down * (0.45 + 0.15 * lvl) * e) : '0');
+  // The glow over the lit words: stronger in the chorus, more each time; it swells on the beat.
+  if (st.block?.glows) {
+    const base = st.block.chorus ? 0.62 + 0.12 * st.block.level : 0.5;
+    setStyle(st.block.glows, 'glow', 'opacity', q(clamp(base * (0.75 + e * 0.35) + (grid ? (chorus ? down * 0.35 : beat * 0.12) : 0), 0, 1)));
+  }
   // The HUD and the relief.
   const total = st.total || data.duration / 1000;
   const frac = total > 0 ? clamp(t / 1000 / total, 0, 1) : 0;
@@ -492,7 +1274,7 @@ const draw = (v, playing) => {
   }
   if (st.shown.paused !== v.paused) {
     st.shown.paused = v.paused;
-    ui.playIcon.textContent = v.paused ? '' : '';
+    ui.playIcon.textContent = v.paused ? '' : '';
     ui.playLabel.textContent = v.paused ? data.texts.play : data.texts.pause;
   }
   if (st.relief && RELIEF_KINDS.has(sec.kind) && Math.abs(shown - st.relief.p) > 0.0004) {
@@ -504,13 +1286,26 @@ const draw = (v, playing) => {
 
 const running = (v) => st.open && !st.ad && !document.hidden && !!v && !v.paused;
 
+// Paused: the CSS animations hold (`ft-still`) and so do the words' axis animations.
+const setStill = (still) => {
+  if (still === st.still) return;
+  st.still = still;
+  ui.root.classList.toggle('ft-still', still);
+  for (const a of st.anims) still ? a.pause() : a.play();
+};
+
 const frame = () => {
   st.raf = 0;
   if (!st.open || st.ad || !st.v) return;
+  // The first time, the fonts get a moment to load, so the lines are not measured in another face.
+  if (!st.fonts && performance.now() - st.opened < FONT_WAIT_MS) {
+    st.raf = requestAnimationFrame(frame);
+    return;
+  }
   const v = video();
   const go = running(v);
+  setStill(!go);
   if (v) draw(v, go);
-  ui.root.classList.toggle('ft-still', !go);
   if (go) st.raf = requestAnimationFrame(frame);
   else releaseLevel();
 };
@@ -518,6 +1313,13 @@ const frame = () => {
 // Draws now and goes on while it plays; paused, one frame.
 const kick = () => {
   if (st.open && !st.ad && st.v && !st.raf) st.raf = requestAnimationFrame(frame);
+};
+
+// Everything set again for the new size (the safe area is in pixels).
+const relayout = () => {
+  if (!st.open || !st.v) return;
+  st.sec = -1;
+  kick();
 };
 
 // The site shows (and its loops run) whenever the stage is closed or an ad plays.
@@ -572,14 +1374,21 @@ const fly = () => {
     .finally(() => img.remove());
 };
 
+const onResize = () => {
+  clearTimeout(st.resize);
+  st.resize = setTimeout(relayout, 150);
+};
+
 const open = () => {
   st.open = true;
+  st.opened = performance.now();
   st.ad = !!feathertune.ad?.showing();
-  if (!st.ad) fly();
   ui.root.classList.toggle('ft-ad', st.ad);
   ui.root.hidden = false;
+  if (!st.ad) fly();
   cover();
   requestAnimationFrame(() => st.open && ui.root.classList.add('ft-on'));
+  addEventListener('resize', onResize);
   wake();
 };
 
@@ -591,11 +1400,14 @@ const close = () => {
   releaseLevel();
   cover();
   clearTimeout(st.idle);
+  removeEventListener('resize', onResize);
   ui.root.classList.remove('ft-on');
   setTimeout(() => {
     if (st.open) return;
     ui.root.hidden = true;
-    ui.camera.replaceChildren();
+    leaveLine();
+    ui.lines.replaceChildren();
+    ui.camera.querySelectorAll('.ft-scene').forEach((s) => s.remove());
     st.scene = null;
     st.sec = -1;
   }, 600);
@@ -610,41 +1422,48 @@ feathertune.stage = Object.freeze({
       return close();
     }
     if (!ui) build();
-    const key = `${v.id}\u0000${JSON.stringify(v.sections)}`;
+    const key = `${v.id}\u0000${v.voice}\u0000${JSON.stringify(v.sections)}`;
     const same = st.open && key === st.key;
     st.v = v;
     st.key = key;
-    st.shown = { time: '', paused: null, transform: '', vignette: '', flash: '', played: -1 };
+    st.shown = {};
     const playing = video();
     st.total = playing ? feathertune.clock.duration(playing) || 0 : 0;
+    if (!st.open) open();
+    setVoice();
     renderTimeline();
     renderRelief();
     setField();
-    // The same script keeps its scene on screen (the line is drawn again: a translation may have come).
+    // The same script keeps its scene on screen (the line is set again: a translation may have come).
     if (same) st.line = -2;
     else st.sec = -1;
-    if (!st.open) open();
     ui.hint.textContent = v.texts.esc;
     ui.leaveLabel.textContent = v.texts.leave;
     kick();
   },
 });
 
-// The display font (Bricolage Grotesque, SIL Open Font License), loaded with the FontFace API so the page
-// fetches nothing; one weight range covers every weight the stage uses.
+// The display fonts (Anybody, Unbounded, Syne; SIL Open Font License), loaded with the FontFace API so the
+// page fetches nothing. Once they are in, what is on screen is measured and set again with them.
 feathertune.stageFont = Object.freeze({
   set(data) {
-    if (typeof data?.data !== 'string') return;
-    try {
-      const bytes = Uint8Array.from(atob(data.data), (c) => c.charCodeAt(0));
-      const face = new FontFace('feathertune-stage', bytes.buffer, { weight: '200 800' });
-      face
-        .load()
-        .then(() => document.fonts.add(face))
-        .catch((e) => console.warn('feathertune: the stage font did not load', e));
-    } catch (e) {
-      console.warn('feathertune: the stage font did not load', e);
-    }
+    const list = Array.isArray(data?.fonts) ? data.fonts : [];
+    const loads = list
+      .filter((f) => Object.hasOwn(FACES, f?.family) && typeof f.data === 'string')
+      .map((f) => {
+        try {
+          const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
+          const face = new FontFace(f.family, bytes.buffer, FACES[f.family]);
+          return face.load().then(() => document.fonts.add(face));
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      });
+    Promise.allSettled(loads).then((all) => {
+      for (const r of all) if (r.status === 'rejected') console.warn('feathertune: a stage font did not load', r.reason);
+      st.fonts = true;
+      relayout();
+    });
   },
 });
 

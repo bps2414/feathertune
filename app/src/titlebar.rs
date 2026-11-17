@@ -61,10 +61,11 @@ use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindow
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
     IsWindowVisible, IsZoomed, KillTimer, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SIZE_MINIMIZED,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos, WM_ACTIVATE, WM_APP, WM_CLOSE,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOVE,
-    WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
-    WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
+    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SHOWWINDOW, WM_SIZE,
+    WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
 
 use crate::gfx::{self, ICON_FONT, point, rect};
@@ -437,17 +438,26 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
 }
 
 /// Makes the window (and the site, which then also takes the strip's place) fullscreen or back: the
-/// player's fullscreen button, and the stage (stage.rs).
+/// player's fullscreen button, and the stage (stage.rs). The flag is set before the window changes, so the
+/// WM_NCCALCSIZE and WM_SIZE that change brings already see it; the window's own state decides whether it
+/// changes (a flag left behind by an earlier path must not skip it), and the site is laid out again
+/// either way.
 pub(crate) fn set_fullscreen(window: &Window, on: bool) {
-    if FULLSCREEN.swap(on, Ordering::Relaxed) == on {
-        return;
+    FULLSCREEN.store(on, Ordering::Relaxed);
+    if window.is_fullscreen().ok() != Some(on) {
+        let _ = window.set_fullscreen(on);
     }
-    let _ = window.set_fullscreen(on);
     if let Ok(hwnd) = window.hwnd() {
         unsafe {
             let _ = PostMessageW(Some(HWND(hwnd.0)), WM_RELAYOUT, WPARAM(0), LPARAM(0));
         }
     }
+}
+
+/// The strip is not shown: the window is fullscreen, or the stage is open (which makes it fullscreen; its
+/// layer must never sit under the strip, whatever order the window's messages come in).
+fn strip_hidden() -> bool {
+    FULLSCREEN.load(Ordering::Relaxed) || crate::stage::is_open()
 }
 
 /// Turns the drift on or off (the `animated_title_bar` switch).
@@ -512,11 +522,7 @@ fn invalidate_nav(hwnd: HWND) {
 impl TitleBar {
     /// The site webview takes the client area below the strip.
     fn layout(&self, hwnd: HWND, width: i32, height: i32) {
-        let top = if FULLSCREEN.load(Ordering::Relaxed) {
-            0
-        } else {
-            ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height)
-        };
+        let top = if strip_hidden() { 0 } else { ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height) };
         unsafe {
             let _ = self.controller.SetBounds(RECT { left: 0, top: 0, right: width, bottom: height - top });
             let mut container = HWND::default();
@@ -619,8 +625,7 @@ impl TitleBar {
 
     /// Starts or stops the frame timer: it runs only while there is something to move on screen.
     fn schedule(&mut self, hwnd: HWND) {
-        let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() }
-            && !FULLSCREEN.load(Ordering::Relaxed);
+        let on_screen = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() } && !strip_hidden();
         let drifting = ANIMATED.load(Ordering::Relaxed) && self.active && on_screen;
         let flowing = (self.morph.is_some() || gfx::fading()) && on_screen;
         let run = match (flowing, drifting) {
@@ -927,7 +932,7 @@ unsafe extern "system" fn subclass(
             }
             let scale = gfx::scale(hwnd);
             let (x, y) = (p.x as f32 / scale, p.y as f32 / scale);
-            if y >= HEIGHT || FULLSCREEN.load(Ordering::Relaxed) {
+            if y >= HEIGHT || strip_hidden() {
                 return result;
             }
             let code = match bar.hit(x, y, width_dip(hwnd)) {
@@ -1024,7 +1029,23 @@ unsafe extern "system" fn subclass(
             bar.relayout(hwnd);
             return result;
         }
+        // In fullscreen the client area is the whole window. tao keeps a maximized undecorated window's
+        // client area to the monitor's work area (so it does not cover the taskbar) even in borderless
+        // fullscreen, which left the taskbar's height at the bottom outside the site, showing stale pixels.
+        WM_NCCALCSIZE if wparam.0 != 0 && FULLSCREEN.load(Ordering::Relaxed) => return LRESULT(0),
         WM_RELAYOUT => {
+            // The frame again (WM_NCCALCSIZE above), in case the window's size did not change with the flag.
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
             bar.relayout(hwnd);
             bar.schedule(hwnd);
             invalidate(hwnd);

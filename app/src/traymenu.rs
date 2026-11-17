@@ -140,6 +140,18 @@ fn entries(app: &AppHandle) -> Vec<Entry> {
     }
     list.push(item("share_lyrics", "Share lyrics...", None, live.plugin("share_lyrics")));
     list.push(item("reload", "Reload page", None, true));
+    // The sleep timer: a flat group, the one set now checked (with the minutes left).
+    if live.plugin("sleep_timer") {
+        let usable = crate::sleep_timer::available(app);
+        list.push(Entry::Separator);
+        let ids =
+            std::iter::once(crate::sleep_timer::OFF_ID).chain(crate::sleep_timer::ITEMS.iter().map(|&(id, _)| id));
+        for id in ids {
+            let checked = crate::sleep_timer::checked(id);
+            let label = crate::sleep_timer::label(id, true);
+            list.push(Entry::Item { id, label, checked: Some(checked), enabled: usable });
+        }
+    }
     list.extend([
         Entry::Separator,
         item("autostart", "Start with Windows", Some(app.autolaunch().is_enabled().unwrap_or(false)), true),

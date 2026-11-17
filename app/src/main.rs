@@ -45,6 +45,7 @@ mod settings;
 mod settings_window;
 mod share_lyrics;
 mod shortcuts;
+mod sleep_timer;
 mod smtc;
 mod splash;
 mod stats;
@@ -253,6 +254,7 @@ fn main() {
             if live.plugin("album_color") {
                 album_color::start(app.handle());
             }
+            send_effects(app.handle());
             if live.plugin("ambient_mode") {
                 ambient::start(app.handle());
             }
@@ -401,7 +403,7 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
         });
     }
     app.manage(AutostartItem(autostart.clone()));
-    Menu::with_items(
+    let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "toggle", t("Show / hide"), true, None::<&str>)?,
@@ -413,13 +415,49 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
             &MenuItem::with_id(app, "share_lyrics", t("Share lyrics..."), true, None::<&str>)?,
             &MenuItem::with_id(app, "reload", t("Reload page"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &autostart,
-            &lastfm_item,
-            &MenuItem::with_id(app, "settings", t("Settings"), true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", t("Quit"), true, None::<&str>)?,
         ],
-    )
+    )?;
+    // The sleep timer: this menu is built once, so its items are always there, greyed out while the timer
+    // cannot be used (`sync_sleep_items` follows the plugin switches).
+    let usable = sleep_timer::available(app);
+    let mut items = Vec::new();
+    for id in std::iter::once(sleep_timer::OFF_ID).chain(sleep_timer::ITEMS.iter().map(|&(id, _)| id)) {
+        let item = CheckMenuItem::with_id(
+            app,
+            id,
+            sleep_timer::label(id, false),
+            usable,
+            sleep_timer::checked(id),
+            None::<&str>,
+        )?;
+        menu.append(&item)?;
+        items.push((id, item));
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    app.manage(SleepItems(items));
+    menu.append_items(&[
+        &autostart,
+        &lastfm_item,
+        &MenuItem::with_id(app, "settings", t("Settings"), true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "quit", t("Quit"), true, None::<&str>)?,
+    ])?;
+    Ok(menu)
+}
+
+/// The native tray menu's sleep timer items.
+struct SleepItems(Vec<(&'static str, CheckMenuItem<tauri::Wry>)>);
+
+/// Marks the sleep timer set now in the native tray menu and greys its items out while the timer cannot be
+/// used (the themed one reads both when it opens).
+pub(crate) fn sync_sleep_items(app: &AppHandle) {
+    if let Some(items) = app.try_state::<SleepItems>() {
+        let usable = sleep_timer::available(app);
+        for (id, item) in &items.0 {
+            let _ = item.set_checked(sleep_timer::checked(id));
+            let _ = item.set_enabled(usable);
+        }
+    }
 }
 
 /// What a tray menu item does (both menus use these ids).
@@ -456,8 +494,15 @@ pub(crate) fn tray_command(app: &AppHandle, id: &str) {
             stats::flush(app);
             app.exit(0)
         }
+        id if id.starts_with("sleep_") => sleep_timer::choose(app, id),
         _ => {}
     }
+}
+
+/// Gives the page the effects level (`[ui] effects`; the `core` module applies it, core/page.js).
+pub(crate) fn send_effects(app: &AppHandle) {
+    let mode = app.state::<settings::Live>().get().ui.effects().to_owned();
+    injections::send(app, "perf", &serde_json::json!({ "mode": mode }));
 }
 
 /// `None`: the keys are not configured.

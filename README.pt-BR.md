@@ -46,7 +46,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
 - Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
-- Um menu da bandeja no visual do app, com a faixa e os controles.
+- Um menu da bandeja no visual do app, com a faixa e os controles, e um timer para dormir (pausa depois de 15 a 60 minutos ou no fim da faixa).
 - Botões de voltar e avançar na barra de título.
 - Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
 
@@ -58,9 +58,9 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
-- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, crossfade entre faixas (experimental), com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa (experimental) e um visualizer embaixo da capa.
+- Áudio só neste PC, no som da própria página, com todo efeito em bypass durante anúncio: equalizador de 10 bandas, compressor, efeitos sonoros (8D, reverb, estéreo amplo, karaokê, mono), crossfade entre faixas (experimental), com as duas tocando juntas durante o fade (com eco de saída opcional), pular silêncio no começo e no fim da faixa (experimental) e um visualizer embaixo da capa.
 - Análise de faixa (experimental): tempo, tom e contorno de volume de cada faixa, medidos na primeira vez que ela toca; só esses números ficam guardados, nunca áudio.
-- Mixes (experimental, junto com o crossfade): por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o começo da próxima faixa toca numa segunda voz oculta e as duas se sobrepõem; senão a faixa some e a próxima entra.
+- Mixes (experimental, junto com o crossfade): por playlist e por par de faixas, uma transição automática ou editada à mão (pontos de saída e entrada, duração, curva, eco, filtro, troca de graves, tempo) na página Mixagens da janela de configurações. Quando a conta deixa, o fim da faixa toca numa segunda voz oculta enquanto o player já passa para a próxima, e as duas se sobrepõem; senão a faixa some e a próxima entra.
 
 **O que você ouve**
 - Discord Rich Presence e scrobbles no Last.fm (com fila offline).
@@ -133,8 +133,10 @@ navigation = true             # botões de voltar e avançar na barra de título
 song_mode = true              # escolhe a versão só áudio de uma faixa que também tem vídeo
 precise_volume = true         # roda do mouse sobre o player: volume em 2% (Shift: 10%)
 skip_disliked = true          # pula uma faixa que começa marcada com "não gostei"
+sleep_timer = true            # pausa depois de 15-60 min ou no fim da faixa (menu da bandeja; precisa de controls)
 equalizer = true              # plugins de áudio: um grafo Web Audio na página, em bypass durante anúncio
 compressor = true
+sound_effects = true          # 8D, reverb, estéreo amplo, karaokê ou mono (ver [audio] effect)
 crossfade = false             # experimental (desligado por padrão); também os mixes e a voz de transição
 track_analysis = false        # experimental; tempo, tom e contorno de volume em audio-facts/ no perfil
 skip_silence = false          # experimental
@@ -173,6 +175,7 @@ glow = "normal"              # off (mais leve), normal, strong
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB de -12 a 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (fora do caminho do som), soft, night, strong
+effect = "none"              # none (fora do caminho do som), 8d, reverb, wide, karaoke, mono
 crossfade_ms = 6000          # 0 a 12000; 0: desligado
 curve = "equal_power"        # linear, equal_power, s_curve, exponential
 fade_in_ms = 1500            # 0 a 5000, entrando na próxima faixa
@@ -185,6 +188,7 @@ name = "feathertune"         # como os celulares pareados chamam este PC (nunca 
 
 [ui]
 language = "auto"            # auto (idioma do Windows: português vira pt-BR, o resto inglês), en, pt-BR; vale depois de reiniciar
+effects = "auto"             # auto (mais leve quando a página vê que este PC não dá conta), full, light
 
 [browser]
 disable_features = []        # features extras do Chromium a desligar (experimentos, veja docs/DESIGN.pt-BR.md)

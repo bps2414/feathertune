@@ -46,7 +46,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
 - Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
-- A tray menu in the app's look, with the track and its controls.
+- A tray menu in the app's look, with the track and its controls, and a sleep timer (pause after 15 to 60 minutes or at the end of the track).
 - Back and forward buttons on the title bar.
 - Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
 
@@ -58,9 +58,9 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**
-- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, crossfade between tracks (experimental), both playing at once during the fade (with an optional echo out), skipping silence at the start and end of a track (experimental), and a visualizer under the artwork.
+- Audio on this PC only, on the page's own sound, every effect bypassed while an ad plays: a 10-band equalizer, a compressor, sound effects (8D, reverb, wide stereo, karaoke, mono), crossfade between tracks (experimental), both playing at once during the fade (with an optional echo out), skipping silence at the start and end of a track (experimental), and a visualizer under the artwork.
 - Track analysis (experimental): the tempo, key and loudness outline of each track, measured the first time it plays; only those numbers are kept, never audio.
-- Mixes (experimental, with the crossfade): per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) on the settings window's Mixes page. When the account allows it, the start of the next track plays in a hidden second voice so the two overlap; otherwise the track fades out and the next one fades in.
+- Mixes (experimental, with the crossfade): per playlist and per pair of tracks, an automatic or hand-edited transition (out and in points, length, curve, echo, filter, bass swap, tempo) on the settings window's Mixes page. When the account allows it, the end of the track plays in a hidden second voice while the player moves on to the next one, so the two overlap; otherwise the track fades out and the next one fades in.
 
 **Your listening**
 - Discord Rich Presence and Last.fm scrobbling (with an offline queue).
@@ -133,8 +133,10 @@ navigation = true             # back and forward buttons on the title bar
 song_mode = true              # picks the song version of a track that also has a video
 precise_volume = true         # mouse wheel over the player: volume by 2% (Shift: 10%)
 skip_disliked = true          # skips a track that starts marked "dislike"
+sleep_timer = true            # pauses after 15-60 min or at the end of the track (tray menu; needs controls)
 equalizer = true              # audio plugins: one Web Audio graph on the page, bypassed during ads
 compressor = true
+sound_effects = true          # 8D, reverb, wide stereo, karaoke or mono (see [audio] effect)
 crossfade = false             # experimental (off by default); also the mixes and the transition voice
 track_analysis = false        # experimental; tempo, key and loudness outline in audio-facts/ in the profile
 skip_silence = false          # experimental
@@ -173,6 +175,7 @@ glow = "normal"              # off (lightest), normal, strong
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom
 eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
 compressor = "none"          # none (out of the sound path), soft, night, strong
+effect = "none"              # none (out of the sound path), 8d, reverb, wide, karaoke, mono
 crossfade_ms = 6000          # 0 to 12000; 0: off
 curve = "equal_power"        # linear, equal_power, s_curve, exponential
 fade_in_ms = 1500            # 0 to 5000, into the next track
@@ -185,6 +188,7 @@ name = "feathertune"         # what paired phones call this PC (never the Window
 
 [ui]
 language = "auto"            # auto (Windows' language: Portuguese gets pt-BR, anything else English), en, pt-BR; applies after a restart
+effects = "auto"             # auto (lighter once the page sees this PC cannot keep up), full, light
 
 [browser]
 disable_features = []        # extra Chromium features to turn off (experiments, see docs/DESIGN.md)

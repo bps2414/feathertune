@@ -254,6 +254,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
         "strings": crate::i18n::strings(),
         "ui": {
             "language": s.ui.language,
+            "effects": s.ui.effects(),
             // The language in use (the setting may be newer, until a restart).
             "active": crate::i18n::language(),
             "languages": crate::i18n::LANGUAGES.iter().map(|(tag, name)| json!({ "tag": tag, "name": name })).collect::<Vec<_>>(),
@@ -294,6 +295,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "eq_bands": crate::audio::eq_gains(&s),
             "eq_presets": crate::audio::EQ_PRESETS.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
             "compressor": s.audio.compressor,
+            "effect": s.audio.effect,
             "crossfade_ms": s.audio.crossfade_ms,
             "last_transition": crate::deck::last(),
             "curve": s.audio.curve,
@@ -316,8 +318,8 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `lyrics.romanize`, `lyrics.size`,
 /// `lyrics.align`, `lyrics.glow`, `lyrics.duets`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
-/// `audio.compressor`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`, `audio.visualizer`,
-/// `ui.language` or `autostart`. Returns whether a restart is needed for it to apply.
+/// `audio.compressor`, `audio.effect`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`,
+/// `audio.visualizer`, `ui.language`, `ui.effects` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
 pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value) -> Result<bool, String> {
     guard(&webview)?;
@@ -339,6 +341,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             live.write("ui", name, toml_edit::value(lang), None, true)?;
             Ok(true)
         }
+        ("ui", "effects") => {
+            let level = value.as_str().filter(|v| crate::settings::EFFECTS.contains(v)).ok_or("unknown value")?;
+            live.write("ui", name, toml_edit::value(level), None, false)?;
+            crate::send_effects(&app);
+            Ok(false)
+        }
         ("plugins", id) => {
             let plugin = plugins::get(id).ok_or("unknown plugin")?;
             let on = value.as_bool().ok_or("expected true or false")?;
@@ -357,6 +365,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                     crate::miniplayer::refresh();
                 }
                 "remote" => crate::remote::apply(&app),
+                "sleep_timer" | "controls" => crate::sync_sleep_items(&app),
                 id if crate::audio::PLUGINS.contains(&id) => crate::audio::push(&app),
                 _ => {}
             }
@@ -521,6 +530,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("audio", "compressor") => {
             let preset = value.as_str().filter(|p| crate::audio::COMPRESSORS.contains(p)).ok_or("unknown preset")?;
             live.write("audio", name, toml_edit::value(preset), None, false)?;
+            crate::audio::push(&app);
+            Ok(false)
+        }
+        ("audio", "effect") => {
+            let effect = value.as_str().filter(|e| crate::audio::EFFECTS.contains(e)).ok_or("unknown effect")?;
+            live.write("audio", name, toml_edit::value(effect), None, false)?;
             crate::audio::push(&app);
             Ok(false)
         }

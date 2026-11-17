@@ -153,7 +153,87 @@ pub fn field(art: &Art, cells: u32, side: u32, saturation: f32, brightness: f32)
     }
 }
 
-/// Encodes opaque top-down BGRA pixels as PNG.
+/// The whole cover shrunk to `side` × `side`, blurred (a Gaussian of `sigma` pixels that fades into
+/// transparency at the edges, like a CSS `blur()` of a box), with `saturation` and `brightness` as the CSS
+/// filters of those names, and its alpha fading from full at `solid` of the way from the center to the
+/// middle of a side to nothing at the side: a glow of the cover to show large behind it, with no filter
+/// or mask left for the page to run. BGRA with straight alpha (what `png` takes).
+pub fn halo(art: &Art, side: u32, sigma: f32, saturation: f32, brightness: f32, solid: f32) -> Result<Vec<u8>> {
+    let small = unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let source = wic.CreateBitmapFromMemory(
+            art.width,
+            art.height,
+            &GUID_WICPixelFormat32bppPBGRA,
+            art.width * 4,
+            &art.pixels,
+        )?;
+        let scaler = wic.CreateBitmapScaler()?;
+        scaler.Initialize(&source, side, side, WICBitmapInterpolationModeFant)?;
+        let mut pixels = vec![0u8; (side * side * 4) as usize];
+        scaler.CopyPixels(std::ptr::null(), side * 4, &mut pixels)?;
+        pixels
+    };
+    Ok(halo_pixels(&small, side as usize, sigma, saturation, brightness, solid))
+}
+
+/// `halo` on a premultiplied BGRA square of `n` × `n` pixels.
+fn halo_pixels(src: &[u8], n: usize, sigma: f32, saturation: f32, brightness: f32, solid: f32) -> Vec<u8> {
+    let radius = (sigma * 3.0).ceil() as isize;
+    let kernel: Vec<f32> = (-radius..=radius).map(|i| (-0.5 * (i as f32 / sigma).powi(2)).exp()).collect();
+    let total: f32 = kernel.iter().sum();
+    // One pass along `step`; what is outside the square is transparent, so the edges fade out.
+    let blur = |from: &[f32], step: usize, lines: usize| {
+        let mut to = vec![0.0f32; from.len()];
+        for line in 0..n {
+            for at in 0..n {
+                let mut sum = [0.0f32; 4];
+                for (k, w) in kernel.iter().enumerate() {
+                    let i = at as isize + k as isize - radius;
+                    if i < 0 || i >= n as isize {
+                        continue;
+                    }
+                    let p = (line * lines + i as usize * step) * 4;
+                    for c in 0..4 {
+                        sum[c] += from[p + c] * w;
+                    }
+                }
+                let p = (line * lines + at * step) * 4;
+                for c in 0..4 {
+                    to[p + c] = sum[c] / total;
+                }
+            }
+        }
+        to
+    };
+    let floats: Vec<f32> = src.iter().map(|&b| f32::from(b)).collect();
+    let rows = blur(&floats, 1, n);
+    let both = blur(&rows, n, 1);
+    let mut out = vec![0u8; n * n * 4];
+    let half = n as f32 / 2.0;
+    for y in 0..n {
+        for x in 0..n {
+            let p = (y * n + x) * 4;
+            let alpha = both[p + 3];
+            if alpha <= 0.0 {
+                continue;
+            }
+            // Straight color, then the two CSS filters: saturate (its luminance matrix) and brightness.
+            let [b, g, r] = [0, 1, 2].map(|c| both[p + c] / alpha * 255.0);
+            let luma = 0.213 * r + 0.715 * g + 0.072 * b;
+            for (c, v) in [b, g, r].into_iter().enumerate() {
+                out[p + c] = ((luma + (v - luma) * saturation) * brightness).round().clamp(0.0, 255.0) as u8;
+            }
+            let far = ((x as f32 + 0.5 - half).hypot(y as f32 + 0.5 - half) / half).min(1.0);
+            let mask = if far <= solid { 1.0 } else { (1.0 - far) / (1.0 - solid) };
+            out[p + 3] = (alpha * mask).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
+/// Encodes top-down BGRA pixels (straight alpha) as PNG.
 pub fn png(pixels: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     unsafe {
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
@@ -181,5 +261,28 @@ pub fn png(pixels: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
         stream.Read(bytes.as_mut_ptr().cast(), bytes.len() as u32, Some(&mut read)).ok()?;
         bytes.truncate(read as usize);
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_halo_is_solid_in_the_middle_and_gone_at_the_sides() {
+        // An opaque square of one color (premultiplied BGRA).
+        let n = 32;
+        let src: Vec<u8> = [40u8, 80, 200, 255].repeat(n * n);
+        let out = halo_pixels(&src, n, 1.5, 1.0, 1.0, 0.45);
+        let at = |x: usize, y: usize| &out[(y * n + x) * 4..(y * n + x) * 4 + 4];
+        // The color is kept where there is any, and the middle is opaque.
+        assert_eq!(at(n / 2, n / 2), [40, 80, 200, 255]);
+        // Halfway out the alpha is on its way down; at a side and in a corner nothing is left.
+        let mid = at(n / 2 + n * 3 / 8, n / 2)[3];
+        assert!(mid > 0 && mid < 255, "{mid}");
+        assert!(at(n - 1, n / 2)[3] < 16 && at(0, 0)[3] == 0);
+        // Brightness scales the color only.
+        let dark = halo_pixels(&src, n, 1.5, 1.0, 0.5, 0.45);
+        assert_eq!(&dark[(n / 2 * n + n / 2) * 4..][..4], [20, 40, 100, 255]);
     }
 }

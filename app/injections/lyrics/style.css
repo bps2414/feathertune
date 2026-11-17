@@ -3,9 +3,9 @@
    is small, so sizes are in px. Lines fade with their distance from the latest one (`data-d`, set by
    the page; lines without it are the farthest), the lines being sung (`ft-current`; more than one when
    they overlap) are large and bright, and every change between them is a cross-fade.
-   Nothing that changes while the lyrics play is painted again: a line's light is its `opacity` and its
-   size its `transform`, and its glow is a layer of its own (see below), so a change runs on the
-   compositor, also while the page is busy. */
+   Nothing that changes while the lyrics play is painted again: a line's light and its words' are their
+   `opacity`, a line's size its `transform`, and its glow is a layer of its own (see below), so a change
+   runs on the compositor, also while the page is busy. */
 ytmusic-tab-renderer[data-feathertune-lyrics] ytmusic-section-list-renderer {
   display: none;
 }
@@ -27,6 +27,22 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 #feathertune-lyrics .ft-line[data-d],
 #feathertune-lyrics .ft-line.ft-current {
   will-change: transform, opacity;
+}
+
+/* Light effects (`html[data-feathertune-light]`, core/page.js: a PC that cannot keep up, or the setting):
+   fewer layers for the compositor to hold and draw. Only the lines next to the lit one are layers before
+   they light up, and only the lit lines and the two next to the latest keep their glow drawn (the glow,
+   the fades, the glide and the look stay). */
+html[data-feathertune-light] #feathertune-lyrics .ft-line[data-d] {
+  will-change: auto;
+}
+
+html[data-feathertune-light] #feathertune-lyrics .ft-line:is(.ft-current, [data-d='0'], [data-d='1'], [data-d='2']) {
+  will-change: transform, opacity;
+}
+
+html[data-feathertune-light] #feathertune-lyrics .ft-line:not(.ft-current):not([data-d='1'])::before {
+  display: none;
 }
 
 #feathertune-lyrics .ft-line {
@@ -103,18 +119,23 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   will-change: opacity;
 }
 
-/* A line timed word by word lights up as it is sung: its words start dim and turn white in turn. */
-#feathertune-lyrics .ft-line.ft-current.ft-words {
-  color: rgba(255, 255, 255, 0.5);
+/* A line timed word by word lights up as it is sung: its words (`ft-w`) start dim and light up in turn.
+   A word's light is its opacity (white text at half opacity is half-white text), so its fade runs on the
+   compositor: a color fade painted the line's text again at every frame of it, for nearly every song
+   (word times are estimated by default). Outside a lit line a word has no opacity of its own, so a line
+   that dims takes its words back at once, under its own fade. Sung words keep the line's glow (its own
+   layer): a blur of their own per word repainted the whole line at every word. */
+#feathertune-lyrics .ft-line.ft-current .ft-w {
+  opacity: 0.5;
+  will-change: opacity;
 }
 
-/* Sung words keep the line's glow (its own layer): a blur of their own per word repainted the whole
-   line at every word. */
-#feathertune-lyrics .ft-line.ft-current .ft-sung {
-  color: #fff;
+#feathertune-lyrics .ft-line.ft-current .ft-w.ft-sung {
+  opacity: 1;
 }
 
-/* Background vocals under their line: smaller and softer, lit word by word like the line. */
+/* Background vocals under their line: smaller and softer, lit word by word like the line (the wrapper's
+   opacity multiplies its words'). */
 #feathertune-lyrics .ft-line .ft-bg {
   display: block;
   margin-top: 2px;
@@ -124,16 +145,9 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   opacity: 0.75;
 }
 
-#feathertune-lyrics .ft-line.ft-current .ft-bg {
-  color: rgba(255, 255, 255, 0.5);
-}
-
-#feathertune-lyrics .ft-line.ft-current .ft-bg .ft-sung {
-  color: #fff;
-}
-
 /* A translation (and a romanization, above it) under its line: smaller and lighter, lit with the line as a
-   whole (not word by word). Its alpha is multiplied by the line's opacity. */
+   whole (not word by word). Its opacity is multiplied by the line's; it is a layer from the line before
+   the lit one to the one that just left, so its fade both ways runs on the compositor. */
 #feathertune-lyrics .ft-line .ft-ro,
 #feathertune-lyrics .ft-line .ft-tr {
   display: block;
@@ -141,12 +155,17 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   font-size: 0.6em;
   font-weight: 600;
   letter-spacing: 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+  opacity: 0.5;
 }
 
 #feathertune-lyrics .ft-line.ft-current .ft-ro,
 #feathertune-lyrics .ft-line.ft-current .ft-tr {
-  color: rgba(255, 255, 255, 0.75);
+  opacity: 0.75;
+}
+
+#feathertune-lyrics .ft-line:is(.ft-current, [data-d='0'], [data-d='1']) :is(.ft-ro, .ft-tr) {
+  will-change: opacity;
 }
 
 #feathertune-lyrics .ft-line .ft-ro {
@@ -160,9 +179,9 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 }
 
 /* A line leaves slowly (it and its sung words dim together) and the next one comes in a little faster:
-   the transition is the one of the state a line goes to. A line leaving changes its color and its words'
-   at once, under the fade: by then every word is sung, so nothing shows, and a color transition would
-   paint the line again at every frame of it (opacity and transform do not). */
+   the transition is the one of the state a line goes to. A line leaving takes its words back at once,
+   under the fade: by then every word is sung, so nothing shows. Only opacity and transform change, which
+   the compositor runs without painting the line again. */
 #feathertune-lyrics .ft-line {
   transition:
     opacity 0.9s ease,
@@ -173,18 +192,17 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
   transition: opacity 0.9s ease;
 }
 
-/* Words only fade their color; their glow follows the line's (no animation of their own). The
-   translation's color does show when its line leaves, so it keeps its fade both ways. */
-#feathertune-lyrics .ft-line.ft-current span,
+/* Words only fade their opacity; their glow follows the line's (no animation of their own). The
+   translation's does show when its line leaves, so it keeps its fade both ways. */
+#feathertune-lyrics .ft-line.ft-current .ft-w,
 #feathertune-lyrics .ft-line .ft-ro,
 #feathertune-lyrics .ft-line .ft-tr {
-  transition: color 0.9s ease;
+  transition: opacity 0.9s ease;
 }
 
 #feathertune-lyrics .ft-line.ft-current {
   transition:
     opacity 0.5s ease,
-    color 0.5s ease,
     transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -194,24 +212,40 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 
 /* A sung word fades in over a share of its own length (`--ft-word`, set by the page), at most these, so
    fast words light at once instead of trailing the voice. */
-#feathertune-lyrics .ft-line.ft-current .ft-sung {
-  transition: color min(0.25s, var(--ft-word, 0.25s)) ease;
+#feathertune-lyrics .ft-line.ft-current .ft-w.ft-sung {
+  transition: opacity min(0.25s, var(--ft-word, 0.25s)) ease;
 }
 
 /* Estimated word times are a guess: the words light up more softly, so an early or late one jars less. */
-#feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-sung {
-  transition: color min(0.45s, var(--ft-word, 0.45s)) ease;
+#feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-w.ft-sung {
+  transition: opacity min(0.45s, var(--ft-word, 0.45s)) ease;
 }
 
 /* A word named after a color (`--ft-hue`, lyric_colors) takes a tint of it when sung, and glows in it: a
    copy of the word (`data-text`) behind it with the glow as its shadow, which only fades in (a layer of
-   its own while its line is sung, like the line's glow). */
+   its own while its line is sung, like the line's glow). Its tint is a color, so it alone fades its
+   color too (few words are). */
 #feathertune-lyrics .ft-hue {
   position: relative;
 }
 
+#feathertune-lyrics .ft-line.ft-current .ft-hue {
+  transition:
+    opacity 0.9s ease,
+    color 0.9s ease;
+}
+
 #feathertune-lyrics .ft-line.ft-current .ft-hue.ft-sung {
   color: color-mix(in srgb, var(--ft-hue) 45%, #fff);
+  transition:
+    opacity min(0.25s, var(--ft-word, 0.25s)) ease,
+    color min(0.25s, var(--ft-word, 0.25s)) ease;
+}
+
+#feathertune-lyrics.ft-estimated .ft-line.ft-current .ft-hue.ft-sung {
+  transition:
+    opacity min(0.45s, var(--ft-word, 0.45s)) ease,
+    color min(0.45s, var(--ft-word, 0.45s)) ease;
 }
 
 #feathertune-lyrics .ft-hue::after {

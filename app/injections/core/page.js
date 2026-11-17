@@ -332,3 +332,102 @@ const onMedia = (e) => {
 for (const type of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'durationchange', 'seeked', 'volumechange']) {
   document.addEventListener(type, onMedia, true);
 }
+
+// The effects level (`[ui] effects`; Rust sends `{ mode }`: auto, full or light). Light is in force when
+// the setting says so, or on auto when this tab session was judged slow; <html> then has
+// `data-feathertune-light`, which the other modules read in their CSS (or through `perf.light()`).
+// The judgement: `sample()` (the lyrics call it when their glide starts moving) times one window of
+// animation frames, PERF.WINDOW_MS long after PERF.SKIP frames; a window with the page hidden or out
+// of focus at any frame, or a gap over PERF.LOST_MS, does not count. A window is slow when its frames
+// average over PERF.MEAN_MS or PERF.LONGS of them take over PERF.LONG_MS. Light once PERF.SLOW windows
+// were slow and more than were fine (kept in sessionStorage, so a reload stays light; a new start of the
+// app judges again); full, and no more windows this session, once PERF.OK were fine. Never back from
+// light to full within a session. No frame or timer runs outside a window.
+const PERF = { KEY: 'feathertune-effects-light', WINDOW_MS: 1200, SKIP: 3, MEAN_MS: 22, LONG_MS: 50, LONGS: 3, LOST_MS: 1000, SLOW: 3, OK: 8 };
+const perf = { mode: 'auto', verdict: null, slow: 0, ok: 0, running: false, waiting: false };
+try {
+  if (sessionStorage.getItem(PERF.KEY) === '1') perf.verdict = 'light';
+} catch {}
+const perfLight = () => perf.mode === 'light' || (perf.mode === 'auto' && perf.verdict === 'light');
+// Called when light comes into force (`perf.onLight`), for what is already running (the lyrics' pulses).
+const perfListeners = [];
+let perfWasLight = false;
+const perfApply = () => {
+  const root = document.documentElement;
+  if (root) {
+    const light = perfLight();
+    root.toggleAttribute('data-feathertune-light', light);
+    if (light && !perfWasLight) {
+      for (const f of perfListeners) {
+        try {
+          f();
+        } catch {}
+      }
+    }
+    perfWasLight = light;
+    return;
+  }
+  if (perf.waiting) return;
+  perf.waiting = true;
+  document.addEventListener(
+    'readystatechange',
+    () => {
+      perf.waiting = false;
+      perfApply();
+    },
+    { once: true },
+  );
+};
+const perfJudge = (slow) => {
+  if (slow) perf.slow++;
+  else perf.ok++;
+  if (perf.slow >= PERF.SLOW && perf.slow > perf.ok) {
+    perf.verdict = 'light';
+    try {
+      sessionStorage.setItem(PERF.KEY, '1');
+    } catch {}
+    perfApply();
+  } else if (perf.ok >= PERF.OK) {
+    perf.verdict = 'full';
+  }
+};
+const perfSample = () => {
+  if (perf.running || perf.mode !== 'auto' || perf.verdict) return;
+  perf.running = true;
+  let frames = 0;
+  let from = 0;
+  let last = 0;
+  let sum = 0;
+  let count = 0;
+  let long = 0;
+  const step = (now) => {
+    frames++;
+    let lost = document.hidden || !document.hasFocus();
+    if (frames > PERF.SKIP) {
+      const dt = now - last;
+      lost ||= dt > PERF.LOST_MS;
+      sum += dt;
+      count++;
+      if (dt > PERF.LONG_MS) long++;
+    } else {
+      from = now;
+    }
+    last = now;
+    if (lost) return void (perf.running = false);
+    if (frames <= PERF.SKIP || now - from < PERF.WINDOW_MS) return void requestAnimationFrame(step);
+    perf.running = false;
+    if (count) perfJudge(sum / count > PERF.MEAN_MS || long >= PERF.LONGS);
+  };
+  requestAnimationFrame(step);
+};
+perfApply();
+feathertune.perf = Object.freeze({
+  set(data) {
+    const mode = data?.mode;
+    perf.mode = mode === 'full' || mode === 'light' ? mode : 'auto';
+    perfApply();
+  },
+  light: perfLight,
+  sample: perfSample,
+  onLight: (f) => void perfListeners.push(f),
+});

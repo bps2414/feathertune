@@ -15,7 +15,11 @@ use crate::player::Player;
 use crate::settings::{Live, Settings};
 
 /// The plugins of the `audio` page module.
-pub const PLUGINS: &[&str] = &["equalizer", "compressor", "crossfade", "track_analysis", "skip_silence", "visualizer"];
+pub const PLUGINS: &[&str] =
+    &["equalizer", "compressor", "sound_effects", "crossfade", "track_analysis", "skip_silence", "visualizer"];
+
+/// Sound effects (built in the page module); "none" leaves the effect out of the path.
+pub const EFFECTS: &[&str] = &["none", "8d", "reverb", "wide", "karaoke", "mono"];
 
 /// Visualizer styles (drawn in the page module).
 pub const VISUALIZERS: &[&str] = &["bars", "wave"];
@@ -123,9 +127,10 @@ fn payload(s: &Settings) -> Value {
         })
     });
     let visualizer = if VISUALIZERS.contains(&a.visualizer.as_str()) { a.visualizer.as_str() } else { "bars" };
+    let effect = if EFFECTS.contains(&a.effect.as_str()) { a.effect.as_str() } else { "none" };
     json!({
         "plugins": plugins, "eq": eq_gains(s), "compressor": compressor, "crossfade": crossfade,
-        "visualizer": visualizer,
+        "visualizer": visualizer, "effect": effect,
         // The mix buttons' texts, in the app's language.
         "labels": {
             "edited": crate::i18n::t("Edited"),

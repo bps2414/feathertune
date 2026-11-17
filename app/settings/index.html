@@ -69,6 +69,7 @@
         <div data-plugin="song_mode"></div>
         <div data-plugin="precise_volume"></div>
         <div data-plugin="skip_disliked"></div>
+        <div data-plugin="sleep_timer"></div>
       </div>
       <h3>Privacy</h3>
       <div class="group">
@@ -79,6 +80,14 @@
     <section role="tabpanel" data-panel="look" hidden>
       <h2>Appearance</h2>
       <div class="group">
+        <div class="setting">
+          <div class="body"><div class="name">Effects</div><div class="desc">Light keeps the look with fewer layers to draw: for a slow PC.</div></div>
+          <select data-key="ui.effects" aria-label="Effects">
+            <option value="auto">Automatic (lighter on a slow PC)</option>
+            <option value="full">Full</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
         <div data-plugin="album_color"></div>
         <div data-plugin="ambient_mode"></div>
         <div data-plugin="animated_title_bar"></div>
@@ -208,6 +217,19 @@
             </select>
           </div>
         </div>
+        <div data-plugin="sound_effects">
+          <div class="setting">
+            <div class="body"><div class="name">Effect</div></div>
+            <select data-key="audio.effect" aria-label="Effect">
+              <option value="none">None</option>
+              <option value="8d">8D (circles around you)</option>
+              <option value="reverb">Reverb (a hall)</option>
+              <option value="wide">Wide stereo</option>
+              <option value="karaoke">Karaoke (voice down)</option>
+              <option value="mono">Mono</option>
+            </select>
+          </div>
+        </div>
         <div data-plugin="visualizer">
           <div class="setting">
             <div class="body"><div class="name">Style</div></div>
@@ -235,7 +257,7 @@
             </select>
           </div>
           <div class="setting">
-            <div class="body"><div class="name">Fade into the next track</div><div class="desc">Only when the two cannot overlap.</div></div>
+            <div class="body"><div class="name">Fade into the next track</div><div class="desc">When the two do not overlap; with the overlap, the next track fades in along the curve.</div></div>
             <div class="range"><input type="range" data-key="audio.fade_in_ms" min="0" max="5000" step="250" aria-label="Fade into the next track"><span class="value" data-seconds></span></div>
           </div>
           <div class="setting">

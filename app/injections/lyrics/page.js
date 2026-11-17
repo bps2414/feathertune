@@ -28,6 +28,10 @@
 // `colors` (lyric_colors) also glows each verse in one of the album's colors. `romanized` has one text (or
 // null) per line, shown under it like the translation; `beat` { bpm, first_ms } (lyric_pulse, from the
 // track analysis) makes the sung line's glow breathe on the beat.
+// A word's light, like a line's, is its opacity (style.css), so it fades on the compositor instead of
+// painting the line's text again at every frame. With the light effects (core/page.js,
+// `feathertune.perf`) fewer lines are layers and the glow does not pulse; `start` asks it to time the
+// frames of each glide (`sample`), which is how a slow PC is told apart.
 const TAB = 'ytmusic-tab-renderer#tab-renderer';
 const LYRICS_PAGE = 'MUSIC_PAGE_TYPE_TRACK_LYRICS';
 const PLAYER_PAGE = 'ytmusic-player-page';
@@ -282,10 +286,12 @@ const build = () => {
     el.dataset.text = l.text;
     const own = { main: [], bg: [] };
     // Each word fades in over a share of its own length; the last one ends with the line. A word named
-    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css).
+    // after a color carries it (`--ft-hue`) and a copy of itself for its own glow (style.css). Every word
+    // is `ft-w`: its light is its opacity (style.css), which the compositor fades.
     const wordSpans = (parent, words) =>
       words.map((w, j) => {
         const span = document.createElement('span');
+        span.className = 'ft-w';
         span.textContent = w.text;
         const end = words[j + 1]?.ms ?? ends[i];
         if (end > w.ms) span.style.setProperty('--ft-word', `${Math.round((end - w.ms) * WORD_FADE)}ms`);
@@ -477,7 +483,9 @@ const PULSE_FRAMES = [
 const PULSE_DRIFT_MS = 150;
 const pulseAt = (i, video, ms) => {
   const b = meta.beat;
-  if (!b || !lines[i].text || video.playbackRate !== 1 || meta.look?.glow === 'off') {
+  // Not with the light effects: a pulse keeps the compositor drawing every frame.
+  const light = feathertune.perf?.light() === true;
+  if (!b || light || !lines[i].text || video.playbackRate !== 1 || meta.look?.glow === 'off') {
     pulses[i]?.cancel();
     pulses[i] = null;
     return;
@@ -493,6 +501,11 @@ const pulseAt = (i, video, ms) => {
   });
   onClock(pulses[i], video, i, ms, PULSE_DRIFT_MS);
 };
+// Light effects coming on mid-song stop the running pulses now, not at the line's next update.
+feathertune.perf?.onLight?.(() => {
+  for (const a of pulses) a?.cancel();
+  pulses = pulses.map(() => null);
+});
 
 const dim = (i) => {
   for (const a of dots[i]?.anims ?? []) a.cancel();
@@ -807,6 +820,8 @@ const start = (v) => {
   wake(v);
   ownTop = t.scrollTop;
   anim.ready.then(() => align(v)).catch(() => {});
+  // The frames of a glide tell whether this PC keeps up (the automatic effects level, core/page.js).
+  feathertune.perf?.sample();
 };
 
 // Starts the held glide again at `wakeAt` (on the song's clock and rate).

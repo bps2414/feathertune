@@ -322,14 +322,27 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
+        id: "sound_effects",
+        name: "Sound effects",
+        summary: "8D, reverb, wide stereo, karaoke or mono.",
+        description: "One effect on the page's own audio (Audio tab): 8D (the sound circles around you), reverb (a \
+                      hall), wide stereo, karaoke (the voice in the middle goes down) or mono. \"None\" (the \
+                      default) leaves it out of the sound path. Bypassed while an ad plays. While an effect is on, \
+                      the crossfade does not overlap the tracks.",
+        cost: "Not measured yet.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
         id: "crossfade",
         name: "Crossfade",
         summary: "Blends each track into the next.",
         description: "Fades each track into the next (6 s, equal power by default; the mixes are on their own page). \
-                      A hidden second player plays the start of the next track during the fade, so the two overlap; \
-                      when it cannot, the track fades out and the next one fades in. The site still picks the next \
-                      track, so repeat, shuffle and autoplay work as usual. Never over or into an ad, never on \
-                      repeat-one.",
+                      A hidden second player plays the end of the track while the player moves on to the next one, \
+                      so the two overlap; when it cannot (a sound effect on, a slow start), the track fades out and \
+                      the next one fades in. The site still picks the next track, so repeat, shuffle and autoplay \
+                      work as usual. Never over or into an ad, never on repeat-one.",
         cost: "Inside the noise: -1.3 points of CPU and -1 MB private against off (3 runs); the transition and its \
                second player are not measured yet.",
         // Experimental: off until it is reliable (see docs/DESIGN.md, Plugins).
@@ -410,6 +423,17 @@ pub const PLUGINS: &[Plugin] = &[
                       colors (Audio tab). Hidden while an ad plays.",
         cost: "Inside the noise with the expanded player closed: -1.1 points of CPU and -6 MB private against off \
                (3 runs); drawing with it open is not measured.",
+        default_on: true,
+        live: true,
+        legacy: None,
+    },
+    Plugin {
+        id: "sleep_timer",
+        name: "Sleep timer",
+        summary: "Pauses the music after a while, from the tray menu.",
+        description: "A sleep timer in the tray menu: pauses the music after 15, 30, 45 or 60 minutes, or at the end \
+                      of the track. Forgotten when the app closes. Needs Player controls.",
+        cost: "Not measured yet. Nothing runs while no timer is set.",
         default_on: true,
         live: true,
         legacy: None,

@@ -6,6 +6,7 @@
 //! ```toml
 //! [ui]
 //! language = "auto"                # auto (Windows' language), en, pt-BR; applies after a restart
+//! effects = "auto"                 # auto (lighter once the page sees this PC cannot keep up), full, light
 //!
 //! [plugins]                        # one switch per plugin (plugins.rs), all optional
 //! tracker_filter = true            # extra rules go in privacy-list.txt in the profile
@@ -35,6 +36,7 @@
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
 //! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
 //! compressor = "none"              # none (out of the sound path), soft, night, strong
+//! effect = "none"                  # none (out of the sound path), 8d, reverb, wide, karaoke, mono
 //! crossfade_ms = 6000              # 0 to 12000; 0: off
 //! curve = "equal_power"            # linear, equal_power, s_curve, exponential
 //! fade_in_ms = 1500                # 0 to 5000, into the next track
@@ -87,11 +89,23 @@ pub struct Settings {
 pub struct Ui {
     /// "auto" (Windows' language) or a tag of `i18n::LANGUAGES`.
     pub language: String,
+    /// `EFFECTS`: the page's effects level (core/page.js); anything else is "auto".
+    pub effects: String,
 }
+
+/// The effects levels: auto (lighter once the page sees this PC cannot keep up), full, light.
+pub const EFFECTS: &[&str] = &["auto", "full", "light"];
 
 impl Default for Ui {
     fn default() -> Self {
-        Ui { language: "auto".into() }
+        Ui { language: "auto".into(), effects: "auto".into() }
+    }
+}
+
+impl Ui {
+    /// The effects level, "auto" for anything unknown.
+    pub fn effects(&self) -> &str {
+        if EFFECTS.contains(&self.effects.as_str()) { &self.effects } else { "auto" }
     }
 }
 
@@ -180,6 +194,8 @@ pub struct AudioSettings {
     pub eq_bands: Vec<f64>,
     /// `audio::COMPRESSORS`.
     pub compressor: String,
+    /// `audio::EFFECTS`: a sound effect (plugin `sound_effects`).
+    pub effect: String,
     /// Crossfade length, 0 to 12000 (0: off).
     pub crossfade_ms: u32,
     /// `audio::CURVES`.
@@ -198,6 +214,7 @@ impl Default for AudioSettings {
             eq_preset: "flat".into(),
             eq_bands: vec![0.0; 10],
             compressor: "none".into(),
+            effect: "none".into(),
             crossfade_ms: 6000,
             curve: "equal_power".into(),
             fade_in_ms: 1500,

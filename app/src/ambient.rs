@@ -2,10 +2,13 @@
 //! background the page module shows (injections/ambient/), a soft field of the cover's colors
 //! (artwork::field), saturated and darkened, as a small PNG in a `data:` URL. The page shows it large
 //! with no CSS blur, so its slow drift only moves a picture on the compositor instead of blurring the
-//! whole window again at each step. Also carries game mode's `off` to the page.
+//! whole window again at each step. With it goes the halo the page shows right behind the cover
+//! (artwork::halo): the cover already blurred, saturated and faded out toward its sides, so the page runs
+//! no blur or mask for it either (as a CSS filter the compositor drew it again at every frame that moved
+//! anything over it, the lyrics' glide among them). Also carries game mode's `off` to the page.
 //!
-//! The page gets data only: `{ off, field }`, the field a `data:image/png;base64,` string or null (no
-//! cover, or it failed to load). Nothing runs between covers.
+//! The page gets data only: `{ off, field, halo }`, each picture a `data:image/png;base64,` string or
+//! null (no cover, or it failed to load). Nothing runs between covers.
 
 use std::sync::Mutex;
 
@@ -23,9 +26,17 @@ const SIDE: u32 = 64;
 /// The CSS filter it replaces: `saturate(1.7) brightness(0.65)`.
 const SATURATION: f32 = 1.7;
 const BRIGHTNESS: f32 = 0.65;
+/// The halo, and the CSS it replaces: `blur(40px) saturate(1.8) brightness(0.9)` under a radial mask
+/// that is solid up to 45% of the way out. The blur was 40 px of a box 750 to 1200 px wide (1.7 times
+/// the cover on screen), so about 4.4% of its side.
+const HALO_SIDE: u32 = 96;
+const HALO_SIGMA: f32 = 0.044 * HALO_SIDE as f32;
+const HALO_SATURATION: f32 = 1.8;
+const HALO_BRIGHTNESS: f32 = 0.9;
+const HALO_SOLID: f32 = 0.45;
 
-/// What the page was last given: game mode's `off` and the field.
-static PAGE: Mutex<(bool, Option<String>)> = Mutex::new((false, None));
+/// What the page was last given: game mode's `off`, the field and the halo.
+static PAGE: Mutex<(bool, Option<String>, Option<String>)> = Mutex::new((false, None, None));
 
 pub fn start(app: &AppHandle) {
     let app = app.clone();
@@ -41,14 +52,19 @@ pub fn start(app: &AppHandle) {
                         continue;
                     }
                     last = Some(wanted.clone());
-                    let field = wanted.and_then(|url| match background(&url) {
-                        Ok(f) => Some(f),
-                        Err(e) => {
+                    let (field, halo) = match wanted.map(|url| pictures(&url)) {
+                        Some(Ok((field, halo))) => (Some(field), Some(halo)),
+                        Some(Err(e)) => {
                             eprintln!("ambient: no background: {e}");
-                            None
+                            (None, None)
                         }
-                    });
-                    PAGE.lock().unwrap().1 = field;
+                        None => (None, None),
+                    };
+                    {
+                        let mut page = PAGE.lock().unwrap();
+                        page.1 = field;
+                        page.2 = halo;
+                    }
                     send(&app);
                 }
                 Err(RecvError::Lagged(_)) => {}
@@ -65,15 +81,20 @@ pub fn set_off(app: &AppHandle, off: bool) {
 }
 
 fn send(app: &AppHandle) {
-    let (off, field) = PAGE.lock().unwrap().clone();
-    crate::injections::send(app, "ambient", &json!({ "off": off, "field": field }));
+    let (off, field, halo) = PAGE.lock().unwrap().clone();
+    crate::injections::send(app, "ambient", &json!({ "off": off, "field": field, "halo": halo }));
 }
 
-fn background(url: &str) -> Result<String, String> {
+/// The field and the halo of the cover at `url`, each as a `data:` URL.
+fn pictures(url: &str) -> Result<(String, String), String> {
     let art = artwork::load(url)?;
-    let pixels = artwork::field(&art, CELLS, SIDE, SATURATION, BRIGHTNESS).map_err(|e| e.to_string())?;
-    let png = artwork::png(&pixels, SIDE, SIDE).map_err(|e| e.to_string())?;
-    Ok(format!("data:image/png;base64,{}", base64(&png)))
+    let data = |pixels: windows::core::Result<Vec<u8>>, side: u32| {
+        let png = artwork::png(&pixels.map_err(|e| e.to_string())?, side, side).map_err(|e| e.to_string())?;
+        Ok::<_, String>(format!("data:image/png;base64,{}", base64(&png)))
+    };
+    let field = data(artwork::field(&art, CELLS, SIDE, SATURATION, BRIGHTNESS), SIDE)?;
+    let halo = artwork::halo(&art, HALO_SIDE, HALO_SIGMA, HALO_SATURATION, HALO_BRIGHTNESS, HALO_SOLID);
+    Ok((field, data(halo, HALO_SIDE)?))
 }
 
 fn base64(bytes: &[u8]) -> String {

@@ -2,6 +2,15 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.1.1 — 2026-11-16
+
+- **New sound effect: party in the next room** (Audio): the music muffled through a wall, as if you were in the bathroom or the garage of a party.
+- **Sound effects combine:** each effect has its own switch now, so you can turn on several at once (say, party plus reverb). A `config.toml` with one effect keeps it.
+- **Fonts for the Lyrics tab** (Lyrics): pick a font, download one from a library of free fonts (cursive, handwriting, display, sans and serif) or import your own file (TTF, OTF, WOFF, WOFF2).
+- **Crossfade:** the simple fade now follows the track's real length when it changes late (154 s becoming 153.6 s), so it ends with the track instead of spilling onto the start of the next one, which then jumped up.
+- **Lyrics on the beat** (Experimental): the glow's beat is much softer and no longer jumps to resync every few beats; it read as the glow twinkling.
+- Not verified yet in the running app: the new effect by ear, the fonts in the Lyrics tab and the crossfade fix on the track that showed it.
+
 ## 1.1.0 — 2026-11-16
 
 - **Lighter lyrics, same look.** The words, the translation and the romanization now light up without the line being painted again at every frame, and the glow behind the cover is a ready picture instead of a live blur. This is where a slow PC stuttered in the Lyrics tab.

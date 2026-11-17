@@ -2,6 +2,15 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.1.1 — 2026-11-16
+
+- **Efeito sonoro novo: festa no outro cômodo** (Áudio): a música abafada atrás de uma parede, como se você estivesse no banheiro ou na garagem de uma festa.
+- **Efeitos sonoros combinam:** cada efeito agora tem seu próprio switch, então dá para ligar vários ao mesmo tempo (por exemplo, festa mais reverb). Um `config.toml` com um efeito continua com ele.
+- **Fontes para a aba Letras** (Letras): escolha uma fonte, baixe uma de uma biblioteca de fontes gratuitas (cursivas, manuscritas, de destaque, sem serifa e com serifa) ou importe seu próprio arquivo (TTF, OTF, WOFF, WOFF2).
+- **Crossfade:** o fade simples agora segue a duração real da faixa quando ela muda tarde (154 s virando 153,6 s), então termina junto com a faixa em vez de vazar para o começo da próxima, que depois subia de uma vez.
+- **Letra na batida** (Experimental): o pulso do brilho ficou bem mais suave e não salta mais para ressincronizar a cada poucas batidas; parecia o brilho cintilando.
+- Ainda não conferido no app rodando: o efeito novo de ouvido, as fontes na aba Letras e a correção do crossfade na faixa em que apareceu.
+
 ## 1.1.0 — 2026-11-16
 
 - **Letras mais leves, com o mesmo visual.** As palavras, a tradução e a romanização agora acendem sem a linha ser pintada de novo a cada quadro, e o brilho atrás da capa é uma imagem pronta em vez de um blur ao vivo. Era aqui que um PC fraco engasgava na aba Letras.

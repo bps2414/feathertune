@@ -1,10 +1,13 @@
 /* Stage (see stage/page.js): a fixed layer over the site, above everything it has. Under it the site's app
    is not painted, except while an ad plays (then the layer is the one not painted). Only transform and
    opacity move (and the axes of the word being sung, set by page.js); no filter or blur anywhere: the glow
-   is a copy of the line painted once with text shadows, faded in word by word. Display type in the
-   song's voice (Anybody, Unbounded or Syne, bundled; `--ft-face` from page.js), the rest in Segoe UI
-   Variable; no serif. With the light effects (`html[data-feathertune-light]`) no grain, flash, sweep,
-   glow or echo. The CSS animations hold while the track is paused (`ft-still`). */
+   is a copy of the line painted once with text shadows, faded in word by word. A word is not on screen
+   before it is sung: it is born dry (no fade, no turn). Display type in the song's voice (Anybody,
+   Unbounded or Syne, bundled; `--ft-face` from page.js), a script face (Great Vibes) for some emphasis
+   words, the rest in Segoe UI Variable; no serif. The paper (`data-paper`) cuts between the lit stage and
+   light paper with no transition. In a duet each singer has a color (`--ft-sing`). With the light effects
+   (`html[data-feathertune-light]`) no grain, flash, sweep or glow. The CSS animations hold while the
+   track is paused (`ft-still`). */
 html[data-feathertune-stage] ytmusic-app,
 html[data-feathertune-stage] #feathertune-ambient {
   visibility: hidden;
@@ -15,10 +18,10 @@ html[data-feathertune-stage] #feathertune-ambient {
   --ft-glow: var(--feathertune-glow-2, #c84bff);
   --ft-glow-b: var(--feathertune-glow-3, var(--feathertune-glow-1, #3fc6e8));
   --ft-deep: var(--feathertune-ink, #2a1640);
-  --ft-key: color-mix(in srgb, var(--ft-accent) 72%, #fff);
   --ft-bg: #07070b;
   --ft-text: #f7f4ee;
-  --ft-dim: 0.2;
+  --ft-paper: #ece8df;
+  --ft-ink: #141318;
   --ft-display: var(--ft-face, 'Segoe UI Variable Display'), 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
   --ft-ui: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
   /* Out-expo, in-quart, in-out-quart, out-back. */
@@ -63,10 +66,6 @@ html[data-feathertune-stage] #feathertune-ambient {
 }
 #feathertune-stage * {
   box-sizing: border-box;
-}
-#feathertune-stage[data-voice='expanded'],
-#feathertune-stage[data-voice='round'] {
-  --ft-dim: 0.28;
 }
 
 /* ---------- background: the cover's field, the album colors and the light ---------- */
@@ -200,9 +199,53 @@ html[data-feathertune-stage] #feathertune-ambient {
 html[data-feathertune-light] #feathertune-stage .ft-grain,
 html[data-feathertune-light] #feathertune-stage .ft-flash,
 html[data-feathertune-light] #feathertune-stage .ft-sweep,
-html[data-feathertune-light] #feathertune-stage .ft-ghost,
+html[data-feathertune-light] #feathertune-stage .ft-pop,
 html[data-feathertune-light] #feathertune-stage .ft-glows {
   display: none;
+}
+
+/* The paper: light, over the field and the lamps, cut in and out with no transition (page.js sets
+   `data-paper` on an event). The bars' flicker turns it to the accent on their poses. */
+#feathertune-stage .ft-paper {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--ft-paper);
+  opacity: 0;
+  pointer-events: none;
+}
+#feathertune-stage[data-paper='light'] .ft-paper {
+  opacity: 1;
+}
+#feathertune-stage[data-paper='light'][data-flick='1'] .ft-paper {
+  background: var(--ft-accent);
+}
+#feathertune-stage[data-paper='light'] .ft-lines {
+  --ft-text: var(--ft-ink);
+  color: var(--ft-text);
+}
+#feathertune-stage[data-paper='light'] .ft-glows {
+  display: none;
+}
+/* The burst's flash: one dry white frame, at most three a second (page.js). */
+#feathertune-stage .ft-pop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+#feathertune-stage .ft-pop.ft-go {
+  animation: ft-pop 0.2s steps(2, end);
+}
+@keyframes ft-pop {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 /* Letterbox bars on the opening and the credits (outside the safe area). */
@@ -243,7 +286,7 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
 #feathertune-stage .ft-plane,
 #feathertune-stage .ft-inks,
 #feathertune-stage .ft-glows,
-#feathertune-stage .ft-ghost,
+#feathertune-stage .ft-deco,
 #feathertune-stage .ft-title {
   position: absolute;
   inset: 0;
@@ -296,38 +339,188 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
   letter-spacing: 0.06em;
 }
 
-/* A word: dim until sung, then lit, with a small lift into place; the emphasis word in the accent. */
+/* The singer's color (the accent; the second singer's is the album's third color) and the emphasis
+   color made from it, lighter on the stage, darker on light paper. */
+#feathertune-stage .ft-block,
+#feathertune-stage .ft-title {
+  --ft-sing: var(--ft-accent);
+  --ft-keyc: color-mix(in srgb, var(--ft-sing) 72%, #fff);
+}
+#feathertune-stage .ft-s1,
+#feathertune-stage .ft-s2 .ft-alt {
+  --ft-sing: var(--ft-glow-b);
+  --ft-keyc: color-mix(in srgb, var(--ft-sing) 72%, #fff);
+}
+#feathertune-stage[data-paper='light'] .ft-block,
+#feathertune-stage[data-paper='light'] .ft-s1,
+#feathertune-stage[data-paper='light'] .ft-s2 .ft-alt {
+  --ft-keyc: color-mix(in srgb, var(--ft-sing) 70%, #000);
+}
+
+/* A word is not there until it is sung; then it is, at once, and settles from a touch bigger. Lit, the
+   emphasis word takes the singer's color; in a duet every lit word leans to it. */
 #feathertune-stage .ft-w {
-  opacity: var(--ft-dim);
-  transform: translateY(0.04em);
-  transition:
-    opacity 0.2s ease,
-    transform 0.5s var(--ft-ease-back),
-    color 0.35s ease;
+  opacity: 0;
 }
 #feathertune-stage .ft-w.ft-on {
   opacity: 1;
-  transform: none;
+  animation: ft-born 0.3s var(--ft-ease) both;
 }
-#feathertune-stage .ft-w.ft-key.ft-on {
-  color: var(--ft-key);
+@keyframes ft-born {
+  from {
+    transform: scale(1.12);
+  }
+}
+#feathertune-stage .ft-w.ft-key.ft-on,
+#feathertune-stage .ft-tone .ft-w.ft-on {
+  color: var(--ft-keyc);
 }
 #feathertune-stage .ft-w.ft-hit.ft-on {
-  color: var(--ft-accent);
+  color: var(--ft-sing);
+}
+#feathertune-stage .ft-s0 .ft-w.ft-on:not(.ft-key),
+#feathertune-stage .ft-s1 .ft-w.ft-on:not(.ft-key),
+#feathertune-stage .ft-s2 .ft-w.ft-on:not(.ft-key) {
+  color: color-mix(in srgb, var(--ft-sing) 26%, var(--ft-text));
 }
 #feathertune-stage .ft-small.ft-on {
   opacity: 0.86;
 }
-/* The second tone (split): outlined until sung, then filled with the accent. */
-#feathertune-stage .ft-tone .ft-w {
-  color: transparent;
-  -webkit-text-stroke: max(1px, 0.014em) var(--ft-text);
-  opacity: 0.55;
+/* Born from the singer's side (each word of a group from its own side). */
+#feathertune-stage .ft-in-drift .ft-w.ft-on {
+  animation-name: ft-born-drift;
 }
-#feathertune-stage .ft-tone .ft-w.ft-on {
-  color: var(--ft-accent);
-  -webkit-text-stroke-width: 0;
+@keyframes ft-born-drift {
+  from {
+    transform: translateX(calc(var(--wd, var(--ft-dir)) * 0.45em));
+  }
+}
+/* Typed: the word is there when sung, its letters come one by one over the time it is held (`--lt` a
+   letter, `--l0` how late it lit). A duet's answer is typed into outlines. */
+#feathertune-stage .ft-in-letters .ft-w.ft-on {
+  animation: none;
+}
+#feathertune-stage .ft-in-letters .ft-w .ft-l {
+  opacity: 0;
+}
+#feathertune-stage .ft-in-letters .ft-w.ft-on .ft-l {
+  animation: ft-type 1ms linear both;
+  animation-delay: calc(var(--q) * var(--lt, 40ms) + var(--l0, 0ms));
+}
+@keyframes ft-type {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+#feathertune-stage .ft-ans .ft-w .ft-l {
   opacity: 1;
+  -webkit-text-stroke: max(1px, 0.02em) currentColor;
+}
+#feathertune-stage .ft-ans .ft-w.ft-on .ft-l {
+  animation-name: ft-fill;
+}
+@keyframes ft-fill {
+  from {
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+/* The script face, reinforced with a stroke of its own color, a little room for its swashes. */
+#feathertune-stage .ft-script {
+  font-family: 'ft-script', var(--ft-display);
+  -webkit-text-stroke: 0.032em currentColor;
+  padding: 0 0.1em;
+  letter-spacing: 0;
+  text-transform: none;
+}
+#feathertune-stage .ft-gw.ft-script {
+  -webkit-text-stroke: 0;
+}
+
+/* The burst: the small words step back when the last one comes. */
+#feathertune-stage .ft-boom .ft-small-row .ft-w.ft-on {
+  opacity: 0.42;
+}
+#feathertune-stage .ft-l-burst .ft-big.ft-on {
+  animation: ft-burst 0.36s var(--ft-ease) both;
+}
+@keyframes ft-burst {
+  from {
+    transform: scale(1.38);
+  }
+}
+
+/* The bars: solid, from edge to edge, the words in the paper's color; each born with its row's first word. */
+#feathertune-stage .ft-tbar {
+  position: absolute;
+  left: -5vw;
+  width: 110vw;
+  background: var(--ft-text);
+  opacity: 0;
+}
+#feathertune-stage .ft-tbar.ft-on {
+  opacity: 1;
+}
+#feathertune-stage .ft-l-bar .ft-row .ft-w.ft-on {
+  color: var(--ft-ink);
+}
+#feathertune-stage[data-paper='light'] .ft-l-bar .ft-row .ft-w.ft-on {
+  color: var(--ft-paper);
+}
+
+/* The star: eight uneven points in the singer's color, boiling between three drawings (page.js). */
+#feathertune-stage .ft-star {
+  position: absolute;
+  overflow: visible;
+  color: var(--ft-sing);
+  opacity: 0;
+}
+#feathertune-stage .ft-star.ft-on {
+  opacity: 0.9;
+}
+#feathertune-stage .ft-star path {
+  fill: currentColor;
+}
+
+/* The background vocals: a small row under the line, each word born at its own time. */
+#feathertune-stage .ft-bgv {
+  position: absolute;
+  font-family: var(--ft-display);
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  white-space: normal;
+}
+#feathertune-stage .ft-bgv .ft-w {
+  margin-right: 0.3em;
+}
+#feathertune-stage .ft-bgv .ft-w.ft-on {
+  opacity: 0.72;
+  color: color-mix(in srgb, var(--ft-sing) 45%, var(--ft-text));
+}
+
+/* A duet: the other singer's line steps aside, small and dim, up in its corner, until that voice returns. */
+#feathertune-stage .ft-aside {
+  opacity: 0.4;
+  transition:
+    transform 0.5s var(--ft-ease),
+    opacity 0.5s ease;
+}
+#feathertune-stage .ft-aside .ft-glows {
+  display: none;
+}
+#feathertune-stage .ft-aside.ft-out-steps {
+  animation-name: ft-out-steps-aside;
+}
+@keyframes ft-out-steps-aside {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 /* The bloom: the same words as glow only (transparent text, shadows in the accent), each its own layer
@@ -335,9 +528,9 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
 #feathertune-stage .ft-gw {
   color: transparent;
   text-shadow:
-    0 0 0.05em color-mix(in srgb, var(--ft-accent) 55%, #fff),
-    0 0 0.24em var(--ft-accent),
-    0 0 0.6em color-mix(in srgb, var(--ft-accent) 60%, transparent);
+    0 0 0.05em color-mix(in srgb, var(--ft-sing) 55%, #fff),
+    0 0 0.24em var(--ft-sing),
+    0 0 0.6em color-mix(in srgb, var(--ft-sing) 60%, transparent);
   opacity: 0;
   will-change: opacity;
 }
@@ -370,35 +563,6 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
   }
 }
 
-/* The anthem's echoes: outlines a step up and aside each, growing out of the line. */
-#feathertune-stage .ft-ghost .ft-gw {
-  text-shadow: none;
-  -webkit-text-stroke: max(1px, 0.012em) rgba(255, 255, 255, 0.55);
-  opacity: 1;
-  will-change: auto;
-}
-#feathertune-stage .ft-ghost {
-  animation: ft-echo 2.4s var(--ft-ease) both;
-}
-#feathertune-stage .ft-g1 {
-  opacity: 0.22;
-  transform: translate(calc(var(--ft-dir) * 1.1vw), -1.2vh);
-}
-#feathertune-stage .ft-g2 {
-  opacity: 0.13;
-  transform: translate(calc(var(--ft-dir) * 2.2vw), -2.4vh);
-}
-#feathertune-stage .ft-g3 {
-  opacity: 0.07;
-  transform: translate(calc(var(--ft-dir) * 3.3vw), -3.6vh);
-}
-@keyframes ft-echo {
-  from {
-    opacity: 0;
-    transform: none;
-  }
-}
-
 /* The rule between the split's halves, drawn from the side the first half is on. */
 #feathertune-stage .ft-rule {
   position: absolute;
@@ -411,48 +575,6 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
 @keyframes ft-rule {
   from {
     transform: scaleX(0);
-  }
-}
-
-/* Entrances: per word (rise, skew) or per letter (letters, track), staggered. */
-#feathertune-stage .ft-in-rise .ft-inks .ft-w {
-  animation: ft-in-rise 0.8s var(--ft-ease) backwards;
-  animation-delay: calc(var(--i) * 45ms);
-}
-@keyframes ft-in-rise {
-  from {
-    opacity: 0;
-    transform: translateY(0.45em) rotate(4deg);
-  }
-}
-#feathertune-stage .ft-in-skew .ft-inks .ft-w {
-  animation: ft-in-skew 0.7s var(--ft-ease) backwards;
-  animation-delay: calc(var(--i) * 40ms);
-}
-@keyframes ft-in-skew {
-  from {
-    opacity: 0;
-    transform: translateX(calc(var(--ft-dir) * 0.8em)) skewX(calc(var(--ft-dir) * -16deg));
-  }
-}
-#feathertune-stage .ft-in-letters .ft-inks .ft-l {
-  animation: ft-in-letter 0.65s var(--ft-ease) backwards;
-  animation-delay: calc((var(--i) * 3 + var(--q)) * 22ms);
-}
-@keyframes ft-in-letter {
-  from {
-    opacity: 0;
-    transform: translateY(0.6em) skewY(10deg) scaleY(1.3);
-  }
-}
-#feathertune-stage .ft-in-track .ft-inks .ft-l {
-  animation: ft-in-track 1s var(--ft-ease) backwards;
-  animation-delay: calc(var(--i) * 30ms);
-}
-@keyframes ft-in-track {
-  from {
-    opacity: 0;
-    transform: translateX(calc(var(--o) * 0.4em));
   }
 }
 
@@ -490,7 +612,19 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
 @keyframes ft-out-scatter {
   to {
     opacity: 0;
-    transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scale(0.9);
+    transform: translate(var(--sx), var(--sy)) scale(0.9);
+  }
+}
+/* Off in three dry steps. */
+#feathertune-stage .ft-out-steps {
+  animation: ft-out-steps 0.42s steps(3, end) forwards;
+}
+@keyframes ft-out-steps {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 #feathertune-stage .ft-out-fold .ft-inks .ft-w {
@@ -505,9 +639,9 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
   }
 }
 #feathertune-stage .ft-out-scatter .ft-glows,
-#feathertune-stage .ft-out-scatter .ft-ghost,
 #feathertune-stage .ft-out-fold .ft-glows,
-#feathertune-stage .ft-out-fold .ft-ghost,
+#feathertune-stage .ft-out-scatter .ft-deco,
+#feathertune-stage .ft-out-fold .ft-deco,
 #feathertune-stage .ft-out .ft-rule {
   animation: ft-fade-out 0.3s ease forwards;
 }
@@ -560,8 +694,9 @@ html[data-feathertune-light] #feathertune-stage .ft-glows {
     transform: translateY(10px);
   }
 }
+/* Titles are typed, letter by letter (page.js sets each delay). */
 #feathertune-stage .ft-title .ft-l {
-  animation: ft-in-letter 0.9s var(--ft-ease) backwards;
+  animation: ft-type 1ms linear both;
 }
 #feathertune-stage .ft-art {
   display: block;

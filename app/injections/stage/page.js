@@ -11,16 +11,26 @@
 //   axes they end at), then the layout the director chose sets them as big as the safe area (SAFE) allows,
 //   breaking into more rows rather than overflowing; titles narrow through the width axis first. The rows
 //   as laid out are checked once against what was computed, and the block shrinks if they came out wider.
-// - The type: the song's voice (a face and its axes) from the script; a word lights at its time and grows
-//   to its lit axes over the time it is held (font-variation-settings on that word only), blooms (a copy
-//   of the line painted once as glow, each word faded in by opacity), and the emphasis word gets the
-//   accent. Lines enter (rise, letters, skew, track) and leave (slide, scatter, fold, zoom, sink) as the
-//   script says; the chorus' anthem has echoes, more each time it comes back.
+// - The type: the song's voice (a face and its axes) from the script; a word is not on screen before it is
+//   sung. At its time it is born dry (pop: at once, settling from a touch bigger; drift: a short slide
+//   from the singer's side; letters: typed over the time it is held), grows to its lit axes while held
+//   (font-variation-settings on that word only) and blooms (a copy of the line painted once as glow). The
+//   emphasis word gets the singer's color, or the script face. Lines leave (slide, scatter, fold, zoom,
+//   sink, steps) as the script says.
+// - Pieces from lyric edits: the burst (small words pile up, the last bursts big with a full stop and a
+//   flash), the bars (solid, edge to edge, posing a hair either way on the beat while the light paper
+//   flickers to the accent), the stair (a diagonal with script ends) and the climb (two rows rising),
+//   both with a boiling star (three drawings, a new one every STAR_MS). The paper cuts to light when the
+//   script says, with no transition. Flashes and flickers stay under three a second.
+// - A duet: each singer on its side in its color, the group in the middle in both; an answer is typed
+//   into outlines while the other singer's last line steps aside, small, up in its corner, until that
+//   voice returns. Background vocals are a small row under the line, each word born at its own time.
 // - One animation frame loop, only while open, the page visible, the track playing and no ad. Paused, it
 //   draws one frame and stops; the CSS animations and the axis animations hold too. Per frame only
-//   transform and opacity are written, and only when they change; only the current line (and the one
-//   leaving, for its exit) is in the DOM. With the light effects (`html[data-feathertune-light]`) there is
-//   no glow, echo, grain, flash, letter stagger, 3D or camera breath, and lit words take their axes at once.
+//   transform and opacity are written (and the star's drawing), only when they change; only the current
+//   line (the one leaving, for its exit, and a duet's aside) is in the DOM. With the light effects
+//   (`html[data-feathertune-light]`) there is no glow, grain, flash, flicker, pose, boiling, typing, rise,
+//   3D or camera breath, and lit words take their axes at once.
 // - Without the track analysis the light follows the audio module's live level, read only while the
 //   stage plays. Every text goes in as textContent; the data from Rust is checked before use.
 if (window.top !== window) return;
@@ -31,17 +41,36 @@ const IDLE_MS = 2000;
 const KINDS = ['opening', 'close', 'editorial', 'chorus', 'instrumental', 'credits'];
 const TEXT_KINDS = new Set(['close', 'editorial', 'chorus']);
 const RELIEF_KINDS = new Set(['opening', 'instrumental', 'credits']);
-const LAYOUTS = ['stack', 'rag', 'cascade', 'hero', 'grid', 'vertical', 'split', 'tilt', 'anthem'];
-const ENTERS = ['rise', 'letters', 'skew', 'track'];
-const EXITS = ['slide', 'scatter', 'fold', 'zoom', 'sink'];
+const LAYOUTS = ['stack', 'rag', 'cascade', 'hero', 'grid', 'vertical', 'split', 'tilt', 'anthem', 'burst', 'bar', 'stair', 'climb'];
+const ENTERS = ['pop', 'letters', 'drift'];
+const EXITS = ['slide', 'scatter', 'fold', 'zoom', 'sink', 'steps'];
+const PAPERS = ['dark', 'light'];
 const CAMERAS = ['push', 'pull', 'left', 'right', 'rise', 'roll'];
+const DEFAULT_SHOT = { layout: 'stack', x: 0, y: 0, hero: -1, enter: 'pop', exit: 'sink', level: 0, paper: 'dark', script: false, singer: 0, answer: false };
+// Flashes, flickers and the bars' poses: at most one per this long (three a second).
+const FLASH_GAP_MS = 334;
+// The star boils: a new drawing this often.
+const STAR_MS = 100;
+// The star's three drawings: eight uneven points each, in -1..1.
+const STARS = [0, 1, 2].map((s) => {
+  let d = '';
+  for (let p = 0; p < 16; p++) {
+    const j = ((p * 7 + s * 13) % 5) / 5;
+    const r = p % 2 ? 0.3 + j * 0.14 : 0.74 + j * 0.3;
+    const a = (p / 16) * Math.PI * 2 - Math.PI / 2 + (((p * 3 + s * 5) % 7) - 3) * 0.03;
+    d += `${p ? 'L' : 'M'}${(Math.cos(a) * r).toFixed(3)} ${(Math.sin(a) * r).toFixed(3)}`;
+  }
+  return `${d}Z`;
+});
+// Text the script face can set (Latin, with its accents and punctuation).
+const LATIN = /^[ -ɏḀ-ỿ -⁯]+$/;
 const MAX_LINES = 2000;
 const MAX_LIGHT = 9000;
 // Where text may go, as shares of the window: nothing is set outside it (the HUD and the subtitles
 // have the space below it).
 const SAFE = { x: 0.06, y: 0.1, w: 0.88, h: 0.7 };
-// Per-letter entrances only for lines up to this many letters (each letter is an element while it moves).
-const MAX_LETTERS = 48;
+// Typed lines only up to this many letters (each letter is an element).
+const MAX_LETTERS = 64;
 // The live level (dBFS) mapped onto 0..1, and how fast the light follows it.
 const LIVE_DB = { FLOOR: -42, RANGE: 34, FOLLOW: 0.15 };
 const EASE_IN_OUT = 'cubic-bezier(.76, 0, .24, 1)';
@@ -66,6 +95,7 @@ const FACES = {
   'ft-anybody': { weight: '100 900', stretch: '50% 150%' },
   'ft-unbounded': { weight: '200 900' },
   'ft-syne': { weight: '400 800' },
+  'ft-script': { weight: '400' },
 };
 // The voices (src/stage.rs, `Voice`): the face, row pitch, word gap and tracking (em), the case, and the
 // axes of an unlit word, a lit one, the emphasis word, the small words around a hero; `narrow` is how far
@@ -141,6 +171,9 @@ const st = {
   line: -2,
   scene: null,
   block: null,
+  // A duet's line stepped aside (a block, as `block`).
+  aside: null,
+  flashAt: 0,
   words: [],
   anims: new Set(),
   dots: null,
@@ -193,15 +226,20 @@ const svgEl = (tag, attrs, parent) => {
 const check = (d) => {
   const s = d?.script;
   if (!s || !num(s.duration_ms) || !Array.isArray(s.sections) || !Array.isArray(d.lines)) return null;
-  const lines = d.lines.slice(0, MAX_LINES).map((l) => {
-    if (!Array.isArray(l)) return { ms: 0, text: '', words: null };
-    const words = Array.isArray(l[2])
-      ? l[2]
+  // [ms, text] pairs: a line's words or its background vocals.
+  const timed = (x) => {
+    const ws = Array.isArray(x)
+      ? x
           .filter((w) => Array.isArray(w) && num(w[0]) && typeof w[1] === 'string')
           .slice(0, 200)
           .map(([ms, t]) => ({ ms, text: t.slice(0, 120) }))
       : null;
-    return { ms: num(l[0]) ? l[0] : 0, text: text(l[1]), words: words?.length ? words : null };
+    return ws?.length ? ws : null;
+  };
+  const singer = (x) => (Number.isInteger(x) ? clamp(x, 0, 2) : 0);
+  const lines = d.lines.slice(0, MAX_LINES).map((l) => {
+    if (!Array.isArray(l)) return { ms: 0, text: '', words: null, singer: 0, bg: null };
+    return { ms: num(l[0]) ? l[0] : 0, text: text(l[1]), words: timed(l[2]), singer: singer(l[3]), bg: timed(l[4]) };
   });
   const n = lines.length;
   const sign = (x) => (num(x) ? clamp(Math.round(x), -1, 1) : 0);
@@ -210,9 +248,13 @@ const check = (d) => {
     x: sign(x?.x),
     y: sign(x?.y),
     hero: Number.isInteger(x?.hero) && x.hero >= 0 ? x.hero : -1,
-    enter: ENTERS.includes(x?.enter) ? x.enter : 'rise',
+    enter: ENTERS.includes(x?.enter) ? x.enter : 'pop',
     exit: EXITS.includes(x?.exit) ? x.exit : 'sink',
     level: Number.isInteger(x?.level) ? clamp(x.level, 0, 3) : 0,
+    paper: PAPERS.includes(x?.paper) ? x.paper : 'dark',
+    script: x?.script === true,
+    singer: singer(x?.singer),
+    answer: x?.answer === true,
   });
   const sections = s.sections
     .filter((x) => x && KINDS.includes(x.kind) && num(x.from_ms) && num(x.to_ms))
@@ -236,7 +278,6 @@ const check = (d) => {
   const light = Float32Array.from(Array.isArray(s.light) ? s.light.slice(0, MAX_LIGHT) : [], (x) => (num(x) ? clamp(x, 0, 255) / 255 : 0));
   const perLine = (list, f) => lines.map((_, i) => f(Array.isArray(list) ? list[i] : undefined, i));
   const ends = perLine(s.ends, (x, i) => (num(x) && x > lines[i].ms ? x : (lines[i + 1]?.ms ?? lines[i].ms + 4000)));
-  const echoes = perLine(s.echoes, (x) => (Number.isInteger(x) ? clamp(x, 0, 99) : 0));
   const translation = Array.isArray(d.translation) ? perLine(d.translation, (x) => text(x)) : null;
   const c = s.credits || {};
   const next = c.next && typeof c.next.title === 'string' ? { title: text(c.next.title, 200), artist: text(c.next.artist, 200) } : null;
@@ -248,11 +289,11 @@ const check = (d) => {
     duration: s.duration_ms,
     sections,
     voice: Object.hasOwn(VOICES, s.voice) ? s.voice : 'quirk',
+    duet: s.duet === true,
     grid,
     light,
     lines,
     ends,
-    echoes,
     translation,
     credits: { title: text(c.title, 200), artist: text(c.artist, 200), album: text(c.album, 200), next },
     field: typeof d.field === 'string' && FIELD.test(d.field) ? d.field : null,
@@ -306,6 +347,8 @@ const build = () => {
   const lampCore = el('div', 'ft-lamp-core', lamp);
   const flash = el('div', 'ft-flash', root);
   const vignette = el('div', 'ft-vignette', root);
+  el('div', 'ft-paper', root);
+  const pop = el('div', 'ft-pop', root);
   const camera = el('div', 'ft-camera', root);
   const lines = el('div', 'ft-lines', camera);
   const kicker = el('div', 'ft-kicker ft-label', root);
@@ -367,6 +410,7 @@ const build = () => {
     beam,
     beamCore,
     flash,
+    pop,
     camera,
     lines,
     kicker,
@@ -711,7 +755,94 @@ const LAYOUT = {
     const share = [0.8, 0.84, 0.92, 1][c.shot.level];
     const box = { x: c.box.x + (c.box.w * (1 - share)) / 2, y: c.box.y + (c.box.h * (1 - share)) / 2, w: c.box.w * share, h: c.box.h * share };
     const cap = c.cap * (1 + 0.12 * c.shot.level);
-    return { rows: stackRows(c, fit(c.w, c.gap, c.lh, box.w, box.h, cap, 5), 'c', 0, 0, box) };
+    return { rows: stackRows(c, fit(c.w, c.gap, c.lh, box.w, box.h, cap, 5), 'c', c.shot.x, 0, box) };
+  },
+  burst(c) {
+    // The last word as big as the box allows (narrowing first), the others piled small above it.
+    const last = c.w.length - 1;
+    const hf = fit([c.w[last]], 0, c.lh, c.box.w, c.box.h * 0.6, c.box.h * 0.56, 1, 1, c.wn ? [c.wn[last]] : null);
+    const f = fit(c.w.slice(0, last), c.gap, c.slh, c.box.w * 0.62, c.box.h * 0.3, hf.size * 0.26, 3);
+    let sh = hf.size;
+    let s2 = f.size;
+    const height = () => f.rows.length * c.slh * s2 + s2 * 0.25 + sh * c.lh;
+    const over = height() / c.box.h;
+    if (over > 1) {
+      sh /= over;
+      s2 /= over;
+    }
+    const heroW = hf.w[0] * sh;
+    const widths = f.rows.map(([a, b]) => span(f.w, a, b, c.gap) * s2);
+    const bw = Math.max(heroW, ...widths);
+    const at = anchor(c.box, bw, height(), c.shot.x, c.shot.y);
+    const align = (w) => (c.shot.x > 0 ? at.left + bw - w : c.shot.x < 0 ? at.left : at.left + (bw - w) / 2);
+    let top = at.top;
+    const rows = f.rows.map(([a, b], r) => {
+      const row = { idx: range(a, b), size: s2, width: widths[r], left: align(widths[r]), top, small: true };
+      top += c.slh * s2;
+      return row;
+    });
+    rows.push({ idx: [last], size: sh, width: heroW, left: align(heroW), top: top + s2 * 0.25, t: hf.t });
+    return { rows };
+  },
+  bar(c) {
+    // Centered rows, as big as fits with room for a bar around each; the bars go from edge to edge.
+    const pitch = c.lh * 1.36;
+    const f = fit(c.w, c.gap, c.lh, c.box.w * 0.92, (c.box.h * c.lh) / pitch, c.cap * 1.2, 3);
+    const ph = pitch * f.size;
+    const top0 = anchor(c.box, c.box.w, f.rows.length * ph, 0, c.shot.y).top;
+    const widths = f.rows.map(([a, b]) => span(f.w, a, b, c.gap) * f.size);
+    return {
+      rows: f.rows.map(([a, b], r) => ({
+        idx: range(a, b),
+        size: f.size,
+        width: widths[r],
+        left: c.box.x + (c.box.w - widths[r]) / 2,
+        top: top0 + r * ph + (ph - c.lh * f.size) / 2,
+      })),
+      bars: f.rows.map((_, r) => ({ top: top0 + r * ph + ph * 0.05, h: ph * 0.9 })),
+    };
+  },
+  stair(c) {
+    // One word a row down a diagonal: the ends big (the script face when it can set them), the middle
+    // small; the ends' size is the largest that keeps every row inside at its step, and all of them in
+    // the height.
+    const n = c.w.length;
+    const dir = c.shot.x > 0 ? -1 : 1;
+    const step = c.box.w * 0.11;
+    const f = (k) => (c.big[k] ? 1 : 0.4);
+    const pitch = (k) => (c.script[k] ? 0.92 : c.big[k] ? c.lh : c.slh);
+    let S = c.box.h * 0.42;
+    let h = 0;
+    for (let k = 0; k < n; k++) {
+      S = Math.min(S, (c.box.w - k * step) / (c.w[k] * f(k)));
+      h += f(k) * pitch(k);
+    }
+    S = Math.min(S, c.box.h / h);
+    const sizes = range(0, n).map((k) => S * f(k));
+    const widths = sizes.map((s, k) => c.w[k] * s);
+    const reach = Math.max(...widths.map((w, k) => k * step + w));
+    const at = anchor(c.box, reach, S * h, c.shot.x, c.shot.y);
+    let top = at.top;
+    const rows = range(0, n).map((k) => {
+      const left = dir > 0 ? at.left + k * step : at.left + reach - k * step - widths[k];
+      const row = { idx: [k], size: sizes[k], width: widths[k], left, top, lh: pitch(k), small: !c.big[k] };
+      top += sizes[k] * pitch(k);
+      return row;
+    });
+    const r0 = rows[0];
+    return { rows, stars: [{ x: r0.left + r0.width * (dir > 0 ? 0.14 : 0.86), y: r0.top + r0.size * 0.5, s: r0.size * 1.25 }] };
+  },
+  climb(c) {
+    // Two rows about two thirds of the width, set lower by half the rise so they stay inside as they climb;
+    // a star at the first row's start rises with them.
+    const rise = c.box.h * 0.16;
+    const box = { x: c.box.x, y: c.box.y + rise / 2, w: c.box.w, h: c.box.h - rise };
+    const f = fit(c.w, c.gap, c.lh, box.w * 0.64, box.h * 0.6, c.cap, 2, 2);
+    const align = c.shot.x > 0 ? 'r' : c.shot.x < 0 ? 'l' : 'c';
+    const rows = stackRows(c, f, align, c.shot.x, 0, box);
+    const r0 = rows[0];
+    const sx = align === 'r' ? r0.left + r0.width + r0.size * 0.1 : r0.left - r0.size * 0.1;
+    return { rows, rise, stars: [{ x: sx, y: r0.top + r0.size * 0.45, s: r0.size * 1.5 }] };
   },
 };
 
@@ -835,6 +966,8 @@ const mount = (k) => {
   ui.kicker.classList.toggle('ft-off', sec.kind !== 'chorus');
   showSubtitle('');
   if (lyric) return;
+  ui.root.dataset.paper = 'dark';
+  dropAside();
   leaveLine();
   // The light back in the middle, behind the frame.
   ui.lamp.style.transform = '';
@@ -905,11 +1038,12 @@ const onDownbeat = (ms) => {
   return ph < 0.25 || ph > 3.75;
 };
 
-// The line on screen leaves the way its shot says, and is removed once it has.
-const leaveLine = () => {
+// The line on screen leaves the way its shot says, and is removed once it has; in a duet it may step
+// aside instead: small and dim, up in its singer's corner of the safe area, until that voice comes back.
+const leaveLine = (toAside = false) => {
   const b = st.block;
   st.block = null;
-  // A word still growing keeps the axes it had reached while it leaves.
+  // A word still growing keeps the axes it had reached while it leaves (a climb, its height).
   for (const a of st.anims) {
     try {
       a.commitStyles();
@@ -919,8 +1053,20 @@ const leaveLine = () => {
   st.anims.clear();
   st.words = [];
   st.shown.glow = null;
+  if (ui) ui.root.dataset.flick = '0';
   if (!b) return;
   const { node, exit, dir } = b;
+  if (toAside) {
+    const box = safeBox();
+    const left = b.singer === 0;
+    const ox = left ? b.bounds.x : b.bounds.x + b.bounds.w;
+    const oy = b.bounds.y;
+    node.style.transformOrigin = `${ox.toFixed(0)}px ${oy.toFixed(0)}px`;
+    node.classList.add('ft-aside');
+    node.style.transform = `translate(${((left ? box.x : box.x + box.w) - ox).toFixed(0)}px, ${(box.y - oy).toFixed(0)}px) scale(0.34)`;
+    st.aside = b;
+    return;
+  }
   let kind = exit;
   if (lightFx() && (kind === 'fold' || kind === 'scatter')) kind = 'sink';
   node.style.setProperty('--ft-dir', String(dir));
@@ -928,50 +1074,101 @@ const leaveLine = () => {
     node.querySelectorAll('.ft-inks .ft-w').forEach((w, k) => {
       w.style.setProperty('--sx', `${(((k * 73) % 17) - 8) * 0.9}vw`);
       w.style.setProperty('--sy', `${(((k * 41) % 13) - 6) * 1.4}vh`);
-      w.style.setProperty('--sr', `${(((k * 29) % 11) - 5) * 7}deg`);
     });
   }
   node.classList.add('ft-out', `ft-out-${kind}`);
   setTimeout(() => node.remove(), EXIT_MS);
 };
 
-// The line `j` of a text scene, set by its shot: measured, fitted, laid out, then lit word by word.
-const renderLine = (sec, j) => {
+// The line stepped aside goes, in three steps.
+const dropAside = () => {
+  const a = st.aside;
+  st.aside = null;
+  if (!a) return;
+  a.node.classList.add('ft-out', 'ft-out-steps');
+  setTimeout(() => a.node.remove(), EXIT_MS);
+};
+
+// One dry white frame, at most one every FLASH_GAP_MS.
+const popFlash = () => {
+  const now = performance.now();
+  if (lightFx() || now - st.flashAt < FLASH_GAP_MS) return;
+  st.flashAt = now;
+  ui.pop.classList.remove('ft-go');
+  void ui.pop.offsetWidth;
+  ui.pop.classList.add('ft-go');
+};
+
+// The line `j` of a text scene, set by its shot: measured, fitted, laid out; its words are born as sung.
+// `now` is the lyrics' time (ms).
+const renderLine = (sec, j, now) => {
   const v = st.v;
   const i = sec.lines[j];
   st.line = i;
-  leaveLine();
+  const shot = sec.shots[j] || DEFAULT_SHOT;
+  const light = lightFx();
+  // A duet: the other singer's line steps aside until that voice comes back; the group takes the stage.
+  const prev = st.block;
+  const aside = v.duet && !light && !!prev && prev.singer < 2 && shot.singer < 2 && prev.singer !== shot.singer;
+  if (aside || !v.duet || shot.singer === 2 || st.aside?.singer === shot.singer) dropAside();
+  leaveLine(aside);
+  ui.root.dataset.paper = shot.paper;
   const l = v.lines[i];
   if (!l || !l.text.trim()) return showSubtitle('');
-  const shot = sec.shots[j] || { layout: 'stack', x: 0, y: 0, hero: -1, enter: 'rise', exit: 'sink', level: 0 };
   const V = VOICES[v.voice];
-  const light = lightFx();
   const words = wordsOf(i);
   if (!words.length) return showSubtitle('');
   const n = words.length;
   const hero = shot.hero >= 0 && shot.hero < n ? shot.hero : -1;
   let layout = shot.layout;
   // The script checked the word counts; a line that came out otherwise falls back to a plain stack.
-  if (((layout === 'hero' || layout === 'vertical') && (hero < 0 || n < 2)) || (layout === 'grid' && n > 8) || (layout === 'cascade' && n < 3)) layout = 'stack';
+  const within = (a, b) => n >= a && n <= b;
+  if (
+    ((layout === 'hero' || layout === 'vertical') && (hero < 0 || n < 2)) ||
+    (layout === 'grid' && n > 8) ||
+    (layout === 'cascade' && n < 3) ||
+    (layout === 'burst' && !within(3, 7)) ||
+    (layout === 'bar' && n > 8) ||
+    (layout === 'stair' && !within(2, 4)) ||
+    (layout === 'climb' && !within(4, 12))
+  )
+    layout = 'stack';
   const big = layout === 'hero' || layout === 'vertical';
-  const role = (k) => (k === hero ? (big ? 'hero' : 'key') : big ? 'small' : 'word');
-  const letterCount = words.reduce((a, w) => a + w.text.length, 0);
-  const letters = !light && (shot.enter === 'letters' || shot.enter === 'track') && letterCount <= MAX_LETTERS;
-  const shown = words.map((w, k) => cased(w.text, role(k) === 'hero' ? V.heroCase : V.kase));
+  const role = (k) => {
+    if (layout === 'burst') return k === n - 1 ? 'hero' : 'small';
+    if (layout === 'stair') return k === 0 || k === n - 1 ? 'hero' : 'small';
+    return k === hero ? (big ? 'hero' : 'key') : big ? 'small' : 'word';
+  };
+  // The script face for the hero's word or the stair's ends, when it can set them.
+  const script = words.map((w, k) => shot.script && role(k) === 'hero' && (layout === 'stair' || layout === 'hero') && LATIN.test(w.text));
+  const shown = words.map((w, k) => (script[k] ? w.text : cased(w.text, role(k) === 'hero' ? V.heroCase : V.kase)));
+  // The burst's last word ends the sentence.
+  if (layout === 'burst' && !/[.!?…,;:]$/.test(shown[n - 1])) shown[n - 1] += hash(l.text) % 3 ? '.' : '..';
+  const letterCount = shown.reduce((a, s) => a + s.length, 0);
+  const typed = !light && shot.enter === 'letters' && letterCount <= MAX_LETTERS;
+  // A script word keeps its letters joined.
+  const lettersOf = (k) => typed && !script[k];
+  const enter = typed ? 'letters' : shot.enter === 'drift' && !light ? 'drift' : 'pop';
   const axes = (k) => {
+    if (script[k]) return [[], []];
     const r = role(k);
     return r === 'hero' || r === 'key' ? [V.base, V.key] : r === 'small' ? [V.small, V.smallLit] : [V.base, V.lit];
   };
-  const cls = (k) => `ft-mw${role(k) === 'small' ? ' ft-small' : ''}`;
-  const items = words.map((_, k) => ({ text: shown[k], cls: cls(k), fv: fvs(axes(k)[1]), letters }));
+  const cls = (k) => `ft-mw${role(k) === 'small' ? ' ft-small' : ''}${script[k] ? ' ft-script' : ''}`;
+  const items = words.map((_, k) => ({ text: shown[k], cls: cls(k), fv: fvs(axes(k)[1]), letters: lettersOf(k) }));
   const w = measure(items);
-  // The hero may narrow its width axis to stand bigger.
+  // The big words may narrow their width axis to stand bigger.
   let wn = null;
-  if (big && V.narrow != null) {
+  const narrowable = range(0, n).filter((k) => role(k) === 'hero' && !script[k]);
+  if (narrowable.length && V.narrow != null && layout !== 'stair') {
     wn = w.slice();
-    wn[hero] = measure([{ ...items[hero], fv: fvs(withWidth(V.key, V.narrow)) }])[0];
+    const m = measure(narrowable.map((k) => ({ ...items[k], fv: fvs(withWidth(V.key, V.narrow)) })));
+    narrowable.forEach((k, q) => (wn[k] = m[q]));
   }
-  const box = safeBox();
+  const full = safeBox();
+  // A singer's line keeps to its side, so the other singer's aside has the far corner.
+  const side = v.duet && shot.singer < 2 ? (shot.singer === 0 ? -1 : 1) : 0;
+  const box = side ? { ...full, x: side < 0 ? full.x : full.x + full.w * 0.3, w: full.w * 0.7 } : full;
   const calm = sec.kind === 'close';
   const c = {
     w,
@@ -984,18 +1181,38 @@ const renderLine = (sec, j) => {
     shot,
     hero,
     light,
+    big: range(0, n).map((k) => role(k) === 'hero'),
+    script,
   };
   const g = LAYOUT[layout](c);
-  // The block: its rows, a copy of them as glow and, for the anthem, its echoes.
-  const node = el('div', `ft-block ft-l-${layout} ft-in-${letters ? shot.enter : shot.enter === 'skew' ? 'skew' : 'rise'}`, ui.lines);
+  // The block: the bars and stars behind, a copy of the rows as glow, the rows.
+  const ans = shot.answer && typed ? ' ft-ans' : '';
+  const node = el('div', `ft-block ft-l-${layout} ft-in-${enter}${ans}${v.duet ? ` ft-s${shot.singer}` : ''}`, ui.lines);
   const fitBox = el('div', 'ft-fit', node);
   const plane = el('div', 'ft-plane', fitBox);
   if (g.plane) {
     plane.style.transform = g.plane.transform;
     plane.style.transformOrigin = `${g.plane.cx}px ${g.plane.cy}px`;
   }
-  const dir = shot.x !== 0 ? shot.x : shot.y >= 0 ? 1 : -1;
+  const dir = side || (shot.x !== 0 ? shot.x : shot.y >= 0 ? 1 : -1);
   node.style.setProperty('--ft-dir', String(dir));
+  const ends = (k) => (k + 1 < n ? words[k + 1].ms : v.ends[i]);
+  // Born with the voice without axes of their own: the bars (with their row's first word), the stars
+  // (with the first word).
+  const plain = [];
+  const stars = [];
+  const deco = g.bars || g.stars ? el('div', 'ft-deco', plane) : null;
+  g.bars?.forEach((b, r) => {
+    const bar = el('i', 'ft-tbar', deco);
+    Object.assign(bar.style, { top: `${b.top}px`, height: `${b.h}px` });
+    plain.push([words[g.rows[r].idx[0]].ms, bar]);
+  });
+  g.stars?.forEach((s, q) => {
+    const svg = svgEl('svg', { viewBox: '-1 -1 2 2', class: 'ft-star' }, deco);
+    Object.assign(svg.style, { left: `${s.x - s.s / 2}px`, top: `${s.y - s.s / 2}px`, width: `${s.s}px`, height: `${s.s}px` });
+    stars.push(svgEl('path', { d: STARS[q % 3] }, svg));
+    plain.push([words[g.rows[0].idx[0]].ms, svg]);
+  });
   const fvOf = (k, lit) => {
     const r = g.rows.find((row) => row.idx.includes(k));
     const a = axes(k)[lit ? 1 : 0];
@@ -1013,23 +1230,24 @@ const renderLine = (sec, j) => {
     const holder = el('div', layer, plane);
     return g.rows.flatMap((r, ri) => {
       const row = el('div', `ft-row${r.small ? ' ft-small-row' : ''}${r.tone ? ' ft-tone' : ''}`, holder);
-      Object.assign(row.style, { left: `${r.left}px`, top: `${r.top}px`, fontSize: `${r.size}px`, lineHeight: String(r.small ? c.slh : V.lh) });
+      Object.assign(row.style, { left: `${r.left}px`, top: `${r.top}px`, fontSize: `${r.size}px`, lineHeight: String(r.lh ?? (r.small ? c.slh : V.lh)) });
       if (r.rot) row.style.transform = `rotate(${r.rot}deg)`;
       row.style.setProperty('--r', String(ri));
       return r.idx.map((k) => {
-        const word = el('span', kind === 'ink' ? cls(k).replace('ft-mw', 'ft-w') : 'ft-gw', row);
+        const word = el('span', kind === 'ink' ? cls(k).replace('ft-mw', 'ft-w') : `ft-gw${script[k] ? ' ft-script' : ''}`, row);
         word.style.width = `${widthEm(k)}em`;
-        word.style.setProperty('--i', String(k));
         if (role(k) === 'key' || role(k) === 'hero') word.classList.add('ft-key');
+        if (layout === 'burst' && k === n - 1) word.classList.add('ft-big');
+        // A group's words in the two singers' colors, in turn.
+        if (shot.singer === 2 && k % 2) word.classList.add('ft-alt');
         if (kind === 'ink') {
           word.style.fontVariationSettings = fvOf(k, false);
-          if (letters) {
-            const mid = (shown[k].length - 1) / 2;
-            [...shown[k]].forEach((ch, q) => {
-              const s = el('span', 'ft-l', word, ch);
-              s.style.setProperty('--o', String(q - mid));
-              s.style.setProperty('--q', String(q));
-            });
+          if (enter === 'drift' && shot.singer === 2) word.style.setProperty('--wd', k % 2 ? '1' : '-1');
+          if (lettersOf(k)) {
+            // Typed over most of the time the word is held.
+            const each = clamp(((ends(k) - words[k].ms) * 0.8) / Math.max(1, shown[k].length), 18, 110);
+            word.style.setProperty('--lt', `${Math.round(each)}ms`);
+            [...shown[k]].forEach((ch, q) => el('span', 'ft-l', word, ch).style.setProperty('--q', String(q)));
           } else word.textContent = shown[k];
         } else {
           word.style.fontVariationSettings = fvOf(k, true);
@@ -1039,11 +1257,6 @@ const renderLine = (sec, j) => {
       });
     });
   };
-  // The anthem's echoes: the line again, outlined, a step further each, more each time the chorus returns.
-  if (!light && layout === 'anthem') {
-    const count = Math.min(3, Math.max(shot.level, v.echoes[i] > 0 ? 1 : 0));
-    for (let e = count; e >= 1; e--) rowsOf(`ft-ghost ft-g${e}`, 'ghost');
-  }
   const glows = light ? null : rowsOf('ft-glows', 'glow');
   const inks = rowsOf('ft-inks', 'ink');
   if (g.rule && !light) {
@@ -1070,19 +1283,79 @@ const renderLine = (sec, j) => {
   ui.beam.style.transform = `translateX(${(cx - innerWidth / 2).toFixed(0)}px)`;
   node.style.setProperty('--ft-level', String(shot.level));
   node.dataset.level = String(shot.level);
-  const ends = (k) => (k + 1 < n ? words[k + 1].ms : v.ends[i]);
-  st.words = inks.map(([k, word]) => ({
-    el: word,
-    glow: glows?.find((x) => x[0] === k)?.[1] || null,
-    ms: words[k].ms,
-    end: ends(k),
-    base: fvOf(k, false),
-    lit: fvOf(k, true),
-    on: false,
-    anim: null,
-    hit: sec.kind === 'chorus' && onDownbeat(words[k].ms),
-  }));
-  st.block = { node, glows: node.querySelector('.ft-glows'), exit: shot.exit, dir, level: shot.level, chorus: sec.kind === 'chorus' };
+  // The bars pose about the block's center.
+  if (layout === 'bar') plane.style.transformOrigin = `${cx}px ${cy}px`;
+  // The climb: the rows rise over the line's time (one transform animation, held while paused).
+  if (g.rise && !light) {
+    const span = Math.max(1500, v.ends[i] - l.ms + EXIT_MS);
+    const climb = plane.animate([{ transform: `translateY(${g.rise / 2}px)` }, { transform: `translateY(${-g.rise / 2}px)` }], {
+      duration: span,
+      easing: 'linear',
+      fill: 'both',
+    });
+    climb.currentTime = clamp(now - l.ms, 0, span);
+    if (st.still) climb.pause();
+    st.anims.add(climb);
+    climb.finished.then(
+      () => st.anims.delete(climb),
+      () => {},
+    );
+  }
+  // The background vocals: a small row under the line (over it when there is no room), aligned with it.
+  const bgv = [];
+  if (l.bg) {
+    const size = clamp(Math.min(...g.rows.map((r) => r.size)) * 0.34, 15, 34);
+    const half = (bounds.h * k) / 2;
+    const below = cy + half + size * 0.4;
+    const top = below + size * 2.6 <= innerHeight * (SAFE.y + SAFE.h + 0.05) ? below : cy - half - size * 1.6;
+    const ax = side || shot.x;
+    const row = el('div', 'ft-bgv', node);
+    Object.assign(row.style, {
+      left: `${box.x}px`,
+      width: `${box.w}px`,
+      top: `${Math.max(0, top)}px`,
+      fontSize: `${size}px`,
+      textAlign: ax < 0 ? 'left' : ax > 0 ? 'right' : 'center',
+    });
+    for (const b of l.bg) {
+      const t = b.text.trim();
+      if (t) bgv.push({ el: el('span', 'ft-w ft-small', row, cased(t, V.kase)), ms: b.ms });
+    }
+    for (const b of bgv) b.el.style.fontVariationSettings = fvs(V.small);
+  }
+  st.words = [
+    ...inks.map(([k, word]) => ({
+      el: word,
+      glow: glows?.find((x) => x[0] === k)?.[1] || null,
+      ms: words[k].ms,
+      end: ends(k),
+      base: fvOf(k, false),
+      lit: fvOf(k, true),
+      on: false,
+      anim: null,
+      hit: sec.kind === 'chorus' && onDownbeat(words[k].ms),
+      boom: layout === 'burst' && k === n - 1,
+      typed: lettersOf(k),
+    })),
+    ...plain.map(([ms, e]) => ({ el: e, glow: null, ms, end: ms, base: '', lit: '', on: false, anim: null, plain: true })),
+    ...bgv.map((b, q) => ({ ...b, glow: null, end: bgv[q + 1]?.ms ?? v.ends[i], base: fvs(V.small), lit: fvs(V.smallLit), on: false, anim: null })),
+  ];
+  st.block = {
+    node,
+    plane,
+    glows: node.querySelector('.ft-glows'),
+    exit: shot.exit,
+    dir,
+    level: shot.level,
+    chorus: sec.kind === 'chorus',
+    singer: v.duet ? shot.singer : 0,
+    bounds: { x: cx - (bounds.w * k) / 2, y: cy - (bounds.h * k) / 2, w: bounds.w * k, h: bounds.h * k },
+    stars,
+    pose: -1,
+    bar: layout === 'bar' && !light,
+    poseIdx: null,
+    poseAt: 0,
+  };
   showSubtitle(v.translation?.[i] || '');
 };
 
@@ -1094,7 +1367,7 @@ const bboxOf = (rows) => {
   let y1 = -Infinity;
   const lh = VOICES[st.v.voice].lh;
   for (const r of rows) {
-    const h = r.size * (r.small ? Math.max(1.05, lh) : lh);
+    const h = r.size * (r.lh ?? (r.small ? Math.max(1.05, lh) : lh));
     let [l, t, w, hh] = [r.left, r.top, r.width, h];
     if (r.rot) [l, t, w, hh] = [r.left + r.width / 2 - h / 2, r.top + h / 2 - r.width / 2, h, r.width];
     x0 = Math.min(x0, l);
@@ -1105,18 +1378,25 @@ const bboxOf = (rows) => {
   return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
 };
 
-// A word starts or stops being sung: it lights, grows to its lit axes over the time it is held (at once
-// with the light effects, or when it was already over) and blooms.
+// A word starts or stops being sung: it is born, grows to its lit axes over the time it is held (at once
+// with the light effects, or when it was already over) and blooms. A typed word lit late starts its
+// letters as far along as it is; the burst's last word brings the flash.
 const lightWord = (w, on, ms) => {
   w.on = on;
+  if (w.typed) w.el.style.setProperty('--l0', `${on ? Math.round(Math.min(0, w.ms - ms)) : 0}ms`);
   w.el.classList.toggle('ft-on', on);
-  w.el.classList.toggle('ft-hit', on && w.hit);
+  w.el.classList.toggle('ft-hit', on && !!w.hit);
   w.glow?.classList.toggle('ft-on', on);
+  if (w.boom) {
+    st.block?.node.classList.toggle('ft-boom', on);
+    if (on && ms - w.ms < 400) popFlash();
+  }
   if (w.anim) {
     st.anims.delete(w.anim);
     w.anim.cancel();
     w.anim = null;
   }
+  if (w.base === w.lit) return;
   if (!on) {
     w.el.style.fontVariationSettings = w.base;
     return;
@@ -1216,10 +1496,35 @@ const draw = (v, playing) => {
     sec.lines.forEach((li, jj) => {
       if (lines[li].ms <= ms) j = jj;
     });
-    if (sec.lines[j] !== st.line) renderLine(sec, j);
+    if (sec.lines[j] !== st.line) renderLine(sec, j, ms);
     for (const w of st.words) {
       const on = ms >= w.ms;
       if (on !== w.on) lightWord(w, on, ms);
+    }
+    const b = st.block;
+    if (b && !lightFx()) {
+      // The star boils: a new drawing every STAR_MS.
+      if (b.stars.length) {
+        const pose = Math.floor(t / STAR_MS) % 3;
+        if (pose !== b.pose) {
+          b.pose = pose;
+          b.stars.forEach((p, q) => p.setAttribute('d', STARS[(pose + q) % 3]));
+        }
+      }
+      // The bars pose a hair either way on the beat (every other one when beats come faster than
+      // FLASH_GAP_MS), the light paper flickering with them; without a tempo, on each word, as often.
+      if (b.bar) {
+        const lit = st.words.reduce((a, w) => a + (w.on && !w.plain ? 1 : 0), 0);
+        const idx = !lit ? null : grid ? Math.floor((t - grid.off) / (grid.beat * (grid.beat < FLASH_GAP_MS ? 2 : 1))) : lit;
+        const at = performance.now();
+        if (idx !== b.poseIdx && (grid || idx == null || at - b.poseAt >= FLASH_GAP_MS)) {
+          b.poseIdx = idx;
+          b.poseAt = at;
+          const odd = idx != null && (idx & 1) === 1;
+          b.plane.style.transform = idx == null ? '' : `rotate(${odd ? 0.75 : -0.75}deg) scale(${odd ? 1.025 : 1})`;
+          ui.root.dataset.flick = odd ? '1' : '0';
+        }
+      }
     }
   } else if (st.dots) {
     // The dots fill over the last four beats (or seconds) before the next sung line.
@@ -1318,6 +1623,7 @@ const kick = () => {
 // Everything set again for the new size (the safe area is in pixels).
 const relayout = () => {
   if (!st.open || !st.v) return;
+  dropAside();
   st.sec = -1;
   kick();
 };
@@ -1406,7 +1712,9 @@ const close = () => {
     if (st.open) return;
     ui.root.hidden = true;
     leaveLine();
+    st.aside = null;
     ui.lines.replaceChildren();
+    ui.root.dataset.paper = 'dark';
     ui.camera.querySelectorAll('.ft-scene').forEach((s) => s.remove());
     st.scene = null;
     st.sec = -1;

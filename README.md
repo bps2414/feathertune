@@ -55,7 +55,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Lyrics translation: a line-by-line translation under each lyric line (into Windows' language by default), the source's own when it has one, else a machine translation made for lyrics; also on the floating lyrics and the mini player.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
-- Stage: the synced lyrics as a full-screen show, from a title bar button or the tray: an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, cut on the beat when the track was analyzed and colored by the cover; it steps aside at once for ads. Esc leaves.
+- Stage: the synced lyrics as a full-screen show, from a title bar button or the tray: an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, each word born as it is sung, pieces from lyric edits and duets with a side per singer, cut on the beat when the track was analyzed and colored by the cover; it steps aside at once for ads. Esc leaves.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**

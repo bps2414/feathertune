@@ -55,7 +55,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Tradução da letra: uma tradução linha a linha embaixo de cada linha (no idioma do Windows por padrão), a da própria fonte quando ela tem, senão uma tradução automática feita para letras; também na letra flutuante e no mini player.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
-- Palco: a letra sincronizada como um show em tela cheia, por um botão na barra de título ou pela bandeja: abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, com cortes na batida quando a faixa foi analisada e as cores da capa; sai da frente na hora para os anúncios. Esc sai.
+- Palco: a letra sincronizada como um show em tela cheia, por um botão na barra de título ou pela bandeja: abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, cada palavra nascendo quando é cantada, peças de edits de letra e duetos com um lado por cantor, com cortes na batida quando a faixa foi analisada e as cores da capa; sai da frente na hora para os anúncios. Esc sai.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**

@@ -20,16 +20,24 @@
 //!   by game mode and by the plugin's switch. The page asks Rust for nothing: no new command or permission.
 //! - Each line gets a shot (`Shot`): a layout from a varied set (never the same twice in a row, nor the same
 //!   place on screen, between two lines with no textless scene between them), where it sits, its emphasis
-//!   word (the longest held, favouring long words and words the song repeats), how it enters and leaves.
-//!   The chorus has a signature: the anthem then two seeded partners, in the same order, entrances and
-//!   places every time it comes back, one level higher each time (bigger, more glow, more echo, up to 3).
-//!   Each scene gets a camera move. The song gets a type personality (`Voice`) from its tempo, loudness
+//!   word (the longest held, favouring long words and words the song repeats), how its words are born with
+//!   the voice and how it leaves. The set borrows from lyric edits: words piling up small until the last
+//!   one bursts big (`Burst`), a few words down a diagonal with script ends (`Stair`), two rows rising
+//!   (`Climb`), the emphasis word in a script face. The chorus has a signature: the anthem then two seeded
+//!   partners, in the same order, entrances and places every time it comes back, one level higher each
+//!   time (bigger, more glow, up to 3). The peak is the text in bars (`Bar`): on the anthem of the strongest
+//!   choruses after the first (or of the only one), at most twice a song. The paper behind the lines
+//!   (`Paper`) only cuts on an event: a scene's start (every other driven verse is on light paper), a bar,
+//!   a duet's answer after 6 s on the same paper.
+//! - A duet (lines from both singers, TTML agents): each singer has a side and the group the middle; a
+//!   line from the other singer than the line before is an answer, its letters typed over the held note.
+//! - Each scene gets a camera move. The song gets a type personality (`Voice`) from its tempo, loudness
 //!   and how fast its words come (fast and loud: narrow and heavy; slow or quiet: wide and light; in
 //!   between, the seed picks), so songs look different while one song stays coherent.
 //! - The script is written again while open when the track, its lines, its facts or its background change.
-//! - The display fonts, Anybody (width and weight axes), Unbounded and Syne (weight), all under the SIL Open
-//!   Font License (`injections/stage/OFL.txt`), are compiled in and sent once as bytes (`stageFont`); the
-//!   page loads them with the FontFace API.
+//! - The display fonts, Anybody (width and weight axes), Unbounded and Syne (weight), and the script face,
+//!   Great Vibes, all under the SIL Open Font License (`injections/stage/OFL.txt`), are compiled in and sent
+//!   once as bytes (`stageFont`); the page loads them with the FontFace API.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -48,11 +56,16 @@ use crate::player::{Event, Player};
 use crate::settings::Live;
 
 /// The variable latin subsets (Fontsource's WOFF2): the page's family name and the file.
-const FONTS: [(&str, &[u8]); 3] = [
+const FONTS: [(&str, &[u8]); 4] = [
     ("ft-anybody", include_bytes!("../injections/stage/anybody-latin-wdth-wght.woff2")),
     ("ft-unbounded", include_bytes!("../injections/stage/unbounded-latin-wght.woff2")),
     ("ft-syne", include_bytes!("../injections/stage/syne-latin-wght.woff2")),
+    ("ft-script", include_bytes!("../injections/stage/great-vibes-latin-400.woff2")),
 ];
+/// The text in bars is the peak: at most this many a song.
+const MAX_BARS: usize = 2;
+/// A duet's answer only turns the paper once the paper has stayed this long (ms).
+const PAPER_HOLD_MS: f64 = 6000.0;
 /// A cut moves to a bar line at most this share of a beat away.
 const SNAP_BEATS: f64 = 0.75;
 /// A section starts this long before its first line.
@@ -108,8 +121,16 @@ pub enum Layout {
     Split,
     /// A stack on a plane tilted in perspective.
     Tilt,
-    /// The chorus' own: big, centered, with its echoes.
+    /// The chorus' own: big, centered.
     Anthem,
+    /// The words pile up small, the last one bursts big with a full stop.
+    Burst,
+    /// The rows in solid bars, full width, posing on the beat: the peak.
+    Bar,
+    /// Two to four words down a diagonal, the ends big in the script face, a star behind the first.
+    Stair,
+    /// Two rows rising over the line's time, a star rising with them.
+    Climb,
 }
 
 impl Layout {
@@ -120,41 +141,47 @@ impl Layout {
             Layout::Cascade => words >= 3,
             Layout::Grid => (3..=8).contains(&words),
             Layout::Vertical => words >= 3 && hero <= 10,
+            Layout::Burst => (3..=7).contains(&words),
+            Layout::Bar => (1..=8).contains(&words),
+            Layout::Stair => (2..=4).contains(&words),
+            Layout::Climb => (4..=12).contains(&words),
             _ => true,
         }
     }
 }
 
 /// The verse layouts with their weights in a close-up (calm) and in an editorial (driven) scene.
-const VERSE: [(Layout, u32, u32); 8] = [
-    (Layout::Stack, 3, 1),
+const VERSE: [(Layout, u32, u32); 11] = [
+    (Layout::Stack, 2, 1),
     (Layout::Rag, 3, 2),
     (Layout::Hero, 2, 2),
     (Layout::Vertical, 2, 1),
-    (Layout::Tilt, 1, 2),
+    (Layout::Tilt, 1, 1),
     (Layout::Split, 1, 3),
-    (Layout::Cascade, 1, 3),
+    (Layout::Cascade, 1, 2),
     (Layout::Grid, 0, 2),
+    (Layout::Burst, 1, 3),
+    (Layout::Stair, 3, 2),
+    (Layout::Climb, 2, 1),
 ];
 /// The chorus' signature is the anthem and two of these.
-const PARTNERS: [Layout; 4] = [Layout::Hero, Layout::Split, Layout::Tilt, Layout::Stack];
+const PARTNERS: [Layout; 4] = [Layout::Hero, Layout::Split, Layout::Burst, Layout::Climb];
 /// A chorus line whose signature layout does not fit it takes the first of these that differs from its
 /// neighbours (always fits).
-const FALLBACK: [Layout; 3] = [Layout::Tilt, Layout::Stack, Layout::Rag];
+const FALLBACK: [Layout; 3] = [Layout::Stack, Layout::Rag, Layout::Tilt];
 /// The escalation stops here.
 const MAX_LEVEL: u8 = 3;
 
+/// How a line's words are born: each only when it is sung, never before.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Enter {
-    /// Words rise and settle, slightly turned.
-    Rise,
-    /// Letter by letter, skewed.
+    /// Dry: there at once, a flash of glow, a short settle in size.
+    Pop,
+    /// Its letters typed over the time the word is held.
     Letters,
-    /// Words slide in sideways, sheared.
-    Skew,
-    /// The letters close in from far apart.
-    Track,
+    /// A short slide in from the singer's side (from both sides for a group).
+    Drift,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -168,6 +195,16 @@ pub enum Exit {
     /// Past the camera.
     Zoom,
     Sink,
+    /// Off in three dry steps.
+    Steps,
+}
+
+/// The paper behind the lines: the lit stage, or a cut to light paper with dark type.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Paper {
+    Dark,
+    Light,
 }
 
 /// The camera's slow move over a scene.
@@ -195,6 +232,13 @@ pub struct Shot {
     pub exit: Exit,
     /// 0 outside the chorus; 1, 2, 3 for its first, second, third and later times.
     pub level: u8,
+    pub paper: Paper,
+    /// The emphasis word in the script face.
+    pub script: bool,
+    /// Who sings it in a duet: 0 the first singer, 1 the second, 2 together (always 0 outside a duet).
+    pub singer: u8,
+    /// A duet's answer: the other singer than the line before.
+    pub answer: bool,
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -239,10 +283,12 @@ pub struct Script {
     /// Contiguous, from 0 to `duration_ms`.
     pub sections: Vec<Section>,
     pub voice: Voice,
+    /// Lines from both singers (see `Shot::singer`).
+    pub duet: bool,
     pub grid: Option<Grid>,
     /// The energy at 10 Hz, 0 to 255 over the song's own range; empty without facts.
     pub light: Vec<u8>,
-    /// Per line: how many times its text was sung before (the chorus' echoes).
+    /// Per line: how many times its text was sung before.
     pub echoes: Vec<u8>,
     /// Per line: when it stops being sung (its own end, else the next line's start).
     pub ends: Vec<u32>,
@@ -453,6 +499,7 @@ fn shoot(
     ends: &[f64],
     energy: &Energy,
     counts: &HashMap<String, u32>,
+    duet: bool,
     rng: &mut Rng,
 ) {
     // The chorus' signature, once per song: the anthem in the middle, then two partners elsewhere.
@@ -463,8 +510,8 @@ fn shoot(
     let a = off[rng.below(off.len())];
     let rest: Vec<(i8, i8)> = off.iter().copied().filter(|p| *p != a).collect();
     let places = [CENTER, a, rest[rng.below(rest.len())]];
-    let enters = [Enter::Letters, Enter::Skew, if rng.coin() { Enter::Rise } else { Enter::Track }];
-    let exits = [Exit::Zoom, if rng.coin() { Exit::Scatter } else { Exit::Fold }, Exit::Slide];
+    let enters = [Enter::Pop, Enter::Drift, if rng.coin() { Enter::Letters } else { Enter::Pop }];
+    let exits = [Exit::Zoom, if rng.coin() { Exit::Scatter } else { Exit::Fold }, Exit::Steps];
 
     // Every line of a text scene, in order, with whether a textless scene comes before it.
     let mut order: Vec<(usize, usize, bool)> = Vec::new();
@@ -480,6 +527,9 @@ fn shoot(
     }
     let mut prev: Option<Shot> = None;
     let (mut run, mut k) = (0u8, 0usize);
+    // Per line of `order`: its chorus run (1, 2... ; 0 outside one), its word count and its energy.
+    let mut info: Vec<(usize, usize, Option<f64>)> = Vec::with_capacity(order.len());
+    let mut runs = 0usize;
     let mut all: Vec<Vec<Shot>> = sections.iter().map(|s| Vec::with_capacity(s.lines.len())).collect();
     for (n, &(si, j, after_gap)) in order.iter().enumerate() {
         if after_gap {
@@ -489,6 +539,7 @@ fn shoot(
         let chorus = s.kind == Kind::Chorus;
         if chorus && j == 0 && (si == 0 || sections[si - 1].kind != Kind::Chorus) {
             run = run.saturating_add(1);
+            runs += 1;
             k = 0;
         }
         let i = s.lines[j];
@@ -497,7 +548,17 @@ fn shoot(
         let hero_len = hero.map_or(0, |h| letters(&ws[h].1));
         let fits = |l: Layout| l.fits(ws.len(), hero_len);
         let before = prev.map(|p| p.layout);
-        let shot = if chorus {
+        let last_place = prev.map(|p| (p.x, p.y));
+        info.push((if chorus { runs } else { 0 }, ws.len(), energy.between(f64::from(lines[i].ms), ends[i])));
+        // In a duet each singer keeps a side: the first the left, the second the right, together the middle.
+        let singer = if duet { lines[i].voice.min(2) } else { 0 };
+        let side: i8 = match singer {
+            0 => -1,
+            1 => 1,
+            _ => 0,
+        };
+        let answer = duet && singer < 2 && prev.is_some_and(|p| p.singer < 2 && p.singer != singer);
+        let mut shot = if chorus {
             let at = k % sig.len();
             let next = sig[(k + 1) % sig.len()];
             let layout = if fits(sig[at]) {
@@ -506,14 +567,24 @@ fn shoot(
                 FALLBACK.into_iter().find(|l| Some(*l) != before && *l != next).unwrap_or(Layout::Stack)
             };
             k += 1;
+            // The signature's row on the singer's side, another row when the line before was there.
+            let (x, y) = match places[at] {
+                (_, y) if duet && Some((side, y)) == last_place => (side, if y == 1 { -1 } else { 1 }),
+                (_, y) if duet => (side, y),
+                p => p,
+            };
             Shot {
                 layout,
-                x: places[at].0,
-                y: places[at].1,
+                x,
+                y,
                 hero,
                 enter: enters[at],
                 exit: exits[at],
                 level: run.min(MAX_LEVEL),
+                paper: Paper::Dark,
+                script: false,
+                singer,
+                answer,
             }
         } else {
             // A verse line right before a chorus keeps the middle free for its anthem.
@@ -529,26 +600,47 @@ fn shoot(
             let free: Vec<(i8, i8)> = PLACES
                 .iter()
                 .copied()
-                .filter(|p| Some(*p) != prev.map(|s| (s.x, s.y)) && !(to_chorus && *p == CENTER))
+                .filter(|p| (!duet || p.0 == side) && Some(*p) != last_place && !(to_chorus && *p == CENTER))
                 .collect();
             let place = free[rng.below(free.len())];
             let e = energy.between(f64::from(lines[i].ms), ends[i]).unwrap_or(if calm { 0.4 } else { 0.65 });
-            let pick_enter = |e: f64| -> [(Enter, u32); 4] {
+            let pick_enter = |e: f64| -> [(Enter, u32); 3] {
                 if e > 0.6 {
-                    [(Enter::Letters, 3), (Enter::Skew, 3), (Enter::Rise, 1), (Enter::Track, 1)]
+                    [(Enter::Pop, 3), (Enter::Drift, 2), (Enter::Letters, 1)]
                 } else if e < 0.35 {
-                    [(Enter::Rise, 3), (Enter::Track, 3), (Enter::Letters, 1), (Enter::Skew, 0)]
+                    [(Enter::Letters, 3), (Enter::Pop, 2), (Enter::Drift, 1)]
                 } else {
-                    [(Enter::Rise, 2), (Enter::Track, 2), (Enter::Letters, 2), (Enter::Skew, 2)]
+                    [(Enter::Pop, 2), (Enter::Drift, 2), (Enter::Letters, 2)]
                 }
             };
-            let pick_exit = |e: f64| -> [(Exit, u32); 5] {
+            let pick_exit = |e: f64| -> [(Exit, u32); 6] {
                 if e > 0.6 {
-                    [(Exit::Scatter, 3), (Exit::Zoom, 3), (Exit::Slide, 1), (Exit::Fold, 1), (Exit::Sink, 0)]
+                    [
+                        (Exit::Scatter, 3),
+                        (Exit::Zoom, 3),
+                        (Exit::Steps, 2),
+                        (Exit::Slide, 1),
+                        (Exit::Fold, 1),
+                        (Exit::Sink, 0),
+                    ]
                 } else if e < 0.35 {
-                    [(Exit::Sink, 3), (Exit::Slide, 2), (Exit::Fold, 2), (Exit::Zoom, 0), (Exit::Scatter, 0)]
+                    [
+                        (Exit::Sink, 3),
+                        (Exit::Steps, 3),
+                        (Exit::Slide, 2),
+                        (Exit::Fold, 1),
+                        (Exit::Zoom, 0),
+                        (Exit::Scatter, 0),
+                    ]
                 } else {
-                    [(Exit::Sink, 2), (Exit::Slide, 2), (Exit::Fold, 2), (Exit::Zoom, 2), (Exit::Scatter, 2)]
+                    [
+                        (Exit::Sink, 2),
+                        (Exit::Steps, 2),
+                        (Exit::Slide, 2),
+                        (Exit::Fold, 2),
+                        (Exit::Zoom, 2),
+                        (Exit::Scatter, 2),
+                    ]
                 }
             };
             let enters: Vec<(Enter, u32)> =
@@ -560,13 +652,80 @@ fn shoot(
                 x: place.0,
                 y: place.1,
                 hero,
-                enter: rng.weighted(&enters).unwrap_or(Enter::Rise),
+                enter: rng.weighted(&enters).unwrap_or(Enter::Pop),
                 exit: rng.weighted(&exits).unwrap_or(Exit::Slide),
                 level: 0,
+                paper: Paper::Dark,
+                script: false,
+                singer,
+                answer,
             }
         };
+        // The script face: always at the stair's ends; on a hero word now and then, never twice in a row.
+        shot.script = match shot.layout {
+            Layout::Stair => true,
+            Layout::Hero => (3..=12).contains(&hero_len) && !prev.is_some_and(|p| p.script) && rng.coin(),
+            _ => false,
+        };
+        // An answer types its letters; a group's words drift in from both sides.
+        if answer {
+            shot.enter = Enter::Letters;
+        } else if duet && singer == 2 {
+            shot.enter = Enter::Drift;
+        }
         all[si].push(shot);
         prev = Some(shot);
+    }
+    // The peak: bars on the anthem of the strongest choruses after the first (of the only one when there is
+    // one), one a chorus, at most MAX_BARS; without a chorus, the strongest line when it is loud enough.
+    let late = info.iter().any(|x| x.0 >= 2);
+    let mut cands: Vec<usize> = (0..order.len())
+        .filter(|&n| {
+            let (si, j, _) = order[n];
+            all[si][j].layout == Layout::Anthem && Layout::Bar.fits(info[n].1, 0) && (!late || info[n].0 >= 2)
+        })
+        .collect();
+    if runs == 0 {
+        cands = (0..order.len())
+            .filter(|&n| Layout::Bar.fits(info[n].1, 0) && info[n].2.is_some_and(|e| e > 0.8))
+            .collect();
+    }
+    // The strongest first; without the analysis, the latest.
+    cands.sort_by(|&a, &b| info[b].2.unwrap_or(0.0).total_cmp(&info[a].2.unwrap_or(0.0)).then(b.cmp(&a)));
+    let mut bars: Vec<usize> = Vec::new();
+    for n in cands {
+        let limit = if runs == 0 { 1 } else { MAX_BARS };
+        if bars.len() < limit && bars.iter().all(|&m| info[m].0 != info[n].0 || runs == 0) {
+            bars.push(n);
+        }
+    }
+    for &n in &bars {
+        let (si, j, _) = order[n];
+        all[si][j].layout = Layout::Bar;
+        all[si][j].script = false;
+    }
+    // The paper cuts only on an event: a scene's start (every other driven verse on light paper), a bar
+    // (light for its line), a duet's answer once the paper has stayed PAPER_HOLD_MS.
+    let (mut paper, mut since, mut driven) = (Paper::Dark, 0.0, 0usize);
+    for (n, &(si, j, _)) in order.iter().enumerate() {
+        let s = &sections[si];
+        let ms = f64::from(lines[s.lines[j]].ms);
+        if j == 0 {
+            paper = Paper::Dark;
+            if s.kind == Kind::Editorial {
+                driven += 1;
+                if driven % 2 == 0 {
+                    paper = Paper::Light;
+                }
+            }
+            since = ms;
+        }
+        let shot = &mut all[si][j];
+        if shot.answer && ms - since >= PAPER_HOLD_MS {
+            paper = if paper == Paper::Dark { Paper::Light } else { Paper::Dark };
+            since = ms;
+        }
+        shot.paper = if bars.contains(&n) { Paper::Light } else { paper };
     }
     let mut last = Camera::Push;
     for (s, shots) in sections.iter_mut().zip(all) {
@@ -715,11 +874,13 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     }
     let per_s = (sung_ms >= 5000.0).then(|| sung_words as f64 / (sung_ms / 1000.0));
     let voice = voice(bpm, energy.1, per_s, &mut rng);
-    shoot(&mut sections, lines, &ends, &energy, &counts, &mut rng);
+    let duet = [0, 1].iter().all(|&v| sung.iter().filter(|&&i| lines[i].voice == v).count() >= 2);
+    shoot(&mut sections, lines, &ends, &energy, &counts, duet, &mut rng);
     Script {
         duration_ms,
         sections,
         voice,
+        duet,
         grid: bpm.map(|bpm| Grid { bpm, offset_ms: offset }),
         light: energy.light(),
         echoes,
@@ -913,10 +1074,12 @@ fn payload(app: &AppHandle) -> Value {
             next,
         },
     );
-    let words = |l: &Line| -> Value {
-        if l.words.is_empty() { Value::Null } else { l.words.iter().map(|(ms, w)| json!([ms, w])).collect() }
+    let timed = |ws: &crate::lyrics::Words| -> Value {
+        if ws.is_empty() { Value::Null } else { ws.iter().map(|(ms, w)| json!([ms, w])).collect() }
     };
-    let page_lines: Vec<Value> = lines.iter().map(|l| json!([l.ms, l.text, words(l)])).collect();
+    // [start, text, words, singer, background vocals]
+    let page_lines: Vec<Value> =
+        lines.iter().map(|l| json!([l.ms, l.text, timed(&l.words), l.voice, timed(&l.bg)])).collect();
     let subtitles = app.state::<Live>().get().stage.translation;
     let translation = (subtitles && lines.iter().any(|l| l.translation.is_some()))
         .then(|| lines.iter().map(|l| l.translation.as_deref()).collect::<Vec<_>>());
@@ -1189,7 +1352,9 @@ mod tests {
             let runs: Vec<Vec<Shot>> =
                 s.sections.iter().filter(|x| x.kind == Kind::Chorus).map(|x| x.shots.clone()).collect();
             assert_eq!(runs.len(), 3, "{:?}", kinds(&s));
-            let look = |r: &[Shot]| r.iter().map(|x| (x.layout, x.x, x.y, x.enter, x.exit)).collect::<Vec<_>>();
+            // The bars stand in for the anthem at the peak.
+            let anthem = |l: Layout| if l == Layout::Bar { Layout::Anthem } else { l };
+            let look = |r: &[Shot]| r.iter().map(|x| (anthem(x.layout), x.x, x.y, x.enter, x.exit)).collect::<Vec<_>>();
             assert_eq!(look(&runs[0]), look(&runs[1]));
             assert_eq!(look(&runs[0]), look(&runs[2]));
             assert_eq!(runs[0][0].layout, Layout::Anthem);
@@ -1213,6 +1378,88 @@ mod tests {
         };
         assert_eq!(looks("abcdefghijk"), looks("abcdefghijk"));
         assert_ne!(looks("abcdefghijk"), looks("dQw4w9WgXcQ"), "another seed, another show");
+    }
+
+    /// A duet: the first singer, the second answering, both together, never a line twice.
+    fn duet_song() -> Vec<Line> {
+        [0, 0, 1, 0, 1, 1, 2, 2, 0, 1, 0, 2]
+            .iter()
+            .enumerate()
+            .map(|(k, &v)| {
+                let at = 6000 + k as u32 * 3000;
+                Line { voice: v, ..line(at, at + 2800, &format!("duet line number {k} sung here")) }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_duet_gives_each_singer_a_side_and_answers() {
+        let lines = duet_song();
+        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
+            for f in [None, Some(facts(60.0))] {
+                let s = direct(&lines, f.as_ref(), &Track { seed, ..track(60_000) });
+                assert!(s.duet);
+                let mut prev: Option<u8> = None;
+                for x in &s.sections {
+                    if x.lines.is_empty() {
+                        prev = None;
+                    }
+                    for (&i, shot) in x.lines.iter().zip(&x.shots) {
+                        let v = lines[i].voice;
+                        assert_eq!((shot.singer, shot.x), (v, [-1, 1, 0][usize::from(v)]), "{seed}: line {i}");
+                        let answer = prev.is_some_and(|p| p < 2 && v < 2 && p != v);
+                        assert_eq!(shot.answer, answer, "{seed}: line {i}");
+                        assert!(!answer || shot.enter == Enter::Letters);
+                        prev = Some(v);
+                    }
+                }
+                for w in shots(&s).windows(2) {
+                    assert!(w[1].1 || (w[0].0.x, w[0].0.y) != (w[1].0.x, w[1].0.y), "{seed}: {w:?}");
+                }
+            }
+        }
+        // One singer is not a duet.
+        let solo: Vec<Line> = duet_song().into_iter().map(|l| Line { voice: 0, ..l }).collect();
+        let s = direct(&solo, None, &track(60_000));
+        assert!(!s.duet && shots(&s).iter().all(|(x, _, _)| x.singer == 0 && !x.answer));
+    }
+
+    #[test]
+    fn the_bars_come_at_most_twice_on_the_strongest_choruses() {
+        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
+            for f in [None, Some(facts(160.0))] {
+                let s = direct(&long_song(), f.as_ref(), &Track { seed, ..track(160_000) });
+                let bars: Vec<Shot> =
+                    shots(&s).into_iter().filter(|(x, _, _)| x.layout == Layout::Bar).map(|x| x.0).collect();
+                assert!((1..=MAX_BARS).contains(&bars.len()), "{seed}: {bars:?}");
+                // Never on the first chorus, one a chorus, on light paper.
+                assert!(bars.iter().all(|x| x.level >= 2 && x.paper == Paper::Light), "{seed}: {bars:?}");
+                assert!(bars.windows(2).all(|w| w[0].level != w[1].level), "{seed}: {bars:?}");
+            }
+        }
+        // Without a chorus or the analysis, no peak to mark.
+        let s = direct(&duet_song(), None, &track(60_000));
+        assert!(shots(&s).iter().all(|(x, _, _)| x.layout != Layout::Bar));
+    }
+
+    #[test]
+    fn the_paper_cuts_only_on_an_event() {
+        let mut light = false;
+        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
+            for (lines, f, d) in
+                [(long_song(), Some(facts(160.0)), 160_000), (long_song(), None, 160_000), (duet_song(), None, 60_000)]
+            {
+                let s = direct(&lines, f.as_ref(), &Track { seed, ..track(d) });
+                for x in &s.sections {
+                    for w in x.shots.windows(2) {
+                        let event = w[0].layout == Layout::Bar || w[1].layout == Layout::Bar || w[1].answer;
+                        assert!(w[0].paper == w[1].paper || event, "{seed}: {:?}", x.shots);
+                    }
+                    light |= x.shots.iter().any(|y| y.paper == Paper::Light && y.layout != Layout::Bar);
+                }
+            }
+        }
+        assert!(light, "some scene is on light paper");
     }
 
     #[test]

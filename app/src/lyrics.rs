@@ -205,6 +205,7 @@ impl Lyrics {
         crate::desktop_lyrics::refresh();
         crate::share_lyrics::refresh();
         crate::miniplayer::refresh();
+        crate::stage::refresh();
     }
 }
 

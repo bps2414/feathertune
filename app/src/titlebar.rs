@@ -6,7 +6,8 @@
 //!
 //! - WM_NCHITTEST: the top resize border comes from tao; on the strip the caption buttons answer
 //!   HTMINBUTTON/HTMAXBUTTON/HTCLOSE (HTMAXBUTTON is what shows the Windows 11 snap layouts), the
-//!   share lyrics, game mode, mini player and settings buttons are client area and the rest is HTCAPTION (drag,
+//!   share lyrics, stage (stage.rs; dimmed in game mode), game mode, mini player and settings buttons are client
+//!   area and the rest is HTCAPTION (drag,
 //!   Aero Snap, double click maximizes, right click opens the system menu). The share lyrics button is there only
 //!   while the track has synced lyrics (`set_lyrics`, from lyrics.rs) and the `share_lyrics` plugin is on; it takes
 //!   no room while hidden, so the others never move. The game mode button (a controller, game_mode.rs) keeps a
@@ -40,9 +41,12 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, Webview, Window};
 use tokio::sync::broadcast::error::RecvError;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, ICoreWebView2Controller,
+    COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
+    COREWEBVIEW2_PHYSICAL_KEY_STATUS, ICoreWebView2Controller,
 };
-use webview2_com::{ContainsFullScreenElementChangedEventHandler, HistoryChangedEventHandler};
+use webview2_com::{
+    AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler, HistoryChangedEventHandler,
+};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1SolidColorBrush};
 use windows::Win32::Graphics::DirectWrite::{
@@ -50,7 +54,9 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE,
+};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
@@ -87,6 +93,10 @@ const WM_ANIMATE: u32 = WM_APP + 3;
 const WM_RELAYOUT: u32 = WM_APP + 4;
 /// Posted when the history changed: repaint the navigation buttons.
 const WM_NAV: u32 = WM_APP + 5;
+/// Posted when a window minimized during the stage is back: it leaves fullscreen.
+const WM_LEAVE_FULLSCREEN: u32 = WM_APP + 6;
+/// The window was minimized with the stage open (see WM_SIZE).
+static LEAVE_ON_RESTORE: AtomicBool = AtomicBool::new(false);
 const TIMER: usize = 0xfea8;
 /// 30 fps while a theme or shape flows: smooth, half the repaints of 60.
 const FRAME_MS: u32 = 33;
@@ -249,6 +259,7 @@ enum Button {
     Back,
     Forward,
     Share,
+    Stage,
     Game,
     MiniPlayer,
     Settings,
@@ -366,16 +377,43 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             // The player's fullscreen button: without this the page fills only the webview, and if it
             // never gets its Esc the bar of the player stays hidden.
             if let Ok(core) = wv.controller().CoreWebView2() {
+                let app = fullscreen_window.app_handle().clone();
+                let stage_app = app.clone();
+                // The stage's leave button enters and leaves the page's fullscreen, so its end closes the stage.
                 let handler = ContainsFullScreenElementChangedEventHandler::create(Box::new(move |core, _| {
                     let mut on = windows_core::BOOL::default();
                     if let Some(core) = core {
                         core.ContainsFullScreenElement(&mut on)?;
                     }
                     set_fullscreen(&fullscreen_window, on.as_bool());
+                    if !on.as_bool() && crate::stage::is_open() {
+                        crate::stage::close(&stage_app);
+                    }
                     Ok(())
                 }));
                 let mut token = 0;
                 let _ = core.add_ContainsFullScreenElementChanged(&handler, &mut token);
+                // Esc leaves the stage. WebView2 always reports Esc as an accelerator key; it is taken from
+                // the page only while the stage is open (one key press: no autorepeat, no key-up).
+                let keys = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let (mut kind, mut key) = (COREWEBVIEW2_KEY_EVENT_KIND::default(), 0u32);
+                    let mut status = COREWEBVIEW2_PHYSICAL_KEY_STATUS::default();
+                    args.KeyEventKind(&mut kind)?;
+                    args.VirtualKey(&mut key)?;
+                    args.PhysicalKeyStatus(&mut status)?;
+                    if kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                        && key == u32::from(VK_ESCAPE.0)
+                        && !status.WasKeyDown.as_bool()
+                        && crate::stage::is_open()
+                    {
+                        args.SetHandled(true)?;
+                        crate::stage::close(&app);
+                    }
+                    Ok(())
+                }));
+                let mut token = 0;
+                let _ = wv.controller().add_AcceleratorKeyPressed(&keys, &mut token);
                 // The history, for the back and forward buttons.
                 let history = HistoryChangedEventHandler::create(Box::new(move |core, _| {
                     if let Some(core) = core {
@@ -398,8 +436,9 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
     })
 }
 
-/// Makes the window (and the site, which then also takes the strip's place) fullscreen or back.
-fn set_fullscreen(window: &Window, on: bool) {
+/// Makes the window (and the site, which then also takes the strip's place) fullscreen or back: the
+/// player's fullscreen button, and the stage (stage.rs).
+pub(crate) fn set_fullscreen(window: &Window, on: bool) {
     if FULLSCREEN.swap(on, Ordering::Relaxed) == on {
         return;
     }
@@ -552,6 +591,7 @@ impl TitleBar {
             Button::Forward if CAN_FORWARD.load(Ordering::Relaxed) => history(false),
             Button::Back | Button::Forward => {}
             Button::Share => crate::share_lyrics::open(self.window.app_handle()),
+            Button::Stage => crate::stage::open(self.window.app_handle()),
             Button::Game => crate::game_mode::toggle(self.window.app_handle()),
             Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
             Button::Settings => crate::settings_window::open(self.window.app_handle()),
@@ -725,6 +765,8 @@ impl TitleBar {
                     Button::Back => "\u{e72b}",
                     Button::Forward => "\u{e72a}",
                     Button::Share => "\u{e72d}",
+                    // Slideshow: a screen with a play mark.
+                    Button::Stage => "\u{e786}",
                     Button::Game => "\u{e7fc}",
                     Button::MiniPlayer => "\u{e8a7}",
                     Button::Settings => "\u{e713}",
@@ -749,10 +791,11 @@ impl TitleBar {
     }
 }
 
-const BUTTONS: [Button; 9] = [
+const BUTTONS: [Button; 10] = [
     Button::Back,
     Button::Forward,
     Button::Share,
+    Button::Stage,
     Button::Game,
     Button::MiniPlayer,
     Button::Settings,
@@ -762,11 +805,20 @@ const BUTTONS: [Button; 9] = [
 ];
 
 /// Our buttons on the right side, left to right.
-const RIGHT: [Button; 4] = [Button::Share, Button::Game, Button::MiniPlayer, Button::Settings];
+const RIGHT: [Button; 5] = [Button::Share, Button::Stage, Button::Game, Button::MiniPlayer, Button::Settings];
 
 /// The buttons that are client area (ours), not caption buttons.
 fn ours(b: Button) -> bool {
-    matches!(b, Button::Back | Button::Forward | Button::Share | Button::Game | Button::MiniPlayer | Button::Settings)
+    matches!(
+        b,
+        Button::Back
+            | Button::Forward
+            | Button::Share
+            | Button::Stage
+            | Button::Game
+            | Button::MiniPlayer
+            | Button::Settings
+    )
 }
 
 /// The history buttons, on the left; every other button is on the right.
@@ -778,15 +830,18 @@ fn shown(b: Button) -> bool {
     match b {
         Button::Back | Button::Forward => NAV_ON.load(Ordering::Relaxed),
         Button::Share => SHARE_ON.load(Ordering::Relaxed) && LYRICS_READY.load(Ordering::Relaxed),
+        Button::Stage => crate::stage::available(),
         _ => true,
     }
 }
 
-/// Whether a click does anything: the history buttons are dimmed when there is nowhere to go.
+/// Whether a click does anything: the history buttons are dimmed when there is nowhere to go, the stage
+/// during game mode.
 fn enabled(b: Button) -> bool {
     match b {
         Button::Back => CAN_BACK.load(Ordering::Relaxed),
         Button::Forward => CAN_FORWARD.load(Ordering::Relaxed),
+        Button::Stage => !crate::game_mode::is_on(),
         _ => true,
     }
 }
@@ -815,9 +870,10 @@ fn button_left(b: Button, width: f32) -> f32 {
     match b {
         Button::Back => NAV_LEFT,
         Button::Forward => NAV_LEFT + NAV,
-        // Each sits left of the ones after it in `RIGHT`, which are always shown.
-        Button::Share | Button::Game | Button::MiniPlayer | Button::Settings => {
-            let slot = RIGHT.len() - RIGHT.iter().position(|r| *r == b).unwrap_or(0);
+        // Each sits left of the ones after it in `RIGHT` that are shown (a hidden one takes no room).
+        Button::Share | Button::Stage | Button::Game | Button::MiniPlayer | Button::Settings => {
+            let at = RIGHT.iter().position(|r| *r == b).unwrap_or(0);
+            let slot = 1 + RIGHT[at + 1..].iter().filter(|r| shown(**r)).count();
             width - 3.0 * BUTTON - GAP - slot as f32 * SMALL
         }
         Button::Minimize => width - 3.0 * BUTTON,
@@ -977,8 +1033,21 @@ unsafe extern "system" fn subclass(
         WM_SIZE => {
             if wparam.0 != SIZE_MINIMIZED as usize {
                 bar.layout(hwnd, (lparam.0 & 0xffff) as i32, ((lparam.0 >> 16) & 0xffff) as i32);
+                if LEAVE_ON_RESTORE.swap(false, Ordering::Relaxed) && !crate::stage::is_open() {
+                    unsafe {
+                        let _ = PostMessageW(Some(hwnd), WM_LEAVE_FULLSCREEN, WPARAM(0), LPARAM(0));
+                    }
+                }
+            } else if crate::stage::close_page(bar.window.app_handle()) {
+                // Minimized: the stage ends, and the window leaves fullscreen once it is back (leaving it
+                // now would restore it: tao puts the saved placement back).
+                LEAVE_ON_RESTORE.store(true, Ordering::Relaxed);
             }
             bar.schedule(hwnd);
+        }
+        WM_LEAVE_FULLSCREEN => {
+            set_fullscreen(&bar.window, false);
+            return LRESULT(0);
         }
         WM_MOVE => unsafe {
             let _ = bar.controller.NotifyParentWindowPositionChanged();

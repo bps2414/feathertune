@@ -33,6 +33,9 @@
 //! translate_to = "auto"            # a line-by-line translation: auto (Windows' language), off, pt, en, es...
 //! font = ""                        # the Lyrics tab's font, from the profile's fonts folder; "": the site's
 //!
+//! [stage]                          # the full-screen show over the lyrics (plugin `stage`)
+//! translation = true               # the translation under each line, when the lyrics have one
+//!
 //! [audio]                          # the audio plugins (Audio tab); every effect is bypassed during ads
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
 //! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
@@ -76,6 +79,7 @@ pub struct Settings {
     pub lastfm: LastFm,
     pub browser: Browser,
     pub lyrics: LyricsSettings,
+    pub stage: StageSettings,
     pub audio: AudioSettings,
     pub remote: RemoteSettings,
     /// The whole file, for the plugin switches (`plugin`).
@@ -187,6 +191,19 @@ impl Default for LyricsSettings {
             duets: false,
             font: String::new(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct StageSettings {
+    /// The translation under each line on the stage (subtitles), when the lyrics have one.
+    pub translation: bool,
+}
+
+impl Default for StageSettings {
+    fn default() -> Self {
+        StageSettings { translation: true }
     }
 }
 

@@ -49,6 +49,7 @@ mod shortcuts;
 mod sleep_timer;
 mod smtc;
 mod splash;
+mod stage;
 mod stats;
 mod taskbar;
 mod titlebar;
@@ -261,7 +262,7 @@ fn main() {
                 ambient::start(app.handle());
             }
             let page_lyrics = live.plugin("synced_lyrics");
-            if page_lyrics || live.plugin("desktop_lyrics") || live.plugin("share_lyrics") {
+            if page_lyrics || live.plugin("desktop_lyrics") || live.plugin("share_lyrics") || live.plugin("stage") {
                 lyrics::start(app.handle(), &profile, page_lyrics);
             }
             if page_lyrics && !live.get().lyrics.font.is_empty() {
@@ -269,6 +270,7 @@ fn main() {
                 std::thread::spawn(move || fonts::push(&handle));
             }
             desktop_lyrics::start(app.handle());
+            stage::start(app.handle());
             audio::start(app.handle());
             deck::start(app.handle());
             if live.plugin("listening_stats") {
@@ -419,6 +421,7 @@ fn native_menu(app: &AppHandle, lastfm: Option<&lastfm::LastFm>) -> tauri::Resul
             &MenuItem::with_id(app, "desktop_lyrics", t("Floating lyrics"), true, None::<&str>)?,
             &MenuItem::with_id(app, "desktop_lyrics_lock", t("Lock / unlock floating lyrics"), true, None::<&str>)?,
             &MenuItem::with_id(app, "share_lyrics", t("Share lyrics..."), true, None::<&str>)?,
+            &MenuItem::with_id(app, "stage", t("Stage"), stage::available(), None::<&str>)?,
             &MenuItem::with_id(app, "reload", t("Reload page"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
         ],
@@ -477,6 +480,7 @@ pub(crate) fn tray_command(app: &AppHandle, id: &str) {
         "desktop_lyrics" => desktop_lyrics::toggle(app),
         "desktop_lyrics_lock" => desktop_lyrics::set_locked(!desktop_lyrics::is_locked()),
         "share_lyrics" => share_lyrics::open(app),
+        "stage" => stage::open(app),
         "reload" => {
             if let Some(site) = app.get_webview("site") {
                 let _ = site.eval("location.reload()");
@@ -612,6 +616,8 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
 
     let (Some(window), Some(site)) = (app.get_window("main"), app.get_webview("site")) else { return };
     if hidden {
+        // The stage ends with the window shown (stage.rs); first, so the window leaves fullscreen visible.
+        stage::close(app);
         // A page left in fullscreen would keep the window fullscreen (titlebar.rs) once it is back.
         let _ = site.eval("document.fullscreenElement && document.exitFullscreen()");
         let _ = window.hide();

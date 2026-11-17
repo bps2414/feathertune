@@ -151,6 +151,19 @@ pub const PLUGINS: &[Plugin] = &[
         legacy: None,
     },
     Plugin {
+        id: "stage",
+        name: "Stage",
+        summary: "A full-screen show over the lyrics.",
+        description: "The synced lyrics as a directed full-screen show: an opening, close-ups, editorial type, the \
+                      chorus, instrumental breaks and credits, cut on the beat and colored by the cover. Open it \
+                      from the title bar or the tray; Esc leaves. It steps aside at once while an ad plays.",
+        cost: "Not measured yet. Closed, only the lyrics lookup it shares with Synced lyrics; open, one animation \
+               timer while the track plays.",
+        default_on: true,
+        live: false,
+        legacy: None,
+    },
+    Plugin {
         id: "listening_stats",
         name: "Listening stats",
         summary: "Keeps a history of what you play, on this PC only.",

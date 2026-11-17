@@ -290,6 +290,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "duets": s.lyrics.duets,
             "font": s.lyrics.font,
         },
+        "stage": { "translation": s.stage.translation },
         "audio": {
             "eq_preset": s.audio.eq_preset,
             // What the sliders show: the preset's gains, or the custom ones.
@@ -318,7 +319,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `lyrics.romanize`, `lyrics.size`,
-/// `lyrics.align`, `lyrics.glow`, `lyrics.duets`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
+/// `lyrics.align`, `lyrics.glow`, `lyrics.duets`, `stage.translation`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
 /// `audio.compressor`, `audio.effect`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`,
 /// `audio.visualizer`, `ui.language`, `ui.effects` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
@@ -358,6 +359,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                 "global_shortcuts" => crate::shortcuts::register(&app),
                 "mini_player" if !on => crate::miniplayer::close(&app),
                 "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
+                "stage" => crate::stage::set_enabled(&app, on),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
                 "navigation" => crate::titlebar::set_navigation(&app, on),
                 "lyrics_translation" | "lyric_colors" | "lyric_effects" | "lyric_pulse" => {
@@ -450,6 +452,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             let on = value.as_bool().ok_or("expected true or false")?;
             live.write("lyrics", name, toml_edit::value(on), None, false)?;
             crate::lyrics::republish(&app);
+            Ok(false)
+        }
+        ("stage", "translation") => {
+            let on = value.as_bool().ok_or("expected true or false")?;
+            live.write("stage", name, toml_edit::value(on), None, false)?;
+            crate::stage::refresh();
             Ok(false)
         }
         ("lyrics", "offset_ms") => {

@@ -8,6 +8,7 @@
 //! - `ambient_mode`: the page module takes its layers and its style out.
 //! - `desktop_lyrics`: closed, and opened again afterwards if it was open.
 //! - `share_lyrics`: its window is closed (the button still opens it).
+//! - `stage`: closed, and its button dimmed until game mode ends.
 //!
 //! Left alone: everything measured inside the noise, `animated_title_bar` (+3.8 points against a noise
 //! of 2.8: about the noise) and what was not measured yet.
@@ -31,6 +32,7 @@ pub fn toggle(app: &AppHandle) {
     crate::desktop_lyrics::set_suspended(app, on);
     if on {
         crate::share_lyrics::close(app);
+        crate::stage::close(app);
     }
     crate::titlebar::refresh(app);
 }

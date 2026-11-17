@@ -220,6 +220,7 @@ pub fn audio_facts(webview: Webview, app: AppHandle, facts: String, probe: Optio
             let probe = probe.as_deref().and_then(parse_probe).map_or_else(|| "no probe".to_owned(), |p| p.to_string());
             crate::diag::log("analysis", format_args!("{id}: v{v}, bpm {bpm:?}, {probe}"));
             store.save(&f);
+            crate::stage::refresh();
         }
         None => eprintln!("audio_facts: invalid payload dropped ({} bytes)", facts.len()),
     }

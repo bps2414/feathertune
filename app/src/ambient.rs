@@ -83,6 +83,14 @@ pub fn set_off(app: &AppHandle, off: bool) {
 fn send(app: &AppHandle) {
     let (off, field, halo) = PAGE.lock().unwrap().clone();
     crate::injections::send(app, "ambient", &json!({ "off": off, "field": field, "halo": halo }));
+    crate::stage::refresh();
+}
+
+/// The current cover's field, also the stage's background (stage.rs); None without ambient mode, a cover
+/// or while game mode has it off.
+pub fn field() -> Option<String> {
+    let page = PAGE.lock().unwrap();
+    if page.0 { None } else { page.1.clone() }
 }
 
 /// The field and the halo of the cover at `url`, each as a `data:` URL.

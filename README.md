@@ -55,6 +55,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Lyrics translation: a line-by-line translation under each lyric line (into Windows' language by default), the source's own when it has one, else a machine translation made for lyrics; also on the floating lyrics and the mini player.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
+- Stage: the synced lyrics as a full-screen show, from a title bar button or the tray: an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, cut on the beat when the track was analyzed and colored by the cover; it steps aside at once for ads. Esc leaves.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**
@@ -128,6 +129,7 @@ taskbar_controls = true       # buttons on the taskbar thumbnail, progress on th
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
 desktop_lyrics = true         # floating lyrics over the desktop (open it from the tray)
 share_lyrics = true           # lyrics picture cards (open it from the tray)
+stage = true                  # a full-screen show over the lyrics (title bar or tray; Esc leaves)
 listening_stats = true        # history in stats/plays.jsonl in the profile, shown on the Stats page of the settings
 navigation = true             # back and forward buttons on the title bar
 song_mode = true              # picks the song version of a track that also has a video
@@ -171,6 +173,9 @@ size = "medium"              # Lyrics tab text: small, medium, large
 align = "left"               # left, center or right
 duets = false                # a duet by singer: the first on the left, the second on the right
 glow = "normal"              # off (lightest), normal, strong
+
+[stage]                      # the full-screen show over the lyrics (Lyrics page)
+translation = true           # the translation under each line, when the lyrics have one
 
 [audio]                      # the Audio page; mixes are in mixes/<playlist>.json in the profile (Mixes page)
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom

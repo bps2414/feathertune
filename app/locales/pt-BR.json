@@ -554,5 +554,21 @@
   "{} ({} min left)": "{} (faltam {} min)",
   "the main page shows an error": "a página principal mostrou um erro",
   "a sound effect is on": "um efeito sonoro está ligado",
-  "the voice did not lock": "o segundo player não entrou no tempo"
+  "the voice did not lock": "o segundo player não entrou no tempo",
+  "Stage": "Palco",
+  "A full-screen show over the lyrics.": "Um show em tela cheia sobre a letra.",
+  "The synced lyrics as a directed full-screen show: an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, cut on the beat and colored by the cover. Open it from the title bar or the tray; Esc leaves. It steps aside at once while an ad plays.": "A letra sincronizada como um show dirigido em tela cheia: abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, com cortes na batida e as cores da capa. Abra pela barra de título ou pela bandeja; Esc sai. Sai da frente na hora enquanto toca um anúncio.",
+  "Not measured yet. Closed, only the lyrics lookup it shares with Synced lyrics; open, one animation timer while the track plays.": "Ainda não medido. Fechado, só a busca de letra que divide com a Letra sincronizada; aberto, um timer de animação enquanto a faixa toca.",
+  "Stage subtitles": "Legendas do palco",
+  "The translation under each line, when the lyrics have one.": "A tradução embaixo de cada linha, quando a letra tem uma.",
+  "Leave the stage": "Sair do palco",
+  "Esc to leave": "Esc para sair",
+  "Chorus": "Refrão",
+  "Instrumental": "Instrumental",
+  "You listened to": "Você ouviu",
+  "Up next": "A seguir",
+  "Opening": "Abertura",
+  "Close-up": "Close",
+  "Editorial": "Editorial",
+  "Credits": "Créditos"
 }

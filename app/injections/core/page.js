@@ -296,8 +296,25 @@ const watchGuide = () => {
 };
 for (const ms of GUIDE_TRIES_MS) setTimeout(() => watchedGuide?.isConnected || watchGuide(), ms);
 
+// Whether an ad plays, for the other modules (`feathertune.ad`): `showing()` now, and `listen(f)` calls
+// `f(showing)` when it changes (checked on the player's class changes and on every media event).
+const adListeners = [];
+let adNow = false;
+const adCheck = () => {
+  const now = adShowing();
+  if (now === adNow) return;
+  adNow = now;
+  for (const f of adListeners) {
+    try {
+      f(now);
+    } catch {}
+  }
+};
+feathertune.ad = Object.freeze({ showing: adShowing, listen: (f) => void adListeners.push(f) });
+
 // An ad starts or ends: the player's classes change (the media events may not say so by themselves).
 const adObserver = new MutationObserver(() => {
+  adCheck();
   if (video && adShowing() !== lastAd) send(video, true);
 });
 let watchedPlayer = null;
@@ -314,6 +331,7 @@ let volumeSettle = 0;
 const onMedia = (e) => {
   if (!(e.target instanceof HTMLVideoElement)) return;
   video = e.target;
+  adCheck();
   if (e.type === 'loadedmetadata') {
     watchQueue();
     watchPlayer();

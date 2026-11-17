@@ -731,8 +731,17 @@ const goal = (ms) => {
 };
 
 const media = () => document.querySelector('video');
+// `feathertune.covered`: the stage (injections/stage/) covers the site, so nothing here is seen.
 const canRun = (v) =>
-  !!lines && !!box && box.isConnected && !box.hidden && !!v && !v.paused && !document.hidden && document.hasFocus();
+  !!lines &&
+  !!box &&
+  box.isConnected &&
+  !box.hidden &&
+  !!v &&
+  !v.paused &&
+  !document.hidden &&
+  document.hasFocus() &&
+  !feathertune.covered;
 
 // The indices of the samples `ys` (SAMPLE_MS apart) that straight lines must join to stay within
 // GLIDE_TOLERANCE_PX of every sample: each line goes on while one slope still fits all the samples it

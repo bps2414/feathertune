@@ -55,6 +55,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Tradução da letra: uma tradução linha a linha embaixo de cada linha (no idioma do Windows por padrão), a da própria fonte quando ela tem, senão uma tradução automática feita para letras; também na letra flutuante e no mini player.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
+- Palco: a letra sincronizada como um show em tela cheia, por um botão na barra de título ou pela bandeja: abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, com cortes na batida quando a faixa foi analisada e as cores da capa; sai da frente na hora para os anúncios. Esc sai.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
@@ -128,6 +129,7 @@ taskbar_controls = true       # botões na miniatura da barra de tarefas, progre
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
 desktop_lyrics = true         # letra flutuante sobre a área de trabalho (abra pela bandeja)
 share_lyrics = true           # cartões de letra em imagem (abra pela bandeja)
+stage = true                  # um show em tela cheia sobre a letra (barra de título ou bandeja; Esc sai)
 listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na página Estatísticas das configurações
 navigation = true             # botões de voltar e avançar na barra de título
 song_mode = true              # escolhe a versão só áudio de uma faixa que também tem vídeo
@@ -171,6 +173,9 @@ size = "medium"              # texto da aba Letra: small, medium, large
 align = "left"               # left, center ou right
 duets = false                # um dueto por voz: a primeira à esquerda, a segunda à direita
 glow = "normal"              # off (mais leve), normal, strong
+
+[stage]                      # o show em tela cheia sobre a letra (página Letras)
+translation = true           # a tradução embaixo de cada linha, quando a letra tem uma
 
 [audio]                      # a página Áudio; os mixes ficam em mixes/<playlist>.json no perfil (página Mixagens)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom

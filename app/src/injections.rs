@@ -87,6 +87,12 @@ const INJECTIONS: &[Injection] = &[
         css: Some(include_str!("../injections/audio/style.css")),
         plugins: crate::audio::PLUGINS,
     },
+    Injection {
+        id: "stage",
+        js: Some(include_str!("../injections/stage/page.js")),
+        css: Some(include_str!("../injections/stage/style.css")),
+        plugins: &["stage"],
+    },
 ];
 
 /// The last data `send` gave each module (as JSON text).

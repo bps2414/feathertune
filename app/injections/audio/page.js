@@ -1726,7 +1726,15 @@ const VIS_BARS = 48;
 const vis = { canvas: null, g: null, raf: 0, bytes: null, color: '#fff', frames: 0, skip: 0 };
 const playerOpen = () => !!document.querySelector(SELECTORS.layout)?.hasAttribute(SELECTORS.playerOpenAttr);
 const visWanted = () =>
-  on('visualizer') && !!nodes && !ad && !!video && !video.paused && playerOpen() && document.visibilityState === 'visible' && document.hasFocus();
+  on('visualizer') &&
+  !!nodes &&
+  !ad &&
+  !!video &&
+  !video.paused &&
+  playerOpen() &&
+  document.visibilityState === 'visible' &&
+  document.hasFocus() &&
+  !feathertune.covered;
 
 const visCanvas = () => {
   const box = document.querySelector(SELECTORS.artwork);
@@ -1908,6 +1916,15 @@ feathertune.audio = Object.freeze({
     runCommand(d?.command);
     renderButtons();
     visUpdate();
+  },
+  // The stage (injections/stage/) while it plays without the track's analysis: `level(true)` keeps the
+  // analyser connected and gives the input's level now (dBFS), `level(false)` lets it go (also called when
+  // the stage stops covering the page, so the visualizer, stopped under it, starts again). Null without a graph.
+  level: (wanted) => {
+    if (!nodes || off) return null;
+    useAnalyser('stage', !!wanted);
+    if (!wanted) visUpdate();
+    return wanted ? level() : null;
   },
   // The transition voice (deck.rs) reads this through ExecuteScript: the track and its time (with the
   // wall clock they were read at), the fade this page plans and the chain the voice must copy.

@@ -512,6 +512,7 @@ mod tests {
 
     fn facts(bpm: Option<f64>) -> Facts {
         Facts {
+            v: crate::audio_facts::VERSION,
             id: A.into(),
             duration_s: 200.0,
             bpm,

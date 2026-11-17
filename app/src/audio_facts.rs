@@ -19,10 +19,17 @@ pub const MAX_ENVELOPE_BYTES: usize = 27_000;
 const MAX_FILES: usize = 5000;
 const MAX_SECONDS: f64 = 86_400.0;
 const KEYS: [&str; 12] = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+/// The algorithm's version the page writes now: 2 times the blocks by the audio clock and refines
+/// the tempo over the whole track. Older files (no `v`) are still read, and measured again.
+pub const VERSION: u8 = 2;
+const MAX_PROBE: usize = 1024;
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Facts {
+    /// The algorithm's version (0: before versions).
+    #[serde(default)]
+    pub v: u8,
     pub id: String,
     pub duration_s: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,7 +65,8 @@ pub fn parse(json: &str) -> Option<Facts> {
     let f: Facts = serde_json::from_str(json).ok()?;
     let ms = f.duration_s * 1000.0;
     let in_track = |x: f64| x.is_finite() && (0.0..=ms).contains(&x);
-    let ok = valid_id(&f.id)
+    let ok = f.v <= VERSION
+        && valid_id(&f.id)
         && f.duration_s.is_finite()
         && (1.0..=MAX_SECONDS).contains(&f.duration_s)
         && f.bpm.is_none_or(|b| b.is_finite() && (40.0..=250.0).contains(&b))
@@ -143,18 +151,74 @@ impl Store {
     }
 }
 
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Tap {
+    Worklet,
+    Script,
+}
+
+/// How a measure went, only logged for the diagnostics: the tap, the blocks dropped by reason, the
+/// blocks lost (gaps in the audio clock), the anchor's resyncs, its largest drift and where a jump
+/// ended the beat window (s).
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct Probe {
+    tap: Tap,
+    dropped_paused: u32,
+    dropped_waiting: u32,
+    dropped_ad: u32,
+    gaps: u32,
+    resyncs: u32,
+    max_drift_ms: f64,
+    #[serde(default)]
+    beat_lost_s: Option<f64>,
+}
+
+impl std::fmt::Display for Probe {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let tap = match self.tap {
+            Tap::Worklet => "worklet",
+            Tap::Script => "script",
+        };
+        write!(
+            f,
+            "tap {tap}, dropped paused/waiting/ad {}/{}/{}, gaps {}, resyncs {}, max drift {:.0} ms, beat window lost at {:?} s",
+            self.dropped_paused,
+            self.dropped_waiting,
+            self.dropped_ad,
+            self.gaps,
+            self.resyncs,
+            self.max_drift_ms,
+            self.beat_lost_s
+        )
+    }
+}
+
+fn parse_probe(json: &str) -> Option<Probe> {
+    if json.len() > MAX_PROBE {
+        return None;
+    }
+    let p: Probe = serde_json::from_str(json).ok()?;
+    let ok = p.max_drift_ms.is_finite()
+        && (0.0..=MAX_SECONDS * 1000.0).contains(&p.max_drift_ms)
+        && p.beat_lost_s.is_none_or(|s| s.is_finite() && (0.0..=MAX_SECONDS).contains(&s));
+    ok.then_some(p)
+}
+
 /// The command (see the module doc). Invalid payloads are dropped; nothing here triggers an action.
-/// `beat_lost`: where the beat window went out of step and by how much (s), only logged.
+/// `probe`: how the measure went (`Probe`), only logged.
 #[tauri::command]
-pub fn audio_facts(webview: Webview, app: AppHandle, facts: String, beat_lost: Option<[f64; 2]>) {
+pub fn audio_facts(webview: Webview, app: AppHandle, facts: String, probe: Option<String>) {
     if webview.label() != "site" {
         return;
     }
     let Some(store) = app.try_state::<Store>() else { return };
     match parse(&facts) {
         Some(f) => {
-            let (bpm, id) = (f.bpm, &f.id);
-            crate::diag::log("analysis", format_args!("{id}: bpm {bpm:?}, beat window lost: {beat_lost:?}"));
+            let (bpm, id, v) = (f.bpm, &f.id, f.v);
+            let probe = probe.as_deref().and_then(parse_probe).map_or_else(|| "no probe".to_owned(), |p| p.to_string());
+            crate::diag::log("analysis", format_args!("{id}: v{v}, bpm {bpm:?}, {probe}"));
             store.save(&f);
         }
         None => eprintln!("audio_facts: invalid payload dropped ({} bytes)", facts.len()),
@@ -167,7 +231,7 @@ mod tests {
 
     fn sample() -> serde_json::Value {
         serde_json::json!({
-            "id": "dQw4w9WgXcQ", "duration_s": 213.1, "bpm": 113.2, "beat_offset_ms": 310.0,
+            "v": 2, "id": "dQw4w9WgXcQ", "duration_s": 213.1, "bpm": 113.2, "beat_offset_ms": 310.0,
             "key": "Ab major", "camelot": "4B", "lead_in_ms": 300.0, "tail_ms": 212_500.0, "envelope": "AAEC/w8A",
         })
     }
@@ -215,5 +279,41 @@ mod tests {
         let long = "A".repeat((MAX_ENVELOPE_BYTES + 3) / 3 * 4);
         assert!(parse(&with("envelope", serde_json::json!(long))).is_none());
         assert!(parse(&"x".repeat(MAX_PAYLOAD + 1)).is_none());
+    }
+
+    #[test]
+    fn version_is_checked_and_old_files_still_read() {
+        assert_eq!(parse(&sample().to_string()).unwrap().v, VERSION);
+        let mut old = sample();
+        old.as_object_mut().unwrap().remove("v");
+        let f = parse(&old.to_string()).unwrap();
+        assert_eq!((f.v, f.bpm), (0, Some(113.2)));
+        for v in [serde_json::json!(VERSION + 1), serde_json::json!(-1), serde_json::json!(1.5), serde_json::json!("2")]
+        {
+            assert!(parse(&with("v", v.clone())).is_none(), "v = {v}");
+        }
+    }
+
+    #[test]
+    fn probe_is_checked() {
+        let ok = serde_json::json!({
+            "tap": "worklet", "dropped_paused": 3, "dropped_waiting": 0, "dropped_ad": 0, "gaps": 2,
+            "resyncs": 1, "max_drift_ms": 41.0, "beat_lost_s": null,
+        });
+        let p = parse_probe(&ok.to_string()).unwrap();
+        assert_eq!((p.tap, p.gaps, p.beat_lost_s), (Tap::Worklet, 2, None));
+        for (key, value) in [
+            ("tap", serde_json::json!("other")),
+            ("gaps", serde_json::json!(-1)),
+            ("resyncs", serde_json::json!(1.5)),
+            ("max_drift_ms", serde_json::json!(-3.0)),
+            ("beat_lost_s", serde_json::json!(1e9)),
+            ("extra", serde_json::json!(1)),
+        ] {
+            let mut bad = ok.clone();
+            bad[key] = value.clone();
+            assert!(parse_probe(&bad.to_string()).is_none(), "{key} = {value}");
+        }
+        assert!(parse_probe(&"x".repeat(MAX_PROBE + 1)).is_none());
     }
 }

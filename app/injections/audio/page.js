@@ -771,16 +771,7 @@ const onTime = (v) => {
   if (rateBack) rateStep(v);
   if (!fade && on('crossfade')) fade = planFade(v);
   const t = songTime(v);
-  if (analysis && Math.abs(analysis.t - t) > 0.5) {
-    // Out of step (buffering): the envelope goes on from here, the beat window is lost.
-    if (inBeatWindow(analysis) && analysis.beatOk) {
-      analysis.beatOk = false;
-      analysis.beatLost = [t, analysis.t - t];
-    }
-    // Before any sound was heard: where it starts is not known (the time skipped was not heard).
-    if (analysis.soundAt === null) analysis.leadLost = true;
-    analysis.t = t;
-  }
+  if (analysis && !waiting) reanchor(v, 'tick');
   if (id) startAnalysis(v, id);
   skipSilence(v, t);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
@@ -998,7 +989,10 @@ const previewMix = (pair) => {
 
 const onSeek = (v, type) => {
   if (ownSeek !== null && Math.abs(songTime(v) - ownSeek) < 1) {
-    if (type === 'seeked') ownSeek = null;
+    if (type === 'seeked') {
+      ownSeek = null;
+      if (analysis?.offset === null) reanchor(v, 'resume');
+    }
     return;
   }
   ownSeek = null;
@@ -1020,11 +1014,19 @@ const onSeek = (v, type) => {
 // - an envelope: the level of three bands (< 250 Hz, mid, > 4 kHz) every 100 ms, as bytes;
 // - where the sound starts and ends (above -50 dBFS);
 // - the tempo and first beat: onset strength (spectral flux) over the first 60 s of sound,
-//   autocorrelated between 60 and 200 BPM;
+//   autocorrelated between 60 and 200 BPM (which picks the octave), then refined within ±2% and
+//   its phase over the whole track by a comb;
 // - the key: a chromagram over the same 60 s against the Krumhansl profiles (an estimate).
 // Only these numbers leave the page (audio_facts); the samples are never kept. The tap is an
 // AudioWorklet when the site's CSP lets a Blob module load, else a ScriptProcessor; it outputs
 // silence into a zero gain, and exists only while a track is being measured.
+//
+// Time: each block carries the audio clock's time of its first sample (the worklet's `currentFrame`,
+// the ScriptProcessor's `playbackTime`), and an anchor (the song's time minus the audio clock's,
+// read on each timeupdate) maps it to the song's time. A lost block is a hole at the right time
+// instead of shrinking the timeline; small drifts move the anchor, and only a real jump (a stall
+// over 1 s) ends the beat window. Files from an older algorithm (no `v`) or without a tempo are
+// measured again the next time the track plays from its start.
 
 const A = {
   FRAME: 1024,
@@ -1036,20 +1038,31 @@ const A = {
   MAX_BINS: 9000,
   SILENCE_DB: -50,
   MIN_BEAT_S: 20,
+  // The facts' version this algorithm writes (audio_facts.rs `VERSION`).
+  VERSION: 2,
+  // A gap between the anchor and the song's time over this is a jump, not a drift.
+  JUMP_S: 1,
+  // Under this the anchor follows smoothly; over it, at once.
+  DRIFT_S: 0.05,
+  // The tempo's refinement over the whole track: ±2%, coarse then fine steps.
+  REFINE: 0.02,
 };
 const KEY_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 const TAP_CODE = `registerProcessor('feathertune-tap', class extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(4096); this.n = 0; }
+  constructor() { super(); this.buf = new Float32Array(4096); this.n = 0; this.at = 0; this.next = -1; }
   process(inputs) {
     const ch = inputs[0];
     if (!ch || !ch.length) return true;
     const a = ch[0], b = ch[1] || ch[0];
+    if (this.n && currentFrame !== this.next) this.n = 0;
     for (let i = 0; i < a.length; i++) {
+      if (this.n === 0) this.at = (currentFrame + i) / sampleRate;
       this.buf[this.n++] = (a[i] + b[i]) / 2;
-      if (this.n === this.buf.length) { this.port.postMessage(this.buf, [this.buf.buffer]); this.buf = new Float32Array(4096); this.n = 0; }
+      if (this.n === this.buf.length) { this.port.postMessage({ b: this.buf, t: this.at }, [this.buf.buffer]); this.buf = new Float32Array(4096); this.n = 0; }
     }
+    this.next = currentFrame + a.length;
     return true;
   }
 });`;
@@ -1123,6 +1136,10 @@ let tapKind = null;
 let analysis = null;
 // Tracks measured or given up in this page session.
 const analysed = new Set();
+// The element waits for data (a `waiting` event, until `playing`).
+let waiting = false;
+// The facts are this algorithm's and have a tempo (else the track is measured again).
+const complete = (f) => !!f && f.v >= A.VERSION && !!f.bpm;
 
 const ensureTap = () => {
   if (tapNode) return;
@@ -1130,7 +1147,7 @@ const ensureTap = () => {
   nodes.zero.gain.value = 0;
   if (worklet === 'ok') {
     tapNode = new AudioWorkletNode(ctx, 'feathertune-tap', { numberOfOutputs: 1, outputChannelCount: [1] });
-    tapNode.port.onmessage = (e) => feed(e.data);
+    tapNode.port.onmessage = (e) => feed(e.data.b, e.data.t);
     tapKind = 'worklet';
   } else {
     tapNode = ctx.createScriptProcessor(4096, 2, 1);
@@ -1140,7 +1157,8 @@ const ensureTap = () => {
       const b = input.numberOfChannels > 1 ? input.getChannelData(1) : a;
       const mono = new Float32Array(a.length);
       for (let i = 0; i < a.length; i++) mono[i] = (a[i] + b[i]) / 2;
-      feed(mono);
+      // `playbackTime` is when this block's output plays: one block after its input ended.
+      feed(mono, e.playbackTime - (2 * a.length) / input.sampleRate);
     };
     tapKind = 'script';
   }
@@ -1157,13 +1175,20 @@ const dropTap = () => {
 const startAnalysis = (v, id) => {
   if (!on('track_analysis') || analysed.has(id) || analysis || ad || v.playbackRate !== 1) return;
   const length = songLength(v);
-  if (facts()?.id === id || songTime(v) > 0.5 || !Number.isFinite(length)) return;
+  const f = facts();
+  if ((f?.id === id && complete(f)) || songTime(v) > 0.5 || !Number.isFinite(length)) return;
   const sr = ctx.sampleRate;
+  const fps = sr / A.HOP;
   analysis = {
     id,
     sr,
+    fps,
     duration: length,
     t: songTime(v),
+    // The song's time minus the audio clock's (null: read again on the next `playing` or timeupdate).
+    offset: songTime(v) - ctx.currentTime,
+    // The audio clock's time the next block starts at.
+    next: null,
     ring: new Float32Array(A.CHROMA),
     pos: 0,
     sinceHop: 0,
@@ -1174,15 +1199,27 @@ const startAnalysis = (v, id) => {
     covered: 0,
     soundAt: null,
     leadLost: false,
-    onsets: [],
+    // The onset strength of the whole track, one per hop at its time (a lost block leaves zeros).
+    onsets: new Float32Array(Math.ceil(Math.min(length, A.MAX_BINS * A.BIN_S) * fps) + 1),
+    onsetsTo: 0,
     onsetFrom: null,
     beatOk: true,
-    // Where and by how much it went out of step, for the diagnostics.
-    beatLost: null,
     chroma: new Float32Array(12),
     chromaFrames: 0,
+    // For the diagnostics (audio_facts `probe`): numbers only.
+    probe: {
+      tap: 'script',
+      dropped_paused: 0,
+      dropped_waiting: 0,
+      dropped_ad: 0,
+      gaps: 0,
+      resyncs: 0,
+      max_drift_ms: 0,
+      beat_lost_s: null,
+    },
   };
   ensureTap();
+  analysis.probe.tap = tapKind;
   wire();
 };
 
@@ -1194,17 +1231,71 @@ const stopAnalysis = (send) => {
   dropTap();
   if (send) {
     const facts = finish(a);
-    if (facts) window.__TAURI_INTERNALS__?.invoke('audio_facts', { facts: JSON.stringify(facts), beatLost: a.beatLost }).catch(() => {});
+    a.probe.max_drift_ms = Math.round(a.probe.max_drift_ms);
+    const probe = JSON.stringify(a.probe);
+    if (facts) window.__TAURI_INTERNALS__?.invoke('audio_facts', { facts: JSON.stringify(facts), probe }).catch(() => {});
   }
 };
 
-// The samples of one block (mono). Dropped while paused, buffering, during an ad or after a seek.
-const feed = (samples) => {
+// The anchor read again: on a timeupdate (`tick`), on `playing` after a pause (`resume`: the audio
+// clock went on meanwhile) or after waiting for data (`stall`). On a tick it follows the drift
+// smoothly; a stall moves it at once; over JUMP_S it is a jump, which ends the beat window.
+const reanchor = (v, mode) => {
+  const a = analysis;
+  if (!a || !ctx) return;
+  const now = songTime(v) - ctx.currentTime;
+  if (a.offset === null || mode === 'resume') {
+    a.offset = now;
+    return;
+  }
+  const d = now - a.offset;
+  const p = a.probe;
+  if (mode === 'tick') p.max_drift_ms = Math.max(p.max_drift_ms, Math.abs(d) * 1000);
+  if (Math.abs(d) > A.JUMP_S) {
+    p.resyncs++;
+    if (inBeatWindow(a) && a.beatOk) {
+      a.beatOk = false;
+      p.beat_lost_s = Math.round(songTime(v) * 10) / 10;
+    }
+    // Before any sound was heard: where it starts is not known (the time skipped was not heard).
+    if (a.soundAt === null) a.leadLost = true;
+    a.offset = now;
+  } else if (mode === 'stall') {
+    if (Math.abs(d) > A.DRIFT_S) p.resyncs++;
+    a.offset = now;
+  } else {
+    a.offset += d / 4;
+  }
+};
+
+// The samples of one block (mono) and the audio clock's time of its first one. Dropped while paused,
+// waiting for data or during an ad; a lost block leaves a hole at its time.
+const feed = (samples, at) => {
   const a = analysis;
   const v = video;
-  if (!a || !v || v.paused || v.readyState < 3 || ad) return;
+  if (!a || !v) return;
+  const p = a.probe;
+  if (v.paused) return void p.dropped_paused++;
+  if (ad) {
+    // The ad's time is not the song's: the anchor is read again after it.
+    a.offset = null;
+    return void p.dropped_ad++;
+  }
+  if (waiting) return void p.dropped_waiting++;
+  if (a.offset === null || !Number.isFinite(at)) return;
+  const len = samples.length / a.sr;
+  // Blocks are lost whole, so the clock goes on from the last one by whole blocks: the stamps'
+  // jitter (the ScriptProcessor's is read late, on the main thread) never moves the frames, and an
+  // earlier stamp moves the grid back to it.
+  let start = at;
+  if (a.next !== null) {
+    const k = Math.max(0, Math.floor((at - a.next) / len + 0.25));
+    p.gaps += k;
+    start = Math.min(at, a.next + k * len);
+  }
+  a.next = start + len;
   const nyquist = a.sr / 2;
-  const t0 = a.t;
+  const t0 = start + a.offset;
   for (let i = 0; i < samples.length; i++) {
     a.t = t0 + i / a.sr;
     a.ring[a.pos] = samples[i];
@@ -1239,7 +1330,7 @@ const frame = (a, nyquist) => {
     else high += p;
   }
   const bin = Math.floor(a.t / A.BIN_S);
-  if (bin < a.bins.length / 4) {
+  if (bin >= 0 && bin < a.bins.length / 4) {
     a.bins[bin * 4] += low;
     a.bins[bin * 4 + 1] += mid;
     a.bins[bin * 4 + 2] += high;
@@ -1251,12 +1342,17 @@ const frame = (a, nyquist) => {
     a.soundAt = a.t;
     a.onsetFrom = a.t;
   }
-  if (inBeatWindow(a) && a.beatOk) {
+  // The onset strength (spectral flux of the log magnitudes) at this frame's time, the whole track.
+  const lm = new Float32Array(mag.length);
+  for (let k = 1; k < mag.length; k++) lm[k] = Math.log1p(100 * mag[k]);
+  const idx = Math.round(a.t * a.fps);
+  if (a.prev && a.soundAt !== null && idx >= 0 && idx < a.onsets.length) {
     let flux = 0;
-    if (a.prev) for (let k = 1; k < mag.length; k++) flux += Math.max(0, Math.log1p(100 * mag[k]) - Math.log1p(100 * a.prev[k]));
-    a.onsets.push(flux);
+    for (let k = 1; k < lm.length; k++) flux += Math.max(0, lm[k] - a.prev[k]);
+    a.onsets[idx] = Math.max(a.onsets[idx], flux);
+    a.onsetsTo = Math.max(a.onsetsTo, idx + 1);
   }
-  a.prev = mag;
+  a.prev = lm;
 };
 
 const chromaFrame = (a) => {
@@ -1270,8 +1366,9 @@ const chromaFrame = (a) => {
 };
 
 // Our own forward seek over silence (skip_silence): the skipped time counts as silent.
+// The anchor is read again once the seek lands, with no jump counted.
 const skipAnalysis = (to) => {
-  if (analysis && to > analysis.t) analysis.t = to;
+  if (analysis && to > analysis.t) analysis.offset = null;
 };
 
 const finish = (a) => {
@@ -1301,6 +1398,7 @@ const finish = (a) => {
   const ms = (x) => Math.round(x * 1000);
   const durationMs = Math.floor(a.duration * 1000);
   const facts = {
+    v: A.VERSION,
     id: a.id,
     duration_s: Math.round(a.duration * 1000) / 1000,
     lead_in_ms: a.leadLost ? 0 : Math.min(durationMs, ms((first ?? 0) * A.BIN_S)),
@@ -1317,16 +1415,21 @@ const finish = (a) => {
     const fadeMs = ms((b + 1) * A.BIN_S);
     if (fadeMs < facts.tail_ms - 3000 && fadeMs >= facts.lead_in_ms) facts.fade_ms = fadeMs;
   }
-  const fps = a.sr / A.HOP;
-  if (a.beatOk && a.onsets.length / fps >= A.MIN_BEAT_S) Object.assign(facts, tempo(a.onsets, fps, a.onsetFrom));
+  if (a.beatOk) Object.assign(facts, tempo(a));
   if (a.chromaFrames >= 20) Object.assign(facts, key(a.chroma));
   return facts;
 };
 
-// Tempo by autocorrelation of the onset strength, weighted toward 120 BPM (one octave either way).
-const tempo = (onsets, fps, from) => {
-  const mean = onsets.reduce((s, x) => s + x, 0) / onsets.length;
-  const o = onsets.map((x) => Math.max(0, x - mean));
+// Tempo: the first 60 s of sound autocorrelated, weighted toward 120 BPM (one octave either way),
+// picks the period; a comb over the whole track then refines it within ±2% and sets the phase.
+const tempo = (a) => {
+  if (a.onsetFrom === null) return {};
+  const fps = a.fps;
+  const from = Math.max(0, Math.round(a.onsetFrom * fps));
+  const head = a.onsets.subarray(from, Math.max(from, Math.min(a.onsetsTo, from + Math.round(A.BEAT_S * fps))));
+  if (head.length / fps < A.MIN_BEAT_S) return {};
+  const mean = head.reduce((s, x) => s + x, 0) / head.length;
+  const o = Array.from(head, (x) => Math.max(0, x - mean));
   const lo = Math.floor((fps * 60) / 200);
   const hi = Math.ceil((fps * 60) / 60);
   const r = new Float64Array(hi + 2);
@@ -1346,24 +1449,55 @@ const tempo = (onsets, fps, from) => {
     }
   }
   if (best < 0 || !(bestScore > 0)) return {};
-  const [a, b, c] = [r[best - 1], r[best], r[best + 1]];
-  const shift = a - 2 * b + c ? (0.5 * (a - c)) / (a - 2 * b + c) : 0;
-  const period = best + Math.max(-0.5, Math.min(0.5, shift));
-  const bpm = Math.round(((60 * fps) / period) * 10) / 10;
-  // The phase whose beats land on the most onset strength.
-  let phase = 0;
-  let phaseScore = -1;
-  for (let p = 0; p < period; p++) {
+  const [r0, r1, r2] = [r[best - 1], r[best], r[best + 1]];
+  const shift = r0 - 2 * r1 + r2 ? (0.5 * (r0 - r2)) / (r0 - 2 * r1 + r2) : 0;
+  const coarse = best + Math.max(-0.5, Math.min(0.5, shift));
+  // The whole track from the first sound: each hop's strength or its neighbours' (a beat may land
+  // between two hops), over the mean.
+  const all = a.onsets.subarray(from, Math.max(from, a.onsetsTo));
+  const allMean = all.reduce((s, x) => s + x, 0) / Math.max(1, all.length);
+  const w = new Float32Array(all.length);
+  for (let i = 0; i < all.length; i++) w[i] = Math.max(0, Math.max(all[i], all[i - 1] || 0, all[i + 1] || 0) - allMean);
+  // The comb of period p (hops): the mean strength on its beats at the best phase.
+  const sumAt = (p, ph) => {
     let s = 0;
-    for (let i = p; i < o.length; i += period) s += o[Math.round(i)] || 0;
-    if (s > phaseScore) {
-      phaseScore = s;
-      phase = p;
+    for (let x = ph; x < w.length - 0.5; x += p) s += w[Math.round(x)];
+    return s;
+  };
+  const comb = (p) => {
+    let score = -1;
+    let phase = 0;
+    for (let ph = 0; ph < p; ph++) {
+      const s = sumAt(p, ph);
+      if (s > score) {
+        score = s;
+        phase = ph;
+      }
     }
+    return { p, phase, score: score / Math.max(1, Math.floor(w.length / p)) };
+  };
+  // Within ±2% of the coarse period, in steps of 0.2% and then 0.02% around the best.
+  let fit = comb(coarse);
+  const search = (center, span, step) => {
+    for (let r = -span; r <= span + 1e-9; r += step) {
+      const c = comb(center * (1 + r));
+      if (c.score > fit.score) fit = c;
+    }
+  };
+  search(coarse, A.REFINE, A.REFINE / 10);
+  search(fit.p, A.REFINE / 10, A.REFINE / 100);
+  const period = fit.score > 0 ? fit.p : coarse;
+  // The phase between hops, from the comb on either side of the best.
+  let phase = fit.phase;
+  if (fit.score > 0) {
+    const [l, c, r] = [sumAt(period, (phase - 1 + period) % period), sumAt(period, phase), sumAt(period, phase + 1)];
+    const d = l - 2 * c + r;
+    if (d < 0) phase += Math.max(-0.5, Math.min(0.5, (0.5 * (l - r)) / d));
   }
+  const bpm = Math.round(((60 * fps) / period) * 100) / 100;
   const beatS = 60 / bpm;
-  const first = from + phase / fps;
-  return { bpm, beat_offset_ms: Math.round((first - Math.floor(first / beatS) * beatS) * 1000) };
+  const first = (from + phase) / fps;
+  return { bpm, beat_offset_ms: Math.round((((first % beatS) + beatS) % beatS) * 1000) };
 };
 
 // The key whose profile correlates best with the chroma; also on the Camelot wheel.
@@ -1712,6 +1846,8 @@ const onMedia = (e) => {
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       break;
     case 'pause':
+      // The audio clock goes on until the context is suspended: read the anchor again on `playing`.
+      if (analysis) analysis.offset = null;
       holdFade();
       clearTimeout(suspendTimer);
       suspendTimer = setTimeout(() => video?.paused && ctx.suspend().catch(() => {}), SUSPEND_MS);
@@ -1726,16 +1862,21 @@ const onMedia = (e) => {
       break;
     case 'loadstart':
       ownSeek = null;
+      waiting = false;
+      break;
+    case 'waiting':
+      waiting = true;
       break;
     case 'loadedmetadata':
     case 'durationchange':
       // A new duration: the fade is planned again, in place (a gapless queue changes it near the end).
       if (!armed) fade = planFade(v);
-      if (analysis && data?.facts?.current?.id === analysis.id) stopAnalysis(false);
+      if (analysis && data?.facts?.current?.id === analysis.id && complete(data.facts.current)) stopAnalysis(false);
       break;
     case 'playing':
-      // After a pause or a stall, the samples dropped meanwhile: back in step.
-      if (analysis) analysis.t = songTime(v);
+      // After a pause or a stall (the samples meanwhile were dropped): the anchor read again.
+      reanchor(v, waiting ? 'stall' : 'resume');
+      waiting = false;
       onTime(v);
       break;
     case 'timeupdate':
@@ -1744,7 +1885,7 @@ const onMedia = (e) => {
       break;
   }
 };
-for (const type of ['play', 'pause', 'playing', 'timeupdate', 'loadstart', 'loadedmetadata', 'durationchange', 'seeking', 'seeked', 'ratechange']) {
+for (const type of ['play', 'pause', 'playing', 'waiting', 'timeupdate', 'loadstart', 'loadedmetadata', 'durationchange', 'seeking', 'seeked', 'ratechange']) {
   document.addEventListener(type, onMedia, true);
 }
 

@@ -5,7 +5,9 @@
 //!
 //! The report has the app and WebView2 versions, the plugin switches, the lyrics and crossfade
 //! settings, the transition voice's state, the current track and lyrics, and the log. It names the tracks played since the app started (the
-//! lyrics lookups log them), never tokens, keys, account names or paths.
+//! lyrics lookups log them), never tokens, keys, account names or paths. Each track the analysis
+//! measured logs how it went (`analysis`: the tap, the blocks dropped and lost, the clock's resyncs
+//! and largest drift; see audio_facts.rs).
 
 use std::collections::VecDeque;
 use std::fmt::{Display, Write as _};

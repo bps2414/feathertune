@@ -36,8 +36,9 @@ use crate::gfx::{self, ICON_FONT, rect, rgb};
 use crate::player::{Event, Player};
 
 const SUBCLASS_ID: usize = 0xfeab;
-/// Posted by the worker: the player changed, or the progress moved.
-const WM_UPDATE: u32 = WM_APP + 4;
+/// Posted by the worker: the player changed, or the progress moved. The main window is also subclassed by
+/// titlebar.rs, which uses `WM_APP + 2..=6`: this one must not be any of them, or it swallows that one.
+const WM_UPDATE: u32 = WM_APP + 16;
 /// Thumbnail button ids, in order.
 const COMMANDS: [&str; 3] = ["previous", "playPause", "next"];
 const PREVIOUS: &str = "\u{e892}";

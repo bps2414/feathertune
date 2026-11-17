@@ -2,6 +2,15 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.1.0 — 2026-11-16
+
+- **Lighter lyrics, same look.** The words, the translation and the romanization now light up without the line being painted again at every frame, and the glow behind the cover is a ready picture instead of a live blur. This is where a slow PC stuttered in the Lyrics tab.
+- **Effects level** (Appearance): Automatic, Full or Light. Light keeps the look with less to draw: fewer lyric lines prepared ahead, a plain player bar instead of frosted glass, a still background, no glow pulse and a visualizer at half the frame rate. Automatic stays on Full unless the app sees the PC cannot keep up.
+- **Crossfade rebuilt (Experimental).** The hidden second player now plays the end of the current track while the player moves on to the next one at the start of the fade. No more seek in the middle of the next track, and the title, the lyrics and the scrobble change with the sound. It also copies your equalizer and compressor. When it cannot overlap, the app falls back to the simple fade, as before.
+- **Sound effects** (Audio): 8D, reverb, wide stereo, karaoke or mono. Off ("None") by default, and bypassed while an ad plays. While an effect is on, the crossfade does not overlap the tracks.
+- **Sleep timer** in the tray menu: pauses the music after 15, 30, 45 or 60 minutes, or at the end of the track.
+- Not measured yet: the cost of the new features. The new crossfade, the effects and the automatic effects level have not been tried on many PCs and accounts; reports are welcome.
+
 ## 1.0.0 — 2026-11-16
 
 - **feathertune 1.0: the first stable release.** Nothing new to learn: it is 0.7.5 made official. From here on, every 1.x keeps your profile, the `config.toml` keys and extensions written for API 1 working. Features marked Experimental (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, phone remote) stay off by default and may still change.

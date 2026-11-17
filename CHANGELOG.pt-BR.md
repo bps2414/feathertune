@@ -2,6 +2,15 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.1.0 — 2026-11-16
+
+- **Letras mais leves, com o mesmo visual.** As palavras, a tradução e a romanização agora acendem sem a linha ser pintada de novo a cada quadro, e o brilho atrás da capa é uma imagem pronta em vez de um blur ao vivo. Era aqui que um PC fraco engasgava na aba Letras.
+- **Nível de efeitos** (Aparência): Automático, Completo ou Leve. O Leve mantém o visual com menos para desenhar: menos linhas da letra preparadas com antecedência, a barra do player lisa em vez de vidro fosco, o fundo parado, sem pulso no brilho e o visualizador com metade dos quadros. O Automático fica no Completo, a menos que o app veja que o PC não acompanha.
+- **Crossfade refeito (Experimental).** O segundo player oculto agora toca o fim da faixa atual enquanto o player passa para a próxima no início do fade. Não há mais salto no meio da próxima faixa, e o título, a letra e o scrobble mudam junto com o som. Ele também copia seu equalizador e compressor. Quando não consegue sobrepor, o app volta ao fade simples, como antes.
+- **Efeitos sonoros** (Áudio): 8D, reverb, estéreo amplo, karaokê ou mono. Desligado ("Nenhum") por padrão, e fora do caminho enquanto toca um anúncio. Com um efeito ligado, o crossfade não sobrepõe as faixas.
+- **Timer para dormir** no menu da bandeja: pausa a música depois de 15, 30, 45 ou 60 minutos, ou no fim da faixa.
+- Ainda não medido: o custo dos recursos novos. O crossfade novo, os efeitos e o nível automático de efeitos não foram testados em muitos PCs e contas; relatos são bem-vindos.
+
 ## 1.0.0 — 2026-11-16
 
 - **feathertune 1.0: a primeira versão estável.** Nada novo para aprender: é a 0.7.5 oficializada. Daqui em diante, toda 1.x mantém funcionando seu perfil, as chaves do `config.toml` e as extensões feitas para a API 1. Os recursos marcados como Experimental (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, controle pelo celular) continuam desligados por padrão e ainda podem mudar.

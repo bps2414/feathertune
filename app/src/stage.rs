@@ -8,9 +8,12 @@
 //!   over `max(3 s, 7 beats)`, 4.5 s without a tempo, or a change between repeated and unrepeated lines
 //!   starts a new one), each a chorus (half its lines sung elsewhere too), a close-up (energy under 30%),
 //!   an editorial stack (over 55%) or the one the last verse was not; an instrumental where the gap after
-//!   a block is over `max(5 s, 8 beats)`; credits after the last line. Cuts land on a bar line when one is
-//!   within 0.75 beat. The energy is the low band × 0.6 plus the mid × 0.4, between the song's own 10th
-//!   and 90th percentiles; it is also sent at 10 Hz (`light`) for the page's light and relief. Without
+//!   a block is over `max(5 s, 8 beats)`; credits after the last line. A cut moves to a bar line within
+//!   0.75 beat only between the end of the line before it and its first line's lead, so no word comes late
+//!   and none is cut short. Each scene says how it is entered (`Entry`): a lift into a chorus, a breath out
+//!   of one, a frame from the lines, a return to them. The energy is the low band × 0.6 plus the mid × 0.4,
+//!   between the song's own 10th and 90th percentiles; it is also sent at 10 Hz (`light`) for the page's
+//!   light and relief. Without
 //!   facts the lyrics alone decide; without lyrics it is an opening, an instrumental and the credits.
 //! - Opened from the title bar button or the tray: the window goes fullscreen (`titlebar::set_fullscreen`),
 //!   the focus goes to the page and the page gets `{ open: true, script, lines, ... }` through
@@ -21,9 +24,14 @@
 //! - Each line gets a shot (`Shot`): a layout from a varied set (never the same twice in a row, nor the same
 //!   place on screen, between two lines with no textless scene between them), where it sits, its emphasis
 //!   word (the longest held, favouring long words and words the song repeats), how its words are born with
-//!   the voice and how it leaves. The set borrows from lyric edits: words piling up small until the last
-//!   one bursts big (`Burst`), a few words down a diagonal with script ends (`Stair`), two rows rising
-//!   (`Climb`), the emphasis word in a script face. The chorus has a signature: the anthem then two seeded
+//!   the voice and how it leaves. The layout follows the line first (short lines go big, long ones run in
+//!   rows, a word sung twice echoes, a cry bursts) and the seed breaks ties; the places walk a path through
+//!   the scene, one neighbour a line, jumping only at a new sentence, a scene's start or a downbeat; a line
+//!   that goes on with the sentence before it keeps that line's family and pushes it up (`Shot::cont`);
+//!   what covers the screen on its way out only leaves with room before the next line. The set borrows
+//!   from lyric edits: words piling up small until the last one bursts big (`Burst`), a few words down a
+//!   diagonal with script ends (`Stair`), two rows rising (`Climb`), a repeated word stacked in a column
+//!   (`Echo`), the emphasis word in a script face. The chorus has a signature: the anthem then two seeded
 //!   partners, in the same order, entrances and places every time it comes back, one level higher each
 //!   time (bigger, more glow, up to 3). The peak is the text in bars (`Bar`): on the anthem of the strongest
 //!   choruses after the first (or of the only one), at most twice a song. The paper behind the lines
@@ -70,6 +78,18 @@ const PAPER_HOLD_MS: f64 = 6000.0;
 const SNAP_BEATS: f64 = 0.75;
 /// A section starts this long before its first line.
 const LEAD_MS: f64 = 150.0;
+/// A line that comes this soon (ms) after the one before it ends may go on with its sentence.
+const CONT_GAP_MS: f64 = 400.0;
+/// What covers the screen on its way out (a zoom, a scatter) needs this long (ms) before the next line.
+const ROOM_MS: f64 = 600.0;
+/// The paths a scene's lines walk through the 3×3 places, one step to a neighbour a line: the diagonals
+/// through the middle, a zigzag, around the edge and into the middle.
+const PATHS: [&[(i8, i8)]; 4] = [
+    &[(-1, -1), (0, 0), (1, 1), (0, 0)],
+    &[(1, -1), (0, 0), (-1, 1), (0, 0)],
+    &[(-1, -1), (0, 0), (1, -1), (1, 0), (0, 1), (-1, 0)],
+    &[(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (0, 0)],
+];
 /// Under these an opening or the credits are not worth a scene of their own.
 const MIN_OPENING_MS: f64 = 1500.0;
 const MIN_CREDITS_MS: f64 = 3000.0;
@@ -131,6 +151,9 @@ pub enum Layout {
     Stair,
     /// Two rows rising over the line's time, a star rising with them.
     Climb,
+    /// A word the line sings two to four times stacked in a column, a row from each time, each row a
+    /// little bigger.
+    Echo,
 }
 
 impl Layout {
@@ -145,6 +168,8 @@ impl Layout {
             Layout::Bar => (1..=8).contains(&words),
             Layout::Stair => (2..=4).contains(&words),
             Layout::Climb => (4..=12).contains(&words),
+            // And a word sung two to four times (`echoes_a_word`).
+            Layout::Echo => (2..=12).contains(&words),
             _ => true,
         }
     }
@@ -182,6 +207,12 @@ pub enum Enter {
     Letters,
     /// A short slide in from the singer's side (from both sides for a group).
     Drift,
+    /// Up from its baseline, inside a mask.
+    Rise,
+    /// The emphasis word lands big and settles with a small overshoot; the others pop.
+    Stamp,
+    /// Its two halves slide in from opposite sides and meet.
+    Slice,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -205,6 +236,23 @@ pub enum Exit {
 pub enum Paper {
     Dark,
     Light,
+}
+
+/// How a scene is entered; the page plays it on the light and the camera (the lines have their own exits).
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Entry {
+    /// The camera's move only blends into the new one.
+    Cut,
+    /// Into a chorus: the bar before its first downbeat winds up (the camera closes in, the light gathers)
+    /// and the downbeat opens it with a flash.
+    Lift,
+    /// Out of a chorus: a bar's pull back with the light down.
+    Breath,
+    /// From the lines to a scene without them: its picture comes in from where the last line was.
+    Frame,
+    /// From a scene without lines back to them: that scene leaves before the first word.
+    Return,
 }
 
 /// The camera's slow move over a scene.
@@ -239,6 +287,9 @@ pub struct Shot {
     pub singer: u8,
     /// A duet's answer: the other singer than the line before.
     pub answer: bool,
+    /// It goes on with the sentence of the line before (`continues`): the page pushes that one up, small,
+    /// instead of letting it leave. Never two in a row.
+    pub cont: bool,
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -251,6 +302,7 @@ pub struct Section {
     /// One per line, in the same order.
     pub shots: Vec<Shot>,
     pub camera: Camera,
+    pub entry: Entry,
     /// 1 for the first chorus, 2 for the second...; 0 for anything else.
     pub chorus_no: u32,
     /// Why the director chose it, as a code (for the diagnostics and the tests; not shown).
@@ -427,6 +479,7 @@ fn section(kind: Kind, from: f64, to: f64, why: &'static str) -> Section {
         lines: Vec::new(),
         shots: Vec::new(),
         camera: Camera::Push,
+        entry: Entry::Cut,
         chorus_no: 0,
         why,
     }
@@ -470,6 +523,48 @@ fn hero(words: &[(f64, String)], end: f64, counts: &HashMap<String, u32>) -> Opt
     (0..words.len()).filter(|&k| short || letters(&words[k].1) >= 3).max_by(|&a, &b| score(a).total_cmp(&score(b)))
 }
 
+/// Whether a line sings one of its words (two letters or more) two to four times, in twelve words or fewer:
+/// the echo's rows.
+fn echoes_a_word(words: &[(f64, String)]) -> bool {
+    if words.len() > 12 {
+        return false;
+    }
+    let mut count = HashMap::<String, u8>::new();
+    for w in words {
+        let n = norm(&w.1);
+        if n.chars().count() >= 2 {
+            *count.entry(n).or_default() += 1;
+        }
+    }
+    count.values().any(|c| (2..=4).contains(c))
+}
+
+fn ends_sentence(text: &str) -> bool {
+    text.trim_end().ends_with(['.', '!', '?', '…'])
+}
+
+/// Whether line `b` goes on with the sentence of line `a`, which stops being sung at `end`: `b` comes at
+/// once, `a` does not end a sentence, and `a` ends on a comma or is a fragment of three words or fewer, or
+/// `b` starts in lower case.
+fn continues(a: &Line, b: &Line, end: f64) -> bool {
+    let text = a.text.trim_end();
+    if f64::from(b.ms) - end > CONT_GAP_MS || ends_sentence(text) || text.ends_with([':', ';']) {
+        return false;
+    }
+    text.ends_with(',')
+        || text.split_whitespace().count() <= 3
+        || b.text.trim_start().chars().next().is_some_and(char::is_lowercase)
+}
+
+/// The layouts that read alike: the rest of a sentence keeps to its line's family.
+fn family(l: Layout) -> u8 {
+    match l {
+        Layout::Stack | Layout::Rag | Layout::Cascade | Layout::Climb | Layout::Echo => 0,
+        Layout::Hero | Layout::Vertical | Layout::Burst | Layout::Stair => 1,
+        _ => 2,
+    }
+}
+
 /// The song's type personality: the tempo, the loudness and the words per second, each that is known,
 /// as a drive from 0 (calm) to 1; at or over 0.62 compressed, at or under 0.3 expanded, the seed picks in
 /// between.
@@ -492,7 +587,9 @@ fn voice(bpm: Option<f64>, loud: Option<f64>, words_per_s: Option<f64>, rng: &mu
 const PLACES: [(i8, i8); 9] = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
 const CENTER: (i8, i8) = (0, 0);
 
-/// Gives each line of the text scenes its shot and each scene its camera (see the module doc).
+/// Gives each line of the text scenes its shot and each scene its camera (see the module doc). `grid` is
+/// the beat and the first beat (ms) when the tempo is known.
+#[allow(clippy::too_many_arguments)]
 fn shoot(
     sections: &mut [Section],
     lines: &[Line],
@@ -500,8 +597,16 @@ fn shoot(
     energy: &Energy,
     counts: &HashMap<String, u32>,
     duet: bool,
+    grid: Option<(f64, f64)>,
     rng: &mut Rng,
 ) {
+    // A line that starts right on a bar line.
+    let on_bar = |ms: f64| {
+        grid.is_some_and(|(beat, off)| {
+            let ph = ((ms - off) / beat).rem_euclid(4.0);
+            !(0.15..=3.85).contains(&ph)
+        })
+    };
     // The chorus' signature, once per song: the anthem in the middle, then two partners elsewhere.
     let first = rng.below(PARTNERS.len());
     let second = (first + 1 + rng.below(PARTNERS.len() - 1)) % PARTNERS.len();
@@ -510,7 +615,7 @@ fn shoot(
     let a = off[rng.below(off.len())];
     let rest: Vec<(i8, i8)> = off.iter().copied().filter(|p| *p != a).collect();
     let places = [CENTER, a, rest[rng.below(rest.len())]];
-    let enters = [Enter::Pop, Enter::Drift, if rng.coin() { Enter::Letters } else { Enter::Pop }];
+    let enters = [Enter::Pop, Enter::Drift, if rng.coin() { Enter::Letters } else { Enter::Rise }];
     let exits = [Exit::Zoom, if rng.coin() { Exit::Scatter } else { Exit::Fold }, Exit::Steps];
 
     // Every line of a text scene, in order, with whether a textless scene comes before it.
@@ -526,6 +631,8 @@ fn shoot(
         }
     }
     let mut prev: Option<Shot> = None;
+    // The verse's walk: which path, where on it, which way.
+    let mut walk = (0usize, 0usize, true);
     let (mut run, mut k) = (0u8, 0usize);
     // Per line of `order`: its chorus run (1, 2... ; 0 outside one), its word count and its energy.
     let mut info: Vec<(usize, usize, Option<f64>)> = Vec::with_capacity(order.len());
@@ -585,32 +692,112 @@ fn shoot(
                 script: false,
                 singer,
                 answer,
+                cont: false,
             }
         } else {
             // A verse line right before a chorus keeps the middle free for its anthem.
             let to_chorus =
                 order.get(n + 1).is_some_and(|&(nsi, nj, ngap)| !ngap && nj == 0 && sections[nsi].kind == Kind::Chorus);
             let calm = s.kind != Kind::Editorial;
-            let pool: Vec<(Layout, u32)> = VERSE
+            let before_line = if after_gap { None } else { j.checked_sub(1).map(|p| s.lines[p]) };
+            let cont = !duet
+                && !prev.is_some_and(|p| p.cont)
+                && before_line.is_some_and(|p| continues(&lines[p], &lines[i], ends[p]));
+            // The line's own look first: short lines go big, long ones run in rows, a word sung again echoes,
+            // a cry bursts, the rest of a sentence keeps its line's family; the seed only breaks ties.
+            let n_words = ws.len();
+            let text = lines[i].text.trim_end();
+            let kin = if cont { prev.map(|p| family(p.layout)) } else { None };
+            let favour = |l: Layout| -> u32 {
+                let mut w = 1;
+                if kin.is_some_and(|f| family(l) == f) {
+                    w *= 6;
+                }
+                if n_words <= 3 && matches!(l, Layout::Hero | Layout::Stair | Layout::Vertical) {
+                    w *= 4;
+                }
+                if n_words >= 8 && matches!(l, Layout::Rag | Layout::Climb | Layout::Cascade) {
+                    w *= 4;
+                }
+                if text.ends_with(['!', '?']) && l == Layout::Burst {
+                    w *= 4;
+                }
+                w
+            };
+            let mut pool: Vec<(Layout, u32)> = VERSE
                 .iter()
                 .filter(|v| fits(v.0) && Some(v.0) != before)
-                .map(|&(l, quiet, driven)| (l, if calm { quiet } else { driven }))
+                .map(|&(l, quiet, driven)| (l, (if calm { quiet } else { driven }) * favour(l)))
                 .collect();
+            if before != Some(Layout::Echo) && fits(Layout::Echo) && echoes_a_word(&ws) {
+                pool.push((Layout::Echo, 10 * favour(Layout::Echo)));
+            }
             let layout = rng.weighted(&pool).or_else(|| pool.first().map(|p| p.0)).unwrap_or(Layout::Stack);
-            let free: Vec<(i8, i8)> = PLACES
-                .iter()
-                .copied()
-                .filter(|p| (!duet || p.0 == side) && Some(*p) != last_place && !(to_chorus && *p == CENTER))
-                .collect();
-            let place = free[rng.below(free.len())];
+            // The places walk the scene's path one neighbour a line; a scene's start, a new sentence or a
+            // downbeat may jump anywhere (the rest of a sentence never does).
+            let allowed = |p: (i8, i8)| (!duet || p.0 == side) && Some(p) != last_place && !(to_chorus && p == CENTER);
+            let near = |p: (i8, i8)| last_place.is_none_or(|l| (p.0 - l.0).abs() <= 1 && (p.1 - l.1).abs() <= 1);
+            let free: Vec<(i8, i8)> = PLACES.iter().copied().filter(|p| allowed(*p)).collect();
+            if before_line.is_none() {
+                walk = (rng.below(PATHS.len()), 0, rng.coin());
+            }
+            let path = PATHS[walk.0];
+            let jump = !cont
+                && (before_line.is_none()
+                    || before_line.is_some_and(|p| ends_sentence(&lines[p].text))
+                    || on_bar(f64::from(lines[i].ms)));
+            let place = if jump {
+                let p = free[rng.below(free.len())];
+                walk.1 =
+                    (0..path.len()).min_by_key(|&q| (path[q].0 - p.0).abs().max((path[q].1 - p.1).abs())).unwrap_or(0);
+                p
+            } else {
+                let len = path.len();
+                let on_path = (1..=len)
+                    .map(|d| if walk.2 { (walk.1 + d) % len } else { (walk.1 + len * 2 - d) % len })
+                    .find(|&q| allowed(path[q]) && near(path[q]));
+                match on_path {
+                    Some(q) => {
+                        walk.1 = q;
+                        path[q]
+                    }
+                    // Off the path (a duet's side, the middle kept for the chorus): a neighbour, else anywhere.
+                    None => {
+                        let close: Vec<(i8, i8)> = free.iter().copied().filter(|p| near(*p)).collect();
+                        let from = if close.is_empty() { &free } else { &close };
+                        from[rng.below(from.len())]
+                    }
+                }
+            };
             let e = energy.between(f64::from(lines[i].ms), ends[i]).unwrap_or(if calm { 0.4 } else { 0.65 });
-            let pick_enter = |e: f64| -> [(Enter, u32); 3] {
+            let pick_enter = |e: f64| -> [(Enter, u32); 6] {
                 if e > 0.6 {
-                    [(Enter::Pop, 3), (Enter::Drift, 2), (Enter::Letters, 1)]
+                    [
+                        (Enter::Pop, 3),
+                        (Enter::Stamp, 2),
+                        (Enter::Slice, 2),
+                        (Enter::Drift, 1),
+                        (Enter::Letters, 1),
+                        (Enter::Rise, 0),
+                    ]
                 } else if e < 0.35 {
-                    [(Enter::Letters, 3), (Enter::Pop, 2), (Enter::Drift, 1)]
+                    [
+                        (Enter::Letters, 3),
+                        (Enter::Rise, 3),
+                        (Enter::Drift, 1),
+                        (Enter::Pop, 1),
+                        (Enter::Slice, 0),
+                        (Enter::Stamp, 0),
+                    ]
                 } else {
-                    [(Enter::Pop, 2), (Enter::Drift, 2), (Enter::Letters, 2)]
+                    [
+                        (Enter::Pop, 2),
+                        (Enter::Rise, 2),
+                        (Enter::Drift, 2),
+                        (Enter::Letters, 1),
+                        (Enter::Slice, 1),
+                        (Enter::Stamp, 1),
+                    ]
                 }
             };
             let pick_exit = |e: f64| -> [(Exit, u32); 6] {
@@ -645,8 +832,21 @@ fn shoot(
             };
             let enters: Vec<(Enter, u32)> =
                 pick_enter(e).into_iter().filter(|x| Some(x.0) != prev.map(|p| p.enter)).collect();
-            let exits: Vec<(Exit, u32)> =
-                pick_exit(e).into_iter().filter(|x| Some(x.0) != prev.map(|p| p.exit)).collect();
+            // What covers the screen only with room before the next line; the block's last line leaves
+            // stronger.
+            let gap = order
+                .get(n + 1)
+                .map_or(f64::INFINITY, |&(nsi, nj, _)| f64::from(lines[sections[nsi].lines[nj]].ms) - ends[i]);
+            let last_of_block = j + 1 == s.lines.len();
+            let exits: Vec<(Exit, u32)> = pick_exit(e)
+                .into_iter()
+                .filter(|x| Some(x.0) != prev.map(|p| p.exit))
+                .map(|(x, w)| match x {
+                    Exit::Zoom | Exit::Scatter if gap < ROOM_MS => (x, 0),
+                    Exit::Zoom | Exit::Scatter | Exit::Fold if last_of_block => (x, w * 2),
+                    _ => (x, w),
+                })
+                .collect();
             Shot {
                 layout,
                 x: place.0,
@@ -659,6 +859,7 @@ fn shoot(
                 script: false,
                 singer,
                 answer,
+                cont,
             }
         };
         // The script face: always at the stair's ends; on a hero word now and then, never twice in a row.
@@ -756,11 +957,18 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     let bpm = facts.and_then(|f| f.bpm).filter(|b| b.is_finite() && *b > 0.0);
     let beat = bpm.map(|b| 60_000.0 / b);
     let offset = facts.and_then(|f| f.beat_offset_ms).unwrap_or(0.0);
-    let snap = |t: f64| match beat {
+    // A cut at `t` moves to the nearest bar line within reach that lies between `lo` (the end of what is
+    // still sung) and `hi` (the next line's lead), so it never makes a word late nor cuts one short.
+    let snap = |t: f64, lo: f64, hi: f64| match beat {
         Some(beat) => {
             let bar = beat * 4.0;
-            let s = offset + ((t - offset) / bar).round() * bar;
-            if (s - t).abs() < beat * SNAP_BEATS && s >= 0.0 { s } else { t }
+            let k = ((t - offset) / bar).floor();
+            [k, k + 1.0]
+                .into_iter()
+                .map(|k| offset + k * bar)
+                .filter(|s| *s >= lo.max(0.0) && *s <= hi && (s - t).abs() < beat * SNAP_BEATS)
+                .min_by(|a, b| (a - t).abs().total_cmp(&(b - t).abs()))
+                .unwrap_or(t)
         }
         None => t,
     };
@@ -781,8 +989,8 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     let mut out = Vec::new();
     if sung.is_empty() {
         // No lyrics: the cover's opening, an instrumental with the relief, the credits.
-        let head = snap((duration * 0.2).min(12_000.0));
-        let tail = snap(duration - (duration * 0.2).min(15_000.0));
+        let head = snap((duration * 0.2).min(12_000.0), 0.0, duration);
+        let tail = snap(duration - (duration * 0.2).min(15_000.0), head, duration);
         out.push(section(Kind::Opening, 0.0, head, "no_lyrics"));
         out.push(section(Kind::Instrumental, head, tail, "no_lyrics"));
         out.push(section(Kind::Credits, tail, duration, "no_lyrics"));
@@ -801,7 +1009,8 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
             blocks.last_mut().expect("a block").push(i);
         }
         // 2. The opening, until the first line.
-        let first = snap(f64::from(lines[sung[0]].ms) - LEAD_MS);
+        let lead = |i: usize| f64::from(lines[i].ms) - LEAD_MS;
+        let first = snap(lead(sung[0]), 0.0, lead(sung[0]));
         if first >= MIN_OPENING_MS {
             out.push(section(Kind::Opening, 0.0, first, "before_first"));
         }
@@ -810,9 +1019,13 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
         let mut chorus_no = 0;
         let instrumental = beat.map_or(5000.0, |b| (b * 8.0).max(5000.0));
         for (k, block) in blocks.iter().enumerate() {
-            let from = if k == 0 { first.max(0.0) } else { snap(f64::from(lines[block[0]].ms) - LEAD_MS) };
-            let end = ends[*block.last().expect("a line")];
-            let next = blocks.get(k + 1).map(|b| f64::from(lines[b[0]].ms));
+            let end_of = |b: &[usize]| ends[*b.last().expect("a line")];
+            let from = match k.checked_sub(1) {
+                None => first.max(0.0),
+                Some(p) => snap(lead(block[0]), end_of(&blocks[p]), lead(block[0])),
+            };
+            let end = end_of(block);
+            let next = blocks.get(k + 1).map(|b| lead(b[0]));
             let chorus = block.iter().filter(|&&i| repeated(i)).count() * 2 >= block.len();
             let e = energy.between(from, end);
             let (kind, why) = if chorus {
@@ -836,14 +1049,14 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
             s.lines = block.clone();
             s.chorus_no = if chorus { chorus_no } else { 0 };
             match next {
-                Some(next) if next - end > instrumental => {
-                    let at = snap(end + beat.unwrap_or(500.0));
+                Some(next) if next + LEAD_MS - end > instrumental => {
+                    let at = snap(end + beat.unwrap_or(500.0), end, next);
                     s.to_ms = at.round() as u32;
                     out.push(s);
-                    out.push(section(Kind::Instrumental, at, snap(next - LEAD_MS), "gap"));
+                    out.push(section(Kind::Instrumental, at, snap(next, at, next), "gap"));
                 }
                 Some(next) => {
-                    s.to_ms = snap(next - LEAD_MS).max(0.0).round() as u32;
+                    s.to_ms = snap(next, end, next).max(0.0).round() as u32;
                     out.push(s);
                 }
                 None => out.push(s),
@@ -851,7 +1064,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
         }
         // 4. The credits, after the last line.
         let last_end = ends[*sung.last().expect("a line")];
-        let credits = snap(last_end + beat.unwrap_or(1000.0));
+        let credits = snap(last_end + beat.unwrap_or(1000.0), last_end, duration);
         if duration - credits >= MIN_CREDITS_MS {
             if let Some(s) = out.last_mut() {
                 s.to_ms = credits.round() as u32;
@@ -875,7 +1088,19 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     let per_s = (sung_ms >= 5000.0).then(|| sung_words as f64 / (sung_ms / 1000.0));
     let voice = voice(bpm, energy.1, per_s, &mut rng);
     let duet = [0, 1].iter().all(|&v| sung.iter().filter(|&&i| lines[i].voice == v).count() >= 2);
-    shoot(&mut sections, lines, &ends, &energy, &counts, duet, &mut rng);
+    shoot(&mut sections, lines, &ends, &energy, &counts, duet, beat.map(|b| (b, offset)), &mut rng);
+    // How each scene is entered, from the one before it.
+    let text = |k: Kind| matches!(k, Kind::Close | Kind::Editorial | Kind::Chorus);
+    for k in 1..sections.len() {
+        let (was, is) = (sections[k - 1].kind, sections[k].kind);
+        sections[k].entry = match (text(was), text(is)) {
+            (false, true) => Entry::Return,
+            (true, false) => Entry::Frame,
+            (true, true) if is == Kind::Chorus && was != Kind::Chorus => Entry::Lift,
+            (true, true) if was == Kind::Chorus && is != Kind::Chorus => Entry::Breath,
+            _ => Entry::Cut,
+        };
+    }
     Script {
         duration_ms,
         sections,
@@ -1095,7 +1320,6 @@ fn payload(app: &AppHandle) -> Value {
             "esc": t("Esc to leave"),
             "play": t("Play"),
             "pause": t("Pause"),
-            "chorus": t("Chorus"),
             "instrumental": t("Instrumental"),
             "listened": t("You listened to"),
             "next": t("Up next"),
@@ -1176,6 +1400,13 @@ mod tests {
         assert_eq!(choruses.len(), 2, "{:?}", kinds(&s));
         assert_eq!((choruses[0].chorus_no, choruses[1].chorus_no), (1, 2));
         assert_eq!(choruses[0].lines, [2, 3]);
+        // A verse lifts into the chorus; the gap after it is a frame, and the verse after it a return.
+        assert_eq!(choruses[0].entry, Entry::Lift);
+        assert_eq!(kinds(&s)[3], Kind::Instrumental);
+        assert_eq!(
+            s.sections.iter().map(|x| x.entry).skip(3).take(2).collect::<Vec<_>>(),
+            [Entry::Frame, Entry::Return]
+        );
         // Accents, case and punctuation do not matter; the second time is an echo of the first.
         assert_eq!(s.echoes[6], 1);
         assert_eq!(s.echoes[2], 0);
@@ -1191,14 +1422,20 @@ mod tests {
     }
 
     #[test]
-    fn cuts_land_on_the_bar() {
-        let s = direct(&song(), Some(&facts(60.0)), &track(60_000));
-        // The first line at 10.1 s: its scene starts on the bar at 10 s, not at 9.95 s.
+    fn cuts_land_on_the_bar_without_cutting_a_line() {
+        let lines = song();
+        let s = direct(&lines, Some(&facts(60.0)), &track(60_000));
+        // The first line at 10.1 s: the bar at 10 s is past its lead (9.95 s), so the cut stays there.
         assert_eq!(s.sections[0].kind, Kind::Opening);
-        assert_eq!(s.sections[0].to_ms, 10_000);
-        // Every scene of lines starts on a bar (the instrumental and the credits start a beat after the
-        // last line's end, which only moves to a bar line within reach).
-        assert!(s.sections.iter().filter(|x| !x.lines.is_empty()).all(|x| x.from_ms % 2000 == 0), "{:?}", s.sections);
+        assert_eq!(s.sections[0].to_ms, 9950);
+        // The chorus at 16.2 s moves back to the bar at 16 s, where the line before it ends.
+        let chorus = s.sections.iter().find(|x| x.kind == Kind::Chorus).expect("a chorus");
+        assert_eq!(chorus.from_ms, 16_000);
+        // No scene of lines starts after its first line's lead, nor before the line before it ends.
+        for x in s.sections.iter().filter(|x| !x.lines.is_empty()) {
+            assert!(f64::from(x.from_ms) <= f64::from(lines[x.lines[0]].ms) - LEAD_MS, "{x:?}");
+            assert!(x.lines[0].checked_sub(1).is_none_or(|p| x.from_ms >= lines[p].end), "{x:?}");
+        }
         assert_eq!(s.grid, Some(Grid { bpm: 120.0, offset_ms: 0.0 }));
         assert_eq!(s.light.len(), 600);
         assert_contiguous(&s);

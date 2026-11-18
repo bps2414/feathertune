@@ -12,25 +12,38 @@
 //   breaking into more rows rather than overflowing; titles narrow through the width axis first. The rows
 //   as laid out are checked once against what was computed, and the block shrinks if they came out wider.
 // - The type: the song's voice (a face and its axes) from the script; a word is not on screen before it is
-//   sung. At its time it is born dry (pop: at once, settling from a touch bigger; drift: a short slide
-//   from the singer's side; letters: typed over the time it is held), grows to its lit axes while held
-//   (font-variation-settings on that word only) and blooms (a copy of the line painted once as glow). The
-//   emphasis word gets the singer's color, or the script face. Lines leave (slide, scatter, fold, zoom,
-//   sink, steps) as the script says.
+//   sung. At its time it is born (pop: at once, settling from a touch bigger; drift: a short slide from
+//   the singer's side; letters: typed over the time it is held; rise: up from a mask line; slice: its two
+//   halves meeting; stamp: hit down from big), grows to its lit axes while held (font-variation-settings
+//   on that word only) and blooms (a copy of the line painted once as glow). The emphasis word gets the
+//   singer's color, or the script face; one landing on a downbeat is stamped.
+// - Lines leave by time, not when the next comes: each exit (slide, scatter, fold, zoom, sink, steps) is
+//   planned against when the next thing shows (`planExit`), its fade front-loaded and over before it when
+//   there is room, a short handoff when there is none, moving away from where the next line sits. After
+//   its end a line drifts that way. A line that goes on with the sentence of the one before (`cont`)
+//   pushes that one up, small, instead. The next line is built ahead, while the page is idle, off screen.
+// - Between scenes the camera blends from one move into the next; a chorus is lifted into (the light
+//   dims and the camera leans in over the bar before its first downbeat, and hits on it), the scene after
+//   a chorus breathes out. The chorus' number stands behind it, a big outline. The instrumental cuts to a
+//   new crop of the cover each bar with color bands sweeping across, and counts the last four beats down.
 // - Pieces from lyric edits: the burst (small words pile up, the last bursts big with a full stop and a
 //   flash), the bars (solid, edge to edge, posing a hair either way on the beat while the light paper
 //   flickers to the accent), the stair (a diagonal with script ends) and the climb (two rows rising),
-//   both with a boiling star (three drawings, a new one every STAR_MS). The paper cuts to light when the
-//   script says, with no transition. Flashes and flickers stay under three a second.
+//   both with a boiling star (three drawings, a new one every STAR_MS), the echo (a word sung again
+//   starts each row, the rows growing). The paper cuts to light when the script says, with no transition,
+//   on the new line's first word; each line keeps its own paper's colors while it leaves. Flashes and
+//   flickers stay under three a second.
 // - A duet: each singer on its side in its color, the group in the middle in both; an answer is typed
 //   into outlines while the other singer's last line steps aside, small, up in its corner, until that
 //   voice returns. Background vocals are a small row under the line, each word born at its own time.
 // - One animation frame loop, only while open, the page visible, the track playing and no ad. Paused, it
-//   draws one frame and stops; the CSS animations and the axis animations hold too. Per frame only
-//   transform and opacity are written (and the star's drawing), only when they change; only the current
-//   line (the one leaving, for its exit, and a duet's aside) is in the DOM. With the light effects
-//   (`html[data-feathertune-light]`) there is no glow, grain, flash, flicker, pose, boiling, typing, rise,
-//   3D or camera breath, and lit words take their axes at once.
+//   draws one frame and stops; the CSS animations and the axis animations hold too, and the exits, timed
+//   on the track, are removed by time. Per frame only transform and opacity are written (and the star's
+//   drawing), only when they change; only the current line (the ones leaving, a duet's aside or a pushed
+//   line, and the next one staged) is in the DOM. A seek sets everything again for the new moment. With
+//   the light effects (`html[data-feathertune-light]`) there is no glow, grain, flash, flicker, pose,
+//   boiling, typing, rise, slice, stamp, drift, push, lift, bands, 3D or camera breath, and lit words
+//   take their axes at once.
 // - Without the track analysis the light follows the audio module's live level, read only while the
 //   stage plays. Every text goes in as textContent; the data from Rust is checked before use.
 if (window.top !== window) return;
@@ -41,12 +54,48 @@ const IDLE_MS = 2000;
 const KINDS = ['opening', 'close', 'editorial', 'chorus', 'instrumental', 'credits'];
 const TEXT_KINDS = new Set(['close', 'editorial', 'chorus']);
 const RELIEF_KINDS = new Set(['opening', 'instrumental', 'credits']);
-const LAYOUTS = ['stack', 'rag', 'cascade', 'hero', 'grid', 'vertical', 'split', 'tilt', 'anthem', 'burst', 'bar', 'stair', 'climb'];
-const ENTERS = ['pop', 'letters', 'drift'];
+const LAYOUTS = ['stack', 'rag', 'cascade', 'hero', 'grid', 'vertical', 'split', 'tilt', 'anthem', 'burst', 'bar', 'stair', 'climb', 'echo'];
+const ENTERS = ['pop', 'letters', 'drift', 'rise', 'stamp', 'slice'];
 const EXITS = ['slide', 'scatter', 'fold', 'zoom', 'sink', 'steps'];
+const ENTRIES = ['cut', 'lift', 'breath', 'frame', 'return'];
 const PAPERS = ['dark', 'light'];
 const CAMERAS = ['push', 'pull', 'left', 'right', 'rise', 'roll'];
-const DEFAULT_SHOT = { layout: 'stack', x: 0, y: 0, hero: -1, enter: 'pop', exit: 'sink', level: 0, paper: 'dark', script: false, singer: 0, answer: false };
+const DEFAULT_SHOT = {
+  layout: 'stack',
+  x: 0,
+  y: 0,
+  hero: -1,
+  enter: 'pop',
+  exit: 'sink',
+  level: 0,
+  paper: 'dark',
+  script: false,
+  singer: 0,
+  answer: false,
+  cont: false,
+};
+// How long each exit moves (ms); its fade takes about half of that, front-loaded (`planExit`).
+const EXIT_MS = { slide: 640, scatter: 640, fold: 600, zoom: 560, sink: 640, steps: 420, fade: 420 };
+// The shortest fade a line hands over in when the next one comes right on its end.
+const HANDOFF_MS = 160;
+// A line stays at least this long after its last word is born.
+const SEEN_MS = 150;
+// A frame (opening, instrumental) leaves over this long before the lines come back.
+const FRAME_OUT_MS = 700;
+// After its end a line drifts this far (vw) away from where the next one comes, over this long.
+const AFTER = { VW: 1.2, MS: 1600 };
+// The camera blends from one scene's move into the next over a bar, within these (or NO_GRID).
+const BLEND_MS = { MIN: 800, MAX: 1600, NO_GRID: 900 };
+// The share of the safe area's height at the top a line is pushed up into when the next goes on with it.
+const PUSH_SHARE = 0.24;
+// The instrumental's crops of the cover, a new one each bar: [scale, x, y] (the crop's center, 0..1, kept
+// so the cover still fills its frame).
+const CROPS = [
+  [1, 0.5, 0.5],
+  [1.18, 0.3, 0.36],
+  [1.32, 0.68, 0.6],
+  [1.12, 0.6, 0.3],
+];
 // Flashes, flickers and the bars' poses: at most one per this long (three a second).
 const FLASH_GAP_MS = 334;
 // The star boils: a new drawing this often.
@@ -77,7 +126,8 @@ const EASE_IN_OUT = 'cubic-bezier(.76, 0, .24, 1)';
 const EASE_OUT = 'cubic-bezier(.16, 1, .3, 1)';
 // A word grows to its lit axes over the time it is held, within these.
 const HOLD_MS = { MIN: 160, MAX: 2600 };
-const EXIT_MS = 700;
+// The climb keeps rising this long past the line's end, while it leaves.
+const CLIMB_TAIL_MS = 700;
 const FONT_WAIT_MS = 800;
 const FIELD = /^data:image\/png;base64,[A-Za-z0-9+/=]{1,400000}$/;
 const TEXTS = {
@@ -85,7 +135,6 @@ const TEXTS = {
   esc: 'Esc to leave',
   play: 'Play',
   pause: 'Pause',
-  chorus: 'Chorus',
   instrumental: 'Instrumental',
   listened: 'You listened to',
   next: 'Up next',
@@ -168,15 +217,27 @@ const st = {
   v: null,
   key: '',
   sec: -1,
-  line: -2,
-  scene: null,
+  // The line on screen: its index in the scene, and its block (null once it started leaving).
+  j: -1,
   block: null,
+  // The next line, built ahead while the page is idle (`stageNext`), and that idle job.
+  next: null,
+  stageJob: 0,
+  // Blocks leaving: { b, at, until, frozen } in the lyrics' time; removed by time.
+  leaving: [],
   // A duet's line stepped aside (a block, as `block`).
   aside: null,
+  scene: null,
+  // The frame's own exit (an animation), the instrumental's moving parts, the countdown.
+  sceneOut: null,
+  frame: null,
+  count: null,
+  // The lyrics' time (ms) of the frame being drawn; everything is set again on the next frame.
+  now: 0,
+  resync: false,
   flashAt: 0,
-  words: [],
+  // Every animation that holds while paused.
   anims: new Set(),
-  dots: null,
   e: 0.5,
   live: false,
   // The display fonts are in (feathertune.stageFont), and when the stage last opened.
@@ -194,6 +255,7 @@ let ui = null;
 const num = (x) => typeof x === 'number' && Number.isFinite(x);
 const text = (x, max = 300) => (typeof x === 'string' ? x.slice(0, max) : '');
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const smooth = (x) => x * x * (3 - 2 * x);
 const video = () => document.querySelector('video');
 const lightFx = () => !!feathertune.perf?.light();
 const fmt = (s) => {
@@ -255,6 +317,7 @@ const check = (d) => {
     script: x?.script === true,
     singer: singer(x?.singer),
     answer: x?.answer === true,
+    cont: x?.cont === true,
   });
   const sections = s.sections
     .filter((x) => x && KINDS.includes(x.kind) && num(x.from_ms) && num(x.to_ms))
@@ -270,6 +333,7 @@ const check = (d) => {
         lines: pairs.map((p) => p[0]),
         shots: pairs.map((p) => p[1]),
         camera: CAMERAS.includes(x.camera) ? x.camera : 'push',
+        entry: ENTRIES.includes(x.entry) ? x.entry : 'cut',
         chorus: Number.isInteger(x.chorus_no) ? clamp(x.chorus_no, 0, 99) : 0,
       };
     });
@@ -339,8 +403,11 @@ const build = () => {
   root.hidden = true;
   const field = el('div', 'ft-field', root);
   const fieldPicture = el('div', 'ft-field-picture', field);
+  // The second color: two lamps, one per tone, crossfading between scenes (a gradient does not
+  // interpolate); the energy sets the opacity of both at once.
   const lamp2 = el('div', 'ft-lamp ft-lamp2', root);
-  const lamp2Core = el('div', 'ft-lamp-core', lamp2);
+  el('div', 'ft-lamp-core ft-tone-a', lamp2);
+  el('div', 'ft-lamp-core ft-tone-b', lamp2);
   const beam = el('div', 'ft-beam', root);
   const beamCore = el('div', 'ft-beam-core', beam);
   const lamp = el('div', 'ft-lamp', root);
@@ -350,8 +417,12 @@ const build = () => {
   el('div', 'ft-paper', root);
   const pop = el('div', 'ft-pop', root);
   const camera = el('div', 'ft-camera', root);
+  // The chorus' number, behind its lines.
+  const numeral = el('div', 'ft-numeral ft-off', camera);
+  const numeralNum = el('span', null, numeral);
   const lines = el('div', 'ft-lines', camera);
-  const kicker = el('div', 'ft-kicker ft-label', root);
+  const count = el('div', 'ft-count', root);
+  const countNum = el('span', null, count);
   el('div', 'ft-grain', root);
   el('div', 'ft-bar ft-top', root);
   el('div', 'ft-bar ft-bottom', root);
@@ -406,14 +477,16 @@ const build = () => {
     lamp,
     lampCore,
     lamp2,
-    lamp2Core,
     beam,
     beamCore,
     flash,
     pop,
     camera,
+    numeral,
+    numeralNum,
     lines,
-    kicker,
+    count,
+    countNum,
     vignette,
     relief,
     subtitle,
@@ -487,6 +560,8 @@ const setVoice = () => {
   ui.root.style.setProperty('--ft-lh', String(V.lh));
   ui.root.style.setProperty('--ft-gap', `${V.gap}em`);
   ui.root.style.setProperty('--ft-track', `${V.track}em`);
+  ui.numeral.style.fontVariationSettings = fvs(V.key);
+  ui.count.style.fontVariationSettings = fvs(V.key);
 };
 
 // ---------- fitting ----------
@@ -844,6 +919,54 @@ const LAYOUT = {
     const sx = align === 'r' ? r0.left + r0.width + r0.size * 0.1 : r0.left - r0.size * 0.1;
     return { rows, rise, stars: [{ x: sx, y: r0.top + r0.size * 0.45, s: r0.size * 1.5 }] };
   },
+  echo(c) {
+    // A row starts at each time the word comes again, so it stands in a column; each row a touch bigger
+    // than the one before.
+    const n = c.w.length;
+    const starts = [0, ...c.echo.slice(1)];
+    const R = starts.length;
+    const f = range(0, R).map((r) => 0.72 + (0.28 * r) / Math.max(1, R - 1));
+    const spans = starts.map((a, r) => [a, starts[r + 1] ?? n]);
+    // Each row's reach left and right of the column (em at its own size).
+    const pre = spans.map(([a], r) => (r === 0 && c.echo[0] > a ? span(c.w, a, c.echo[0], c.gap) + c.gap : 0) * f[r]);
+    const post = spans.map(([a, b], r) => span(c.w, a, b, c.gap) * f[r] - pre[r]);
+    const L = Math.max(...pre);
+    const T = L + Math.max(...post);
+    const H = c.lh * f.reduce((a, x) => a + x, 0);
+    const S = Math.min(c.box.w / T, c.box.h / H, c.cap * 1.1);
+    const at = anchor(c.box, T * S, H * S, c.shot.x, c.shot.y);
+    let top = at.top;
+    return {
+      rows: spans.map(([a, b], r) => {
+        const row = {
+          idx: range(a, b),
+          size: f[r] * S,
+          width: span(c.w, a, b, c.gap) * f[r] * S,
+          left: at.left + (L - pre[r]) * S,
+          top,
+        };
+        top += c.lh * f[r] * S;
+        return row;
+      }),
+    };
+  },
+};
+
+// The word a line sings two to four times (as src/stage.rs folds it), as the indices it comes at.
+const echoOf = (words) => {
+  const keys = words.map((w) =>
+    w.text
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim(),
+  );
+  const count = new Map();
+  for (const k of keys) if ([...k].length >= 2) count.set(k, (count.get(k) || 0) + 1);
+  let best = '';
+  for (const [k, n] of count) if (n >= 2 && n <= 4 && n > (count.get(best) || 0)) best = k;
+  return best ? keys.flatMap((k, q) => (k === best ? [q] : [])) : null;
 };
 
 // The box (relative to the plane's center) a bw × bh plane covers on screen once turned in perspective:
@@ -902,10 +1025,80 @@ const art = (parent) => {
   return img;
 };
 
-const countdown = (parent) => {
-  const box = el('div', 'ft-countdown', parent);
-  st.dots = Array.from({ length: 4 }, () => ({ el: el('i', null, box), on: false }));
-  return box;
+// Keeps an animation in the set that holds while paused (and in block `b`'s, which its exit freezes).
+const track = (a, b) => {
+  st.anims.add(a);
+  b?.anims.add(a);
+  const done = () => {
+    st.anims.delete(a);
+    b?.anims.delete(a);
+  };
+  a.finished.then(done, done);
+};
+
+// An animation on the track's clock: `since` (the lyrics' ms) is when it starts, so a scene mounted late
+// (after a seek) shows it as far along as it is.
+const run = (node, frames, dur, since, easing = EASE_OUT, b = null) => {
+  const a = node.animate(frames, { duration: dur, easing, fill: 'both' });
+  const at = st.now - since;
+  if (at >= dur) {
+    a.finish();
+    return a;
+  }
+  a.currentTime = Math.max(0, at);
+  if (st.still) a.pause();
+  track(a, b);
+  return a;
+};
+
+// The paper behind the lines; a line kept on screen (aside, pushed up) takes its colors so it still reads.
+const setPaper = (p) => {
+  ui.root.dataset.paper = p;
+  for (const b of [st.aside, st.block?.pushed]) b?.node.classList.toggle('ft-p-light', p === 'light');
+};
+
+// The chorus' number, a big outline behind its lines, across from where its first line sits.
+const setNumeral = (sec) => {
+  const on = sec.kind === 'chorus' && sec.chorus > 0;
+  ui.numeral.classList.toggle('ft-off', !on);
+  if (!on) return;
+  ui.numeralNum.textContent = String(sec.chorus);
+  const x = sec.shots[0]?.x ?? 0;
+  ui.numeral.dataset.side = x > 0 ? 'l' : x < 0 ? 'r' : 'c';
+};
+
+// The countdown (4, 3, 2, 1 over the last beats before the lines come back), centered on (x, y).
+const placeCount = (x, y, size) => {
+  Object.assign(ui.count.style, { left: `${x.toFixed(0)}px`, top: `${y.toFixed(0)}px`, fontSize: `${size.toFixed(0)}px` });
+  st.count = { n: 0 };
+};
+const showCount = (n) => {
+  const c = st.count;
+  if (!c || c.n === n) return;
+  c.n = n;
+  ui.count.classList.toggle('ft-show', n > 0);
+  ui.count.classList.toggle('ft-last', n === 1);
+  if (!n) return;
+  ui.countNum.textContent = String(n);
+  if (!lightFx()) ui.countNum.animate([{ transform: 'scale(1.3)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 280, easing: EASE_OUT });
+};
+const hideCount = () => {
+  st.count = null;
+  ui.count.classList.remove('ft-show', 'ft-last');
+};
+
+// The frame on screen goes: at the end of its own exit when it had one, else in a short fade.
+const dropScene = () => {
+  const s = st.scene;
+  const a = st.sceneOut;
+  st.scene = null;
+  st.sceneOut = null;
+  st.frame = null;
+  if (!s) return;
+  const gone = () => s.remove();
+  if (a?.playState === 'finished') return gone();
+  if (a) return void a.finished.then(gone, gone);
+  s.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: 'forwards' }).finished.then(gone, gone);
 };
 
 // A title (the opening's, the credits') set in `area`: the voice's face at its lit axes, as big as fits,
@@ -945,30 +1138,24 @@ const title = (parent, s, area, align, delay) => {
 };
 
 // The frame of a scene without lines (opening, instrumental, credits); the text scenes keep the lines'
-// layer, whose blocks come and go in `renderLine`.
-const mount = (k) => {
+// layer, whose blocks come and go in `showLine` (the line on screen keeps to its planned exit).
+const mount = (k, ms) => {
   const v = st.v;
   const sec = v.sections[k];
   st.sec = k;
-  st.line = -2;
-  st.dots = null;
-  const lyric = TEXT_KINDS.has(sec.kind);
-  if (st.scene) {
-    const old = st.scene;
-    st.scene = null;
-    old.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(1.05)' }], { duration: 600, easing: EASE_IN_OUT, fill: 'forwards' })
-      .finished.then(() => old.remove(), () => old.remove());
-  }
+  st.j = -1;
+  hideCount();
+  dropScene();
   ui.root.dataset.scene = sec.kind;
   ui.root.dataset.tone = String(k % 2);
-  // The chorus' label, with how many times it came.
-  ui.kicker.textContent = sec.kind === 'chorus' ? (sec.chorus > 1 ? `${v.texts.chorus}  ×${sec.chorus}` : v.texts.chorus) : '';
-  ui.kicker.classList.toggle('ft-off', sec.kind !== 'chorus');
+  setNumeral(sec);
+  if (TEXT_KINDS.has(sec.kind)) return;
   showSubtitle('');
-  if (lyric) return;
-  ui.root.dataset.paper = 'dark';
-  dropAside();
-  leaveLine();
+  setPaper('dark');
+  dropAside(ms);
+  // A line still on screen hands over now.
+  const b = st.block;
+  if (b) startExit(b, b.plan && b.plan.at <= ms ? b.plan : quick(b, ms), ms, null);
   // The light back in the middle, behind the frame.
   ui.lamp.style.transform = '';
   ui.lamp2.style.transform = '';
@@ -1002,20 +1189,34 @@ const mount = (k) => {
     };
     if (c.artist) label(c.artist, area.y - H * 0.05, 'ft-tracked');
     if (c.album) label(c.album, area.y + area.h + H * 0.03, 'ft-late');
-    const dots = countdown(scene);
-    Object.assign(dots.style, { top: `${Math.min(area.y + area.h + H * 0.09, H * 0.74)}px`, bottom: 'auto', left: `${area.x + area.w / 2}px` });
+    const cx = align === 'l' ? area.x + H * 0.04 : align === 'r' ? area.x + area.w - H * 0.04 : area.x + area.w / 2;
+    placeCount(cx, Math.min(area.y + area.h + H * 0.13, H * 0.78), H * 0.1);
     if (!t) cover.classList.add('ft-alone');
     scene.insertAdjacentElement('afterbegin', el('div', 'ft-sweep'));
   } else if (sec.kind === 'instrumental') {
-    art(scene);
-    el('div', 'ft-label ft-caption ft-tracked', scene, v.texts.instrumental);
-    countdown(scene);
+    // The cover framed on one side, cut to a new crop of it each bar (`draw`), bands of color sweeping
+    // behind it, and the countdown big across from it.
+    const box = safeBox();
+    const side = k % 2 ? 1 : -1;
+    const size = Math.min(H * 0.56, W * 0.4);
+    const bands = lightFx() ? [] : [0, 1].map((q) => el('div', `ft-band ft-band-${q}`, scene));
+    st.shown.band0 = st.shown.band1 = null;
+    const cx = box.x + box.w * (side < 0 ? 0.3 : 0.7);
+    const top = box.y + (box.h - size) / 2;
+    const frame = el('div', 'ft-frame', scene);
+    Object.assign(frame.style, { left: `${cx - size / 2}px`, top: `${top}px`, width: `${size}px`, height: `${size}px` });
+    const img = art(el('div', 'ft-crop', frame));
+    const label = el('div', 'ft-label ft-tracked ft-inst-label', scene, v.texts.instrumental);
+    Object.assign(label.style, { left: `${cx - size / 2}px`, width: `${size}px`, top: `${top - H * 0.06}px` });
+    placeCount(box.x + box.w * (side < 0 ? 0.78 : 0.22), box.y + box.h / 2, H * 0.3);
+    st.frame = { img, bands, cut: null };
+    run(frame, [{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'none' }], 1100, sec.from);
   } else if (sec.kind === 'credits') {
     const box = safeBox();
-    el('small', 'ft-label ft-credit-label ft-tracked', scene, v.texts.listened).style.top = `${box.y + box.h * 0.04}px`;
-    title(scene, c.title, { x: box.x + box.w * 0.08, y: box.y + box.h * 0.14, w: box.w * 0.84, h: box.h * 0.4 }, 'c', 300);
+    el('small', 'ft-label ft-credit-label ft-tracked', scene, v.texts.listened).style.top = `${box.y + box.h * 0.02}px`;
+    title(scene, c.title, { x: box.x + box.w * 0.04, y: box.y + box.h * 0.1, w: box.w * 0.92, h: box.h * 0.48 }, 'c', 300);
     const by = el('small', 'ft-label ft-credit-by ft-late', scene, [c.artist, c.album].filter(Boolean).join('  ·  '));
-    by.style.top = `${box.y + box.h * 0.6}px`;
+    by.style.top = `${box.y + box.h * 0.64}px`;
     if (c.next) {
       const next = el('div', 'ft-up-next', scene);
       el('small', 'ft-label', next, v.texts.next);
@@ -1038,56 +1239,155 @@ const onDownbeat = (ms) => {
   return ph < 0.25 || ph > 3.75;
 };
 
-// The line on screen leaves the way its shot says, and is removed once it has; in a duet it may step
-// aside instead: small and dim, up in its singer's corner of the safe area, until that voice comes back.
-const leaveLine = (toAside = false) => {
-  const b = st.block;
-  st.block = null;
-  // A word still growing keeps the axes it had reached while it leaves (a climb, its height).
-  for (const a of st.anims) {
+// ---------- lines coming and going ----------
+
+// A block's animations stop where they are: a word still growing keeps the axes it reached, a climb its
+// height.
+const freeze = (b) => {
+  for (const a of b.anims) {
     try {
       a.commitStyles();
     } catch {}
     a.cancel();
+    st.anims.delete(a);
   }
-  st.anims.clear();
-  st.words = [];
-  st.shown.glow = null;
-  if (ui) ui.root.dataset.flick = '0';
-  if (!b) return;
-  const { node, exit, dir } = b;
-  if (toAside) {
-    const box = safeBox();
-    const left = b.singer === 0;
-    const ox = left ? b.bounds.x : b.bounds.x + b.bounds.w;
-    const oy = b.bounds.y;
-    node.style.transformOrigin = `${ox.toFixed(0)}px ${oy.toFixed(0)}px`;
-    node.classList.add('ft-aside');
-    node.style.transform = `translate(${((left ? box.x : box.x + box.w) - ox).toFixed(0)}px, ${(box.y - oy).toFixed(0)}px) scale(0.34)`;
-    st.aside = b;
-    return;
-  }
-  let kind = exit;
+  b.anims.clear();
+};
+
+// A block moved by (x, y) px and scaled by `s` about its center (its transform origin).
+const tuck = (b, x, y, s) => {
+  b.node.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) scale(${s.toFixed(3)})`;
+};
+
+// A duet: the other singer's line steps aside, small and dim, up in its singer's corner of the safe area,
+// until that voice comes back.
+const stepAside = (b) => {
+  freeze(b);
+  const box = safeBox();
+  const s = 0.34;
+  const { x, y } = b.center;
+  const tx = b.singer === 0 ? box.x - (x - (s * b.bounds.w) / 2) : box.x + box.w - (x + (s * b.bounds.w) / 2);
+  tuck(b, tx, box.y - (y - (s * b.bounds.h) / 2), s);
+  b.node.classList.add('ft-aside');
+  st.aside = b;
+};
+
+// The line a sentence goes on from is pushed up, small, into the top of the safe area (the new line was set
+// below it); it leaves with the line that pushed it.
+const pushUp = (b, by, ms) => {
+  freeze(b);
+  if (b.pushed) goOut(b.pushed, { kind: 'fade', move: EXIT_MS.fade, fade: HANDOFF_MS, at: ms }, ms, { x: 0, y: 0 });
+  b.pushed = null;
+  const box = safeBox();
+  const band = box.h * PUSH_SHARE;
+  const s = Math.min(0.42, (band * 0.8) / b.bounds.h, box.w / b.bounds.w);
+  tuck(b, 0, box.y + band * 0.1 - (b.center.y - (s * b.bounds.h) / 2), s);
+  b.node.classList.add('ft-pushed');
+  by.pushed = b;
+};
+
+// How the line on screen leaves before what comes next shows at `next` (the lyrics' ms). With room, its
+// whole move fits before it, the fade front-loaded over about half; without, a short handoff that ends as
+// the next comes, never before the line was seen. The big moves need room; the light effects keep to the
+// plain ones.
+const planExit = (b, next) => {
+  let kind = b.exit;
   if (lightFx() && (kind === 'fold' || kind === 'scatter')) kind = 'sink';
-  node.style.setProperty('--ft-dir', String(dir));
-  if (kind === 'scatter') {
-    node.querySelectorAll('.ft-inks .ft-w').forEach((w, k) => {
+  const gap = next - b.end;
+  const room = gap >= EXIT_MS[kind];
+  if (!room && (kind === 'zoom' || kind === 'scatter')) kind = 'slide';
+  const move = EXIT_MS[kind];
+  const fade = room ? (kind === 'steps' ? move : move * 0.5) : clamp(gap, HANDOFF_MS, move * 0.5);
+  const at = Math.min(next, Math.max(next - fade - (room ? 120 : 0), b.last + SEEN_MS));
+  return { kind, move, fade, at };
+};
+
+// Leaving now, in a short handoff.
+const quick = (b, ms) => ({ ...planExit(b, ms), fade: HANDOFF_MS, at: ms });
+
+// Which way a line goes: away from where `to` (the block coming next) sits, as a unit vector in shares of
+// the window; without one, back from its own side and a little down.
+const awayFrom = (b, to) => {
+  let x = -b.dir;
+  let y = 0.3;
+  if (to && to !== b) {
+    x = (b.center.x - to.center.x) / innerWidth;
+    y = (b.center.y - to.center.y) / innerHeight;
+  }
+  const d = Math.hypot(x, y);
+  return d < 0.03 ? { x: -b.dir * 0.96, y: 0.29 } : { x: x / d, y: y / d };
+};
+
+// A block's exit as planned: the CSS runs from `--x0` (a wait, or how late it starts), from where its drift
+// took it (`--dx`, `--dy`) toward `away`, and the block is removed by time once its fade is over (`sweep`).
+const goOut = (b, plan, ms, away) => {
+  const s = b.node.style;
+  s.setProperty('--xd', `${Math.round(plan.move)}ms`);
+  s.setProperty('--xo', `${Math.round(plan.fade)}ms`);
+  s.setProperty('--x0', `${Math.round(plan.at - ms)}ms`);
+  s.setProperty('--xx', away.x.toFixed(3));
+  s.setProperty('--xy', away.y.toFixed(3));
+  s.setProperty('--ys', away.y < 0 ? '-1' : '1');
+  s.setProperty('--dx', `${b.dx.toFixed(1)}px`);
+  s.setProperty('--dy', `${b.dy.toFixed(1)}px`);
+  if (plan.kind === 'scatter') {
+    b.node.querySelectorAll('.ft-inks .ft-w').forEach((w, k) => {
       w.style.setProperty('--sx', `${(((k * 73) % 17) - 8) * 0.9}vw`);
       w.style.setProperty('--sy', `${(((k * 41) % 13) - 6) * 1.4}vh`);
     });
   }
-  node.classList.add('ft-out', `ft-out-${kind}`);
-  setTimeout(() => node.remove(), EXIT_MS);
+  b.out = true;
+  b.node.classList.add('ft-out', `ft-out-${plan.kind}`);
+  const x = { b, at: plan.at, until: plan.at + plan.fade + 60, frozen: plan.at <= ms };
+  if (x.frozen) freeze(b);
+  st.leaving.push(x);
+};
+
+// The line on screen starts leaving, with the line it pushed up; `to` is the block coming next, if known.
+const startExit = (b, plan, ms, to = st.next) => {
+  if (st.block === b) st.block = null;
+  if (b.bar) ui.root.dataset.flick = '0';
+  const away = b.away || awayFrom(b, to);
+  goOut(b, plan, ms, away);
+  if (b.pushed) goOut(b.pushed, { kind: 'fade', move: EXIT_MS.fade, fade: plan.fade, at: plan.at }, ms, away);
+  b.pushed = null;
 };
 
 // The line stepped aside goes, in three steps.
-const dropAside = () => {
+const dropAside = (ms) => {
   const a = st.aside;
   st.aside = null;
-  if (!a) return;
-  a.node.classList.add('ft-out', 'ft-out-steps');
-  setTimeout(() => a.node.remove(), EXIT_MS);
+  if (a) goOut(a, { kind: 'steps', move: EXIT_MS.steps, fade: EXIT_MS.steps, at: ms }, ms, { x: 0, y: 0 });
 };
+
+// Blocks whose exit is over are removed (and any a jump back left waiting); a block's animations stop
+// when its exit starts.
+const sweep = (ms) => {
+  st.leaving = st.leaving.filter((x) => {
+    if (!x.frozen && ms >= x.at) {
+      x.frozen = true;
+      freeze(x.b);
+    }
+    if (ms < x.until && ms > x.at - 2500) return true;
+    freeze(x.b);
+    x.b.node.remove();
+    return false;
+  });
+};
+
+// What comes after line `j` of scene `k`: when it shows (the lyrics' ms) and its shot (null for a frame).
+const nextAt = (k, j) => {
+  const { sections, lines } = st.v;
+  const sec = sections[k];
+  if (j + 1 < sec.lines.length) return { ms: lines[sec.lines[j + 1]].ms, shot: sec.shots[j + 1] || DEFAULT_SHOT };
+  const nx = sections[k + 1];
+  if (!nx) return { ms: Infinity, shot: null };
+  if (TEXT_KINDS.has(nx.kind) && nx.lines.length) return { ms: lines[nx.lines[0]].ms, shot: nx.shots[0] || DEFAULT_SHOT };
+  return { ms: nx.from, shot: null };
+};
+
+// Whether line `b` stays on screen (stepped aside, pushed up) when the line of `shot` comes.
+const keeps = (b, shot) => !lightFx() && (shot.cont || (st.v.duet && b.singer < 2 && shot.singer < 2 && b.singer !== shot.singer));
 
 // One dry white frame, at most one every FLASH_GAP_MS.
 const popFlash = () => {
@@ -1099,28 +1399,23 @@ const popFlash = () => {
   ui.pop.classList.add('ft-go');
 };
 
-// The line `j` of a text scene, set by its shot: measured, fitted, laid out; its words are born as sung.
-// `now` is the lyrics' time (ms).
-const renderLine = (sec, j, now) => {
+// The line `j` of text scene `si`, set by its shot off screen (`ft-staged`): measured, fitted, laid out,
+// its words waiting to be born as sung. Nothing else changes until `showLine`; null for a line without words.
+const buildLine = (si, j) => {
   const v = st.v;
+  const sec = v.sections[si];
   const i = sec.lines[j];
-  st.line = i;
   const shot = sec.shots[j] || DEFAULT_SHOT;
   const light = lightFx();
-  // A duet: the other singer's line steps aside until that voice comes back; the group takes the stage.
-  const prev = st.block;
-  const aside = v.duet && !light && !!prev && prev.singer < 2 && shot.singer < 2 && prev.singer !== shot.singer;
-  if (aside || !v.duet || shot.singer === 2 || st.aside?.singer === shot.singer) dropAside();
-  leaveLine(aside);
-  ui.root.dataset.paper = shot.paper;
   const l = v.lines[i];
-  if (!l || !l.text.trim()) return showSubtitle('');
+  if (!l || !l.text.trim()) return null;
   const V = VOICES[v.voice];
   const words = wordsOf(i);
-  if (!words.length) return showSubtitle('');
+  if (!words.length) return null;
   const n = words.length;
   const hero = shot.hero >= 0 && shot.hero < n ? shot.hero : -1;
   let layout = shot.layout;
+  const echo = layout === 'echo' ? echoOf(words) : null;
   // The script checked the word counts; a line that came out otherwise falls back to a plain stack.
   const within = (a, b) => n >= a && n <= b;
   if (
@@ -1130,13 +1425,15 @@ const renderLine = (sec, j, now) => {
     (layout === 'burst' && !within(3, 7)) ||
     (layout === 'bar' && n > 8) ||
     (layout === 'stair' && !within(2, 4)) ||
-    (layout === 'climb' && !within(4, 12))
+    (layout === 'climb' && !within(4, 12)) ||
+    (layout === 'echo' && !echo)
   )
     layout = 'stack';
   const big = layout === 'hero' || layout === 'vertical';
   const role = (k) => {
     if (layout === 'burst') return k === n - 1 ? 'hero' : 'small';
     if (layout === 'stair') return k === 0 || k === n - 1 ? 'hero' : 'small';
+    if (layout === 'echo') return echo.includes(k) ? 'key' : 'word';
     return k === hero ? (big ? 'hero' : 'key') : big ? 'small' : 'word';
   };
   // The script face for the hero's word or the stair's ends, when it can set them.
@@ -1148,7 +1445,15 @@ const renderLine = (sec, j, now) => {
   const typed = !light && shot.enter === 'letters' && letterCount <= MAX_LETTERS;
   // A script word keeps its letters joined.
   const lettersOf = (k) => typed && !script[k];
-  const enter = typed ? 'letters' : shot.enter === 'drift' && !light ? 'drift' : 'pop';
+  const enter = typed ? 'letters' : !light && ['drift', 'rise', 'stamp', 'slice'].includes(shot.enter) ? shot.enter : 'pop';
+  // Stamped: every word but the small ones on a stamp entrance; the emphasis word when it lands on a
+  // downbeat.
+  const stamped = (k) =>
+    !light &&
+    !lettersOf(k) &&
+    layout !== 'burst' &&
+    role(k) !== 'small' &&
+    (enter === 'stamp' || ((role(k) === 'key' || role(k) === 'hero') && onDownbeat(words[k].ms)));
   const axes = (k) => {
     if (script[k]) return [[], []];
     const r = role(k);
@@ -1168,7 +1473,9 @@ const renderLine = (sec, j, now) => {
   const full = safeBox();
   // A singer's line keeps to its side, so the other singer's aside has the far corner.
   const side = v.duet && shot.singer < 2 ? (shot.singer === 0 ? -1 : 1) : 0;
-  const box = side ? { ...full, x: side < 0 ? full.x : full.x + full.w * 0.3, w: full.w * 0.7 } : full;
+  let box = side ? { ...full, x: side < 0 ? full.x : full.x + full.w * 0.3, w: full.w * 0.7 } : full;
+  // Going on with the sentence before: set below the band that line is pushed up into.
+  if (shot.cont && !light) box = { ...box, y: box.y + box.h * PUSH_SHARE, h: box.h * (1 - PUSH_SHARE) };
   const calm = sec.kind === 'close';
   const c = {
     w,
@@ -1183,11 +1490,16 @@ const renderLine = (sec, j, now) => {
     light,
     big: range(0, n).map((k) => role(k) === 'hero'),
     script,
+    echo,
   };
   const g = LAYOUT[layout](c);
   // The block: the bars and stars behind, a copy of the rows as glow, the rows.
   const ans = shot.answer && typed ? ' ft-ans' : '';
-  const node = el('div', `ft-block ft-l-${layout} ft-in-${enter}${ans}${v.duet ? ` ft-s${shot.singer}` : ''}`, ui.lines);
+  const node = el(
+    'div',
+    `ft-block ft-staged ft-p-${shot.paper} ft-l-${layout} ft-in-${enter}${ans}${v.duet ? ` ft-s${shot.singer}` : ''}`,
+    ui.lines,
+  );
   const fitBox = el('div', 'ft-fit', node);
   const plane = el('div', 'ft-plane', fitBox);
   if (g.plane) {
@@ -1243,11 +1555,16 @@ const renderLine = (sec, j, now) => {
         if (kind === 'ink') {
           word.style.fontVariationSettings = fvOf(k, false);
           if (enter === 'drift' && shot.singer === 2) word.style.setProperty('--wd', k % 2 ? '1' : '-1');
+          if (stamped(k)) word.classList.add('ft-st');
           if (lettersOf(k)) {
             // Typed over most of the time the word is held.
             const each = clamp(((ends(k) - words[k].ms) * 0.8) / Math.max(1, shown[k].length), 18, 110);
             word.style.setProperty('--lt', `${Math.round(each)}ms`);
             [...shown[k]].forEach((ch, q) => el('span', 'ft-l', word, ch).style.setProperty('--q', String(q)));
+          } else if (enter === 'rise') el('span', 'ft-wi', word, shown[k]);
+          else if (enter === 'slice') {
+            el('span', 'ft-h ft-h1', word, shown[k]);
+            el('span', 'ft-h ft-h2', word, shown[k]);
           } else word.textContent = shown[k];
         } else {
           word.style.fontVariationSettings = fvOf(k, true);
@@ -1277,30 +1594,10 @@ const renderLine = (sec, j, now) => {
   fitBox.style.transformOrigin = `${cx}px ${cy}px`;
   node.style.transformOrigin = `${cx}px ${cy}px`;
   if (k < 0.999) fitBox.style.transform = `scale(${k.toFixed(4)})`;
-  // The light follows the line.
-  ui.lamp.style.transform = `translate(${(cx - innerWidth / 2).toFixed(0)}px, ${(cy - innerHeight / 2).toFixed(0)}px)`;
-  ui.lamp2.style.transform = `translate(${((innerWidth / 2 - cx) * 0.8).toFixed(0)}px, ${(innerHeight * 0.18).toFixed(0)}px)`;
-  ui.beam.style.transform = `translateX(${(cx - innerWidth / 2).toFixed(0)}px)`;
   node.style.setProperty('--ft-level', String(shot.level));
   node.dataset.level = String(shot.level);
   // The bars pose about the block's center.
   if (layout === 'bar') plane.style.transformOrigin = `${cx}px ${cy}px`;
-  // The climb: the rows rise over the line's time (one transform animation, held while paused).
-  if (g.rise && !light) {
-    const span = Math.max(1500, v.ends[i] - l.ms + EXIT_MS);
-    const climb = plane.animate([{ transform: `translateY(${g.rise / 2}px)` }, { transform: `translateY(${-g.rise / 2}px)` }], {
-      duration: span,
-      easing: 'linear',
-      fill: 'both',
-    });
-    climb.currentTime = clamp(now - l.ms, 0, span);
-    if (st.still) climb.pause();
-    st.anims.add(climb);
-    climb.finished.then(
-      () => st.anims.delete(climb),
-      () => {},
-    );
-  }
   // The background vocals: a small row under the line (over it when there is no room), aligned with it.
   const bgv = [];
   if (l.bg) {
@@ -1323,7 +1620,7 @@ const renderLine = (sec, j, now) => {
     }
     for (const b of bgv) b.el.style.fontVariationSettings = fvs(V.small);
   }
-  st.words = [
+  const list = [
     ...inks.map(([k, word]) => ({
       el: word,
       glow: glows?.find((x) => x[0] === k)?.[1] || null,
@@ -1340,9 +1637,15 @@ const renderLine = (sec, j, now) => {
     ...plain.map(([ms, e]) => ({ el: e, glow: null, ms, end: ms, base: '', lit: '', on: false, anim: null, plain: true })),
     ...bgv.map((b, q) => ({ ...b, glow: null, end: bgv[q + 1]?.ms ?? v.ends[i], base: fvs(V.small), lit: fvs(V.smallLit), on: false, anim: null })),
   ];
-  st.block = {
+  return {
+    k: si,
+    j,
+    i,
+    shot,
     node,
     plane,
+    words: list,
+    anims: new Set(),
     glows: node.querySelector('.ft-glows'),
     exit: shot.exit,
     dir,
@@ -1350,13 +1653,125 @@ const renderLine = (sec, j, now) => {
     chorus: sec.kind === 'chorus',
     singer: v.duet ? shot.singer : 0,
     bounds: { x: cx - (bounds.w * k) / 2, y: cy - (bounds.h * k) / 2, w: bounds.w * k, h: bounds.h * k },
+    center: { x: cx, y: cy },
     stars,
     pose: -1,
     bar: layout === 'bar' && !light,
     poseIdx: null,
     poseAt: 0,
+    paper: shot.paper,
+    // The lyrics' times: the line, its first and last births, its end.
+    ms: l.ms,
+    first: words[0].ms,
+    last: Math.max(words[n - 1].ms, ...bgv.map((b) => b.ms)),
+    end: v.ends[i],
+    // The climb's rise (px) over the line's time.
+    rise: g.rise && !light ? g.rise : 0,
+    // Its drift after its end (px), and the way it goes.
+    dx: 0,
+    dy: 0,
+    away: null,
+    plan: null,
+    held: false,
+    out: false,
+    papered: false,
+    pushed: null,
   };
-  showSubtitle(v.translation?.[i] || '');
+};
+
+// Line `nb` takes the stage: the line on screen steps aside (a duet), is pushed up (the sentence goes on)
+// or leaves (as planned, else handing over now); the light follows the new line.
+const showLine = (nb, ms) => {
+  const v = st.v;
+  const prev = st.block;
+  const light = lightFx();
+  // A duet: the other singer's line steps aside until that voice comes back; the group takes the stage.
+  const aside = v.duet && !light && !!prev && prev.singer < 2 && nb.singer < 2 && prev.singer !== nb.singer;
+  if (aside || !v.duet || nb.singer === 2 || st.aside?.singer === nb.singer) dropAside(ms);
+  if (prev) {
+    if (aside) stepAside(prev);
+    else if (nb.shot.cont && !light) pushUp(prev, nb, ms);
+    else startExit(prev, prev.plan || planExit(prev, nb.first), ms, nb);
+  }
+  st.block = nb;
+  st.shown.glow = null;
+  nb.node.classList.remove('ft-staged');
+  // The light follows the line.
+  const { x: cx, y: cy } = nb.center;
+  ui.lamp.style.transform = `translate(${(cx - innerWidth / 2).toFixed(0)}px, ${(cy - innerHeight / 2).toFixed(0)}px)`;
+  ui.lamp2.style.transform = `translate(${((innerWidth / 2 - cx) * 0.8).toFixed(0)}px, ${(innerHeight * 0.18).toFixed(0)}px)`;
+  ui.beam.style.transform = `translateX(${(cx - innerWidth / 2).toFixed(0)}px)`;
+  // The climb: the rows rise over the line's time and on while it leaves (held while paused).
+  if (nb.rise) {
+    const span = Math.max(1500, nb.end - nb.ms + CLIMB_TAIL_MS);
+    const frames = [{ transform: `translateY(${nb.rise / 2}px)` }, { transform: `translateY(${-nb.rise / 2}px)` }];
+    run(nb.plane, frames, span, nb.ms, 'linear', nb);
+  }
+  showSubtitle(v.translation?.[nb.i] || '');
+};
+
+// The line after the one on screen: the next of this scene, else the first of the next when it has lines.
+const upcoming = () => {
+  const { sections } = st.v;
+  const sec = sections[st.sec];
+  if (!sec) return null;
+  if (TEXT_KINDS.has(sec.kind) && st.j + 1 < sec.lines.length) return { k: st.sec, j: st.j + 1 };
+  const nx = sections[st.sec + 1];
+  return nx && TEXT_KINDS.has(nx.kind) && nx.lines.length ? { k: st.sec + 1, j: 0 } : null;
+};
+
+const dropStaged = () => {
+  if (st.stageJob) window.cancelIdleCallback ? cancelIdleCallback(st.stageJob) : clearTimeout(st.stageJob);
+  st.stageJob = 0;
+  st.next?.node.remove();
+  st.next = null;
+};
+
+// The staged line when it is line `j` of scene `k` (else it goes).
+const takeStaged = (k, j) => {
+  const n = st.next;
+  if (n && n.k === k && n.j === j) {
+    st.next = null;
+    return n;
+  }
+  dropStaged();
+  return null;
+};
+
+// The next line is built ahead, while the page is idle, so its cut costs no layout.
+const stageNext = () => {
+  const u = upcoming();
+  if (st.next && (!u || st.next.k !== u.k || st.next.j !== u.j)) dropStaged();
+  if (!u || st.next || st.stageJob) return;
+  const job = () => {
+    st.stageJob = 0;
+    const now = upcoming();
+    if (!st.open || !st.v || st.next || !now || now.k !== u.k || now.j !== u.j) return;
+    st.next = buildLine(u.k, u.j);
+  };
+  st.stageJob = window.requestIdleCallback ? requestIdleCallback(job, { timeout: 300 }) : setTimeout(job, 50);
+};
+
+// Everything off the stage at once (a seek, a new size, a new script, closing); `keepScene` keeps the frame.
+const clearAll = (keepScene = false) => {
+  for (const a of [...st.anims]) {
+    if (keepScene && st.scene?.contains(a.effect?.target)) continue;
+    a.cancel();
+    st.anims.delete(a);
+  }
+  dropStaged();
+  st.block = null;
+  st.aside = null;
+  st.leaving = [];
+  st.j = -1;
+  ui.lines.replaceChildren();
+  ui.root.dataset.flick = '0';
+  hideCount();
+  if (keepScene) return;
+  ui.camera.querySelectorAll('.ft-scene').forEach((s) => s.remove());
+  st.scene = null;
+  st.sceneOut = null;
+  st.frame = null;
 };
 
 // The box around rows as laid out (a turned row covers its own box turned about its center).
@@ -1380,19 +1795,20 @@ const bboxOf = (rows) => {
 
 // A word starts or stops being sung: it is born, grows to its lit axes over the time it is held (at once
 // with the light effects, or when it was already over) and blooms. A typed word lit late starts its
-// letters as far along as it is; the burst's last word brings the flash.
-const lightWord = (w, on, ms) => {
+// letters as far along as it is; the burst's last word brings the flash. `b` is the word's block.
+const lightWord = (b, w, on, ms) => {
   w.on = on;
   if (w.typed) w.el.style.setProperty('--l0', `${on ? Math.round(Math.min(0, w.ms - ms)) : 0}ms`);
   w.el.classList.toggle('ft-on', on);
   w.el.classList.toggle('ft-hit', on && !!w.hit);
   w.glow?.classList.toggle('ft-on', on);
   if (w.boom) {
-    st.block?.node.classList.toggle('ft-boom', on);
+    b.node.classList.toggle('ft-boom', on);
     if (on && ms - w.ms < 400) popFlash();
   }
   if (w.anim) {
     st.anims.delete(w.anim);
+    b.anims.delete(w.anim);
     w.anim.cancel();
     w.anim = null;
   }
@@ -1414,17 +1830,16 @@ const lightWord = (w, on, ms) => {
   a.currentTime = clamp(ms - w.ms, 0, hold);
   if (st.still) a.pause();
   w.anim = a;
-  st.anims.add(a);
+  track(a, b);
   a.finished.then(
     () => {
-      st.anims.delete(a);
       if (w.anim === a) {
         w.el.style.fontVariationSettings = w.lit;
         a.cancel();
         w.anim = null;
       }
     },
-    () => st.anims.delete(a),
+    () => {},
   );
 };
 
@@ -1452,8 +1867,8 @@ const setStyle = (node, key, prop, value) => {
   node.style[prop] = value;
 };
 
-// The camera's move over a scene at progress p (0..1), with a breath on the beat.
-const cameraAt = (sec, p, breath) => {
+// The camera's move over a scene at progress p (0..1).
+const camPose = (sec, p) => {
   const lvl = sec.kind === 'chorus' ? Math.min(3, sec.chorus) : 0;
   let x = 0;
   let y = 0;
@@ -1479,30 +1894,138 @@ const cameraAt = (sec, p, breath) => {
       s = 1.02;
       break;
   }
-  return `translate(${x.toFixed(3)}vw, ${y.toFixed(3)}vh) rotate(${r.toFixed(3)}deg) scale(${(s + breath).toFixed(4)})`;
+  return { x, y, r, s };
+};
+
+// The camera at the lyrics' time `ms` in scene `k`: its move, blended over about a bar from where the
+// scene before left it, so a cut between scenes does not jump.
+const camAt = (k, ms) => {
+  const { sections, grid } = st.v;
+  const prog = (s, at) => clamp((at - s.from) / Math.max(1000, s.to - s.from), 0, 1);
+  const sec = sections[k];
+  const now = camPose(sec, prog(sec, ms));
+  const prev = sections[k - 1];
+  const span = grid ? clamp(grid.beat * 4, BLEND_MS.MIN, BLEND_MS.MAX) : BLEND_MS.NO_GRID;
+  const x = (ms - sec.from) / span;
+  if (!prev || x < 0 || x >= 1) return now;
+  const a = camPose(prev, prog(prev, prev.to));
+  const m = smooth(x);
+  const mix = (p, q) => p + (q - p) * m;
+  return { x: mix(a.x, now.x), y: mix(a.y, now.y), r: mix(a.r, now.r), s: mix(a.s, now.s) };
+};
+
+// When a scene's first word is sung (the track's time): on the bar line nearest it, within three quarters
+// of a beat, so a lift hits on the downbeat itself.
+const hitAt = (sec) => {
+  if (sec.hit != null) return sec.hit;
+  const { lines, grid } = st.v;
+  const l = lines[sec.lines[0]];
+  const first = l ? (l.words?.[0]?.ms ?? l.ms) : sec.from + LEAD_MS;
+  let hit = first;
+  if (grid) {
+    const bar = grid.beat * 4;
+    const near = grid.off + Math.round((first - grid.off) / bar) * bar;
+    if (Math.abs(near - first) <= grid.beat * 0.75) hit = near;
+  }
+  sec.hit = hit;
+  return hit;
+};
+
+// How the scene is entered, played on the light and the camera at the track's time `t`: into a chorus
+// (`lift`) the light dims and the camera leans in over the bar before its first downbeat, then hits on
+// it; after a chorus (`breath`) the camera eases back and the light dips over the first bar. A frame and
+// a return have their own entrances (the frames, the blend).
+const entryFx = (k, t) => {
+  const fx = { zoom: 0, dim: 1, hit: 0 };
+  if (lightFx()) return fx;
+  const { sections, grid } = st.v;
+  const bar = grid ? grid.beat * 4 : 2000;
+  let wind = 0;
+  let hit = 0;
+  let dip = 0;
+  for (const q of [k, k + 1]) {
+    const s = sections[q];
+    if (s?.entry === 'lift' && s.lines.length) {
+      const h = hitAt(s);
+      if (t >= h - bar && t < h) wind = ((t - (h - bar)) / bar) ** 2;
+      else if (t >= h && t < h + 1500) hit = Math.exp(-(t - h) / 260);
+    } else if (s?.entry === 'breath' && q === k) {
+      const x = (t + LEAD_MS - s.from) / bar;
+      if (x >= 0 && x < 1) dip = Math.sin(Math.PI * x);
+    }
+  }
+  fx.zoom = 0.04 * wind + 0.015 * hit - 0.03 * dip;
+  fx.dim = (1 - 0.5 * wind) * (1 - 0.35 * dip);
+  fx.hit = hit;
+  return fx;
 };
 
 const draw = (v, playing) => {
   const data = st.v;
   const t = feathertune.clock.time(v) * 1000;
   const ms = t + LEAD_MS;
+  // After a seek (or a new size, or an ad) everything is set again for this moment.
+  if (st.resync) {
+    st.resync = false;
+    clearAll();
+    st.sec = -1;
+  }
+  st.now = ms;
+  if (st.leaving.length) sweep(ms);
   const { sections, lines, grid } = data;
   let k = sections.findIndex((s) => ms >= s.from && ms < s.to);
   if (k < 0) k = ms < sections[0].from ? 0 : sections.length - 1;
-  if (k !== st.sec) mount(k);
+  if (k !== st.sec) mount(k, ms);
   const sec = sections[k];
+  const light = lightFx();
   if (TEXT_KINDS.has(sec.kind) && sec.lines.length) {
     let j = 0;
     sec.lines.forEach((li, jj) => {
       if (lines[li].ms <= ms) j = jj;
     });
-    if (sec.lines[j] !== st.line) renderLine(sec, j, ms);
-    for (const w of st.words) {
-      const on = ms >= w.ms;
-      if (on !== w.on) lightWord(w, on, ms);
+    if (j !== st.j) {
+      st.j = j;
+      const nb = takeStaged(k, j) || buildLine(k, j);
+      if (nb) showLine(nb, ms);
+      else {
+        // A line without words: the one on screen hands over, nothing comes.
+        if (st.block) startExit(st.block, st.block.plan || quick(st.block, ms), ms, null);
+        dropAside(ms);
+        showSubtitle('');
+      }
     }
     const b = st.block;
-    if (b && !lightFx()) {
+    if (b) {
+      for (const w of b.words) {
+        const on = ms >= w.ms;
+        if (on !== w.on) lightWord(b, w, on, ms);
+      }
+      // The paper cuts with the line's first word, not before.
+      if (!b.papered && ms >= b.first) {
+        b.papered = true;
+        setPaper(b.paper);
+      }
+      // Its exit, planned once against what comes next, unless it stays for it (aside, pushed up).
+      if (!b.plan && !b.held) {
+        const nx = nextAt(k, j);
+        if (nx.shot && keeps(b, nx.shot)) b.held = true;
+        else b.plan = planExit(b, nx.ms);
+      }
+      if (b.plan && ms >= b.plan.at) startExit(b, b.plan, ms);
+    }
+    if (b && !b.out && !light) {
+      // After its end the line drifts away from where the next one comes.
+      if (ms > b.end) {
+        b.away ||= awayFrom(b, st.next);
+        const p = AFTER.VW * smooth(clamp((ms - b.end) / AFTER.MS, 0, 1)) * (innerWidth / 100);
+        const dx = Math.round(b.away.x * p * 10) / 10;
+        const dy = Math.round(b.away.y * p * 10) / 10;
+        if (dx !== b.dx || dy !== b.dy) {
+          b.dx = dx;
+          b.dy = dy;
+          b.node.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+      }
       // The star boils: a new drawing every STAR_MS.
       if (b.stars.length) {
         const pose = Math.floor(t / STAR_MS) % 3;
@@ -1514,7 +2037,7 @@ const draw = (v, playing) => {
       // The bars pose a hair either way on the beat (every other one when beats come faster than
       // FLASH_GAP_MS), the light paper flickering with them; without a tempo, on each word, as often.
       if (b.bar) {
-        const lit = st.words.reduce((a, w) => a + (w.on && !w.plain ? 1 : 0), 0);
+        const lit = b.words.reduce((a, w) => a + (w.on && !w.plain ? 1 : 0), 0);
         const idx = !lit ? null : grid ? Math.floor((t - grid.off) / (grid.beat * (grid.beat < FLASH_GAP_MS ? 2 : 1))) : lit;
         const at = performance.now();
         if (idx !== b.poseIdx && (grid || idx == null || at - b.poseAt >= FLASH_GAP_MS)) {
@@ -1526,42 +2049,77 @@ const draw = (v, playing) => {
         }
       }
     }
-  } else if (st.dots) {
-    // The dots fill over the last four beats (or seconds) before the next sung line.
-    const next = lines.find((l) => l.ms > ms && l.text.trim());
-    const left = next ? next.ms - ms : Infinity;
-    const step = grid ? grid.beat : 1000;
-    st.dots.forEach((d, j) => {
-      const on = left < step * (4 - j);
-      if (on !== d.on) {
-        d.on = on;
-        d.el.classList.toggle('ft-on', on);
+  } else {
+    // The countdown: 4, 3, 2, 1 over the last four beats (or seconds) before the next sung line.
+    if (st.count) {
+      const next = lines.find((l) => l.ms > ms && l.text.trim());
+      const left = next ? next.ms - ms : Infinity;
+      const step = grid ? grid.beat : 1000;
+      showCount(left <= step * 4 ? Math.max(1, Math.ceil(left / step)) : 0);
+    }
+    // The instrumental: a new crop of the cover each bar; the bands sweep across over two.
+    const f = st.frame;
+    if (f) {
+      const bars = (t - (grid?.off ?? 0)) / (grid ? grid.beat * 4 : 2000);
+      const cut = Math.floor(bars);
+      if (cut !== f.cut) {
+        f.cut = cut;
+        const [s, x, y] = CROPS[((cut % CROPS.length) + CROPS.length) % CROPS.length];
+        const m = (s - 1) / (2 * s);
+        const tx = -clamp(x - 0.5, -m, m) * s * 100;
+        const ty = -clamp(y - 0.5, -m, m) * s * 100;
+        f.img.style.transform = `translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%) scale(${s})`;
       }
-    });
+      f.bands.forEach((band, q) => {
+        const ph = (((bars / 2 + q * 0.5) % 1) + 1) % 1;
+        setStyle(band, `band${q}`, 'transform', `translateX(${(-30 + ph * 160).toFixed(2)}vw) skewX(-14deg)`);
+      });
+    }
+    // The frame leaves before the lines come back.
+    const nx = sections[k + 1];
+    if (st.scene && !st.sceneOut && nx && TEXT_KINDS.has(nx.kind) && ms >= nx.from - FRAME_OUT_MS) {
+      const frames = [
+        { opacity: 1, transform: 'none' },
+        { opacity: 0, transform: 'scale(1.04)' },
+      ];
+      st.sceneOut = run(st.scene, frames, FRAME_OUT_MS, nx.from - FRAME_OUT_MS, 'cubic-bezier(.4, 0, .2, 1)');
+    }
   }
+  stageNext();
   const e = energy(t, playing);
-  const light = lightFx();
+  const fx = entryFx(k, t);
   const chorus = sec.kind === 'chorus';
   const lvl = chorus ? Math.min(3, Math.max(1, sec.chorus)) : 0;
-  const p = clamp((ms - sec.from) / Math.max(1000, sec.to - sec.from), 0, 1);
   const beatPh = grid ? ((((t - grid.off) / grid.beat) % 1) + 1) % 1 : 0.5;
   const barPh = grid ? ((((t - grid.off) / (grid.beat * 4)) % 1) + 1) % 1 : 1;
   const beat = grid ? Math.exp(-beatPh * 6) : 0;
   const down = grid ? Math.exp(-barPh * 9) : 0;
-  setStyle(ui.camera, 'camera', 'transform', cameraAt(sec, p, grid && !light ? beat * 0.005 * e : 0));
+  const cam = camAt(k, ms);
+  const scale = cam.s + (grid && !light ? beat * 0.005 * e : 0) + fx.zoom;
+  setStyle(
+    ui.camera,
+    'camera',
+    'transform',
+    `translate(${cam.x.toFixed(3)}vw, ${cam.y.toFixed(3)}vh) rotate(${cam.r.toFixed(3)}deg) scale(${scale.toFixed(4)})`,
+  );
   // The light: the lamp behind the line breathes with the energy and kicks on the beat; the second color
-  // and the beam come up with it; the vignette opens.
+  // and the beam come up with it; the vignette opens. A lift dims it all, then hits.
   const q = (x) => x.toFixed(2);
-  setStyle(ui.lampCore, 'lamp', 'opacity', q(clamp(0.35 + e * 0.55 + beat * 0.15 * e + lvl * 0.06, 0, 1)));
+  setStyle(ui.lampCore, 'lamp', 'opacity', q(clamp((0.35 + e * 0.55 + beat * 0.15 * e + lvl * 0.06) * fx.dim, 0, 1)));
   setStyle(ui.lampCore, 'lampScale', 'transform', `scale(${(0.9 + e * 0.2 + beat * 0.05 * e).toFixed(3)})`);
-  setStyle(ui.lamp2Core, 'lamp2', 'opacity', q(0.25 + e * 0.5));
-  setStyle(ui.beamCore, 'beam', 'opacity', q(clamp((chorus ? 0.35 + lvl * 0.15 : 0.12) + e * 0.35, 0, 1)));
-  setStyle(ui.vignette, 'vignette', 'opacity', q(0.95 - e * 0.45));
-  setStyle(ui.flash, 'flash', 'opacity', chorus && grid && !light ? q(down * (0.45 + 0.15 * lvl) * e) : '0');
-  // The glow over the lit words: stronger in the chorus, more each time; it swells on the beat.
-  if (st.block?.glows) {
-    const base = st.block.chorus ? 0.62 + 0.12 * st.block.level : 0.5;
-    setStyle(st.block.glows, 'glow', 'opacity', q(clamp(base * (0.75 + e * 0.35) + (grid ? (chorus ? down * 0.35 : beat * 0.12) : 0), 0, 1)));
+  setStyle(ui.lamp2, 'lamp2', 'opacity', q((0.25 + e * 0.5) * fx.dim));
+  setStyle(ui.beamCore, 'beam', 'opacity', q(clamp(((chorus ? 0.35 + lvl * 0.15 : 0.12) + e * 0.35) * fx.dim, 0, 1)));
+  setStyle(ui.vignette, 'vignette', 'opacity', q(clamp(0.95 - e * 0.45 + (1 - fx.dim) * 0.3, 0, 1)));
+  const beatFlash = chorus && grid && !light ? down * (0.45 + 0.15 * lvl) * e : 0;
+  setStyle(ui.flash, 'flash', 'opacity', q(Math.max(beatFlash, fx.hit * 0.6)));
+  // The glow over the lit words: stronger in the chorus, more each time; it swells on the beat and settles
+  // once the line is over.
+  const b = st.block;
+  if (b?.glows) {
+    const base = b.chorus ? 0.62 + 0.12 * b.level : 0.5;
+    const after = 1 - 0.4 * smooth(clamp((ms - b.end) / AFTER.MS, 0, 1));
+    const glow = (base * (0.75 + e * 0.35) + (grid ? (chorus ? down * 0.35 : beat * 0.12) : 0)) * after;
+    setStyle(b.glows, 'glow', 'opacity', q(clamp(glow, 0, 1)));
   }
   // The HUD and the relief.
   const total = st.total || data.duration / 1000;
@@ -1623,8 +2181,7 @@ const kick = () => {
 // Everything set again for the new size (the safe area is in pixels).
 const relayout = () => {
   if (!st.open || !st.v) return;
-  dropAside();
-  st.sec = -1;
+  st.resync = true;
   kick();
 };
 
@@ -1650,7 +2207,7 @@ const onAd = (showing) => {
     releaseLevel();
   } else if (st.open) {
     // Back on the scene of this moment.
-    st.sec = -1;
+    st.resync = true;
     kick();
   }
 };
@@ -1711,12 +2268,8 @@ const close = () => {
   setTimeout(() => {
     if (st.open) return;
     ui.root.hidden = true;
-    leaveLine();
-    st.aside = null;
-    ui.lines.replaceChildren();
+    clearAll();
     ui.root.dataset.paper = 'dark';
-    ui.camera.querySelectorAll('.ft-scene').forEach((s) => s.remove());
-    st.scene = null;
     st.sec = -1;
   }, 600);
 };
@@ -1742,9 +2295,15 @@ feathertune.stage = Object.freeze({
     renderTimeline();
     renderRelief();
     setField();
-    // The same script keeps its scene on screen (the line is set again: a translation may have come).
-    if (same) st.line = -2;
-    else st.sec = -1;
+    // The same script keeps its scene and line on screen (a translation may have come); another starts over,
+    // its frame fading out.
+    if (same) {
+      dropStaged();
+      if (st.block) showSubtitle(v.translation?.[st.block.i] || '');
+    } else {
+      clearAll(true);
+      st.sec = -1;
+    }
     ui.hint.textContent = v.texts.esc;
     ui.leaveLabel.textContent = v.texts.leave;
     kick();
@@ -1780,6 +2339,8 @@ feathertune.stageFont = Object.freeze({
 const onMedia = (e) => {
   if (!st.open || !(e.target instanceof HTMLVideoElement)) return;
   if (e.type !== 'timeupdate' || !st.total) st.total = feathertune.clock.duration(e.target) || 0;
+  // A seek sets the stage again for the new moment (the lines' exits are timed on the track).
+  if (e.type === 'seeked') st.resync = true;
   const ad = !!feathertune.ad?.showing();
   if (ad !== st.ad) onAd(ad);
   kick();

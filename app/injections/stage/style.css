@@ -1151,3 +1151,6 @@ html[data-feathertune-light] #feathertune-stage .ft-crop {
   pointer-events: none;
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.7);
 }
+html:not([data-feathertune-stage]) .ft-fly {
+  display: none !important;
+}

@@ -493,7 +493,14 @@ fn letters(word: &str) -> usize {
 /// length by their letters, as the page does.
 fn words(line: &Line, end: f64) -> Vec<(f64, String)> {
     if !line.words.is_empty() {
-        return line.words.iter().map(|(ms, w)| (f64::from(*ms), w.trim().to_owned())).collect();
+        return line
+            .words
+            .iter()
+            .filter_map(|(ms, w)| {
+                let text = w.trim();
+                (!text.is_empty()).then(|| (f64::from(*ms), text.to_owned()))
+            })
+            .collect();
     }
     let parts: Vec<&str> = line.text.split_whitespace().collect();
     let ms = f64::from(line.ms);
@@ -956,7 +963,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     };
     let bpm = facts.and_then(|f| f.bpm).filter(|b| b.is_finite() && *b > 0.0);
     let beat = bpm.map(|b| 60_000.0 / b);
-    let offset = facts.and_then(|f| f.beat_offset_ms).unwrap_or(0.0);
+    let offset = facts.and_then(|f| f.beat_offset_ms).filter(|o| o.is_finite()).unwrap_or(0.0);
     // A cut at `t` moves to the nearest bar line within reach that lies between `lo` (the end of what is
     // still sung) and `hi` (the next line's lead), so it never makes a word late nor cuts one short.
     let snap = |t: f64, lo: f64, hi: f64| match beat {
@@ -1176,10 +1183,37 @@ pub fn start(app: &AppHandle) {
     AVAILABLE.store(true, Ordering::Relaxed);
     let mut rx = app.state::<Player>().subscribe();
     std::thread::spawn(move || {
+        let mut last_meta: Option<(Option<String>, String, i64)> = None;
         loop {
             match rx.blocking_recv() {
-                Ok(Event::Track(_)) => refresh(),
+                Ok(Event::Track(s)) => {
+                    last_meta = Some((s.track.id, s.track.album, (s.track.duration * 2.0).round() as i64));
+                    refresh();
+                }
+                Ok(Event::Progress(s)) => {
+                    let meta = (s.track.id, s.track.album, (s.track.duration * 2.0).round() as i64);
+                    if last_meta.as_ref() != Some(&meta) {
+                        last_meta = Some(meta);
+                        if is_open() {
+                            refresh();
+                        }
+                    }
+                }
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+    let mut queue_rx = app.state::<Player>().subscribe_queue();
+    std::thread::spawn(move || {
+        loop {
+            match queue_rx.blocking_recv() {
+                Ok(_) => {
+                    if is_open() {
+                        refresh();
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
             }
         }
@@ -1200,6 +1234,8 @@ pub fn is_open() -> bool {
 pub fn set_enabled(app: &AppHandle, on: bool) {
     if !on {
         close(app);
+        FONT_SENT.store(false, Ordering::Relaxed);
+        crate::injections::send(app, "stageFont", &Value::Null);
     }
     AVAILABLE.store(on && LOADED.load(Ordering::Relaxed), Ordering::Relaxed);
     crate::titlebar::refresh(app);

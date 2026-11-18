@@ -12,6 +12,7 @@
 //!   paused, stopped or in the tray.
 //! - A click runs the same `controls` command as the tray.
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, Window};
@@ -59,27 +60,44 @@ struct Taskbar {
     shows_pause: bool,
 }
 
+type Cell = RefCell<Taskbar>;
+
+fn with_taskbar<R>(data: usize, f: impl FnOnce(&mut Taskbar) -> R) -> Option<R> {
+    let ptr = data as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 /// Subclasses the main window. Main thread (setup).
 pub fn install(app: &AppHandle, window: &Window) {
     let Ok(hwnd) = window.hwnd() else { return };
     let hwnd = HWND(hwnd.0);
     let created = unsafe { RegisterWindowMessageW(w!("TaskbarButtonCreated")) };
-    let taskbar =
-        Box::new(Taskbar { app: app.clone(), created, list: None, added: false, icons: None, shows_pause: false });
+    let taskbar = Box::new(RefCell::new(Taskbar {
+        app: app.clone(),
+        created,
+        list: None,
+        added: false,
+        icons: None,
+        shows_pause: false,
+    }));
     unsafe {
         // When the app runs elevated, Explorer's messages would otherwise be filtered out.
         for msg in [created, WM_COMMAND] {
             let _ = ChangeWindowMessageFilterEx(hwnd, msg, MSGFLT_ALLOW, None);
         }
-        let taskbar = Box::into_raw(taskbar);
-        if !SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, taskbar as usize).as_bool() {
+        let ptr = Box::into_raw(taskbar) as usize;
+        if !SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, ptr).as_bool() {
             eprintln!("taskbar: SetWindowSubclass failed");
-            drop(Box::from_raw(taskbar));
+            drop(Box::from_raw(ptr as *mut Cell));
             return;
         }
         // Already on the taskbar: the message came before the subclass.
         if IsWindowVisible(hwnd).as_bool() {
-            (*taskbar).button_created(hwnd);
+            with_taskbar(ptr, |t| t.button_created(hwnd));
         }
     }
     let rx = app.state::<Player>().subscribe();
@@ -192,25 +210,39 @@ fn make_icons(hwnd: HWND) -> Result<[HICON; 4]> {
     let format = gfx::text_format(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
     let mut icons = [HICON::default(); 4];
     for (icon, glyph) in icons.iter_mut().zip([PREVIOUS, PLAY, PAUSE, NEXT]) {
-        let mut bitmap = gfx::Offscreen::new(size, size)?;
-        bitmap.draw(scale, |c| c.text(glyph, &format, rect(0.0, 0.0, 16.0, 16.0), rgb(0xffffff)))?;
-        // Icons take straight alpha, the bitmap has it premultiplied.
-        for px in bitmap.pixels().as_chunks_mut::<4>().0 {
-            let a = u32::from(px[3]);
-            for c in &mut px[..3] {
-                if let Some(v) = (u32::from(*c) * 255).checked_div(a) {
-                    *c = v.min(255) as u8;
+        let made: Result<HICON> = (|| {
+            let mut bitmap = gfx::Offscreen::new(size, size)?;
+            bitmap.draw(scale, |c| c.text(glyph, &format, rect(0.0, 0.0, 16.0, 16.0), rgb(0xffffff)))?;
+            // Icons take straight alpha, the bitmap has it premultiplied.
+            for px in bitmap.pixels().as_chunks_mut::<4>().0 {
+                let a = u32::from(px[3]);
+                for c in &mut px[..3] {
+                    if let Some(v) = (u32::from(*c) * 255).checked_div(a) {
+                        *c = v.min(255) as u8;
+                    }
                 }
             }
-        }
-        // The mask is unused with an alpha channel, but must be there.
-        let zeros = vec![0u8; (size as usize).div_ceil(16) * 2 * size as usize];
-        unsafe {
-            let mask = CreateBitmap(size, size, 1, 1, Some(zeros.as_ptr().cast()));
-            let info = ICONINFO { fIcon: true.into(), hbmMask: mask, hbmColor: bitmap.bitmap(), ..Default::default() };
-            let made = CreateIconIndirect(&info);
-            let _ = DeleteObject(mask.into());
-            *icon = made?;
+            // The mask is unused with an alpha channel, but must be there.
+            let zeros = vec![0u8; (size as usize).div_ceil(16) * 2 * size as usize];
+            unsafe {
+                let mask = CreateBitmap(size, size, 1, 1, Some(zeros.as_ptr().cast()));
+                let info =
+                    ICONINFO { fIcon: true.into(), hbmMask: mask, hbmColor: bitmap.bitmap(), ..Default::default() };
+                let result = CreateIconIndirect(&info);
+                let _ = DeleteObject(mask.into());
+                result
+            }
+        })();
+        match made {
+            Ok(h) => *icon = h,
+            Err(e) => {
+                for created in icons {
+                    if !created.is_invalid() {
+                        let _ = unsafe { DestroyIcon(created) };
+                    }
+                }
+                return Err(e);
+            }
         }
     }
     Ok(icons)
@@ -224,25 +256,29 @@ unsafe extern "system" fn subclass(
     _id: usize,
     data: usize,
 ) -> LRESULT {
-    let taskbar = unsafe { &mut *(data as *mut Taskbar) };
+    let created_msg = with_taskbar(data, |t| t.created);
     match msg {
-        _ if msg == taskbar.created => {
-            taskbar.added = false;
-            taskbar.button_created(hwnd);
+        _ if Some(msg) == created_msg => {
+            with_taskbar(data, |t| {
+                t.added = false;
+                t.button_created(hwnd);
+            });
         }
         WM_UPDATE => {
-            taskbar.update(hwnd);
+            with_taskbar(data, |t| t.update(hwnd));
             return LRESULT(0);
         }
         WM_COMMAND if (wparam.0 >> 16) as u32 & 0xffff == THBN_CLICKED => {
-            if let Some(command) = COMMANDS.get(wparam.0 & 0xffff) {
-                crate::player(&taskbar.app, command);
+            if let Some(app) = with_taskbar(data, |t| t.app.clone())
+                && let Some(command) = COMMANDS.get(wparam.0 & 0xffff)
+            {
+                crate::player(&app, command);
             }
             return LRESULT(0);
         }
         WM_NCDESTROY => unsafe {
             let _ = RemoveWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID);
-            let taskbar = Box::from_raw(data as *mut Taskbar);
+            let taskbar = Box::from_raw(data as *mut Cell).into_inner();
             for icon in taskbar.icons.into_iter().flatten() {
                 let _ = DestroyIcon(icon);
             }

@@ -191,6 +191,10 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let launcher = launcher && splash::show(&handle, profile.clone());
+            if !launcher {
+                let p = profile.clone();
+                std::thread::spawn(move || updater::cleanup(&p));
+            }
             wasm::start(app.handle());
             let window = WindowBuilder::new(app, "main")
                 .title("feathertune")
@@ -640,6 +644,7 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
         // A page left in fullscreen would keep the window fullscreen (titlebar.rs) once it is back.
         let _ = site.eval("document.fullscreenElement && document.exitFullscreen()");
         let _ = window.hide();
+        injections::set_hidden(app, true);
     }
     let _ = site.with_webview(move |wv| unsafe {
         let controller = wv.controller();
@@ -681,6 +686,7 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
             let _ = window.maximize();
         }
         let _ = window.set_focus();
+        injections::set_hidden(app, false);
     }
     println!("{} memory {}", if hidden { "hidden," } else { "shown," }, if hidden { "Low" } else { "Normal" });
 }

@@ -9,6 +9,7 @@
 //!   exists; a download shows its real progress.
 //! - It lives on the main thread; `set` and `step_done` can be called from any thread.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, Once};
@@ -19,7 +20,6 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, IDWriteTextFormat,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, UpdateWindow,
 };
@@ -27,9 +27,9 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetClientRect, GetCursorPos, GetWindowLongPtrW, HTCAPTION, IDC_ARROW, KillTimer, LoadCursorW, PostMessageW,
-    RegisterClassExW, SW_SHOW, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, WM_APP, WM_CLOSE, WM_DESTROY, WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    RegisterClassExW, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST,
+    WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Result, w};
 
@@ -120,6 +120,7 @@ pub fn show(app: &AppHandle, profile: PathBuf) -> bool {
 
 /// Update check, download and install; then the update step is done.
 fn run(app: &AppHandle, profile: &std::path::Path) {
+    updater::cleanup(profile);
     if updater::installed(profile) {
         match updater::check() {
             Ok(Some(update)) => {
@@ -138,6 +139,7 @@ fn run(app: &AppHandle, profile: &std::path::Path) {
                         return;
                     }
                     Err(e) => {
+                        crate::diag::log("updater", format_args!("install failed: {e}"));
                         eprintln!("update failed: {e}");
                         set(t("The update failed, starting the current version"), None);
                         std::thread::sleep(Duration::from_millis(1500));
@@ -146,7 +148,7 @@ fn run(app: &AppHandle, profile: &std::path::Path) {
             }
             Ok(None) => {}
             // Offline is the usual reason: not worth the user's attention.
-            Err(e) => eprintln!("update check failed: {e}"),
+            Err(e) => crate::diag::log("updater", format_args!("check failed: {e}")),
         }
     }
     set(t("Starting the player…"), None);
@@ -240,6 +242,17 @@ fn finish(app: &AppHandle) {
     });
 }
 
+type Cell = RefCell<Splash>;
+
+fn with_splash<R>(hwnd: HWND, f: impl FnOnce(&mut Splash) -> R) -> Option<R> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 unsafe fn create() -> Result<()> {
     static REGISTER: Once = Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
@@ -257,15 +270,15 @@ unsafe fn create() -> Result<()> {
         RegisterClassExW(&wc);
     });
     let center = |family, size, weight| gfx::text_format(family, size, weight, DWRITE_TEXT_ALIGNMENT_CENTER);
-    let splash = Box::new(Splash {
+    let splash = Splash {
         surface: gfx::Surface::default(),
         name: center(NAME_FONT, 30.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?,
         status: center(TEXT_FONT, 13.0, DWRITE_FONT_WEIGHT_NORMAL)?,
         small: center(TEXT_FONT, 11.0, DWRITE_FONT_WEIGHT_NORMAL)?,
         start: Instant::now(),
         ticking: false,
-    });
-    let splash = Box::into_raw(splash);
+    };
+    let mut slot = Some(Box::new(RefCell::new(splash)));
     // On success WM_NCCREATE takes the box (freed in WM_NCDESTROY).
     let hwnd = unsafe {
         CreateWindowExW(
@@ -280,33 +293,28 @@ unsafe fn create() -> Result<()> {
             None,
             None,
             Some(instance.into()),
-            Some(splash as *const _),
+            Some((&raw mut slot).cast()),
         )?
     };
     WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
     unsafe {
-        // Centered on the monitor the cursor is on, where the user just launched it.
-        let scale = gfx::scale(hwnd);
-        let (w, h) = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
+        // Centered on the monitor the cursor is on, sized for that monitor's DPI.
         let mut cursor = windows::Win32::Foundation::POINT::default();
         let _ = GetCursorPos(&mut cursor);
         let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
         let _ = GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &mut info);
         let area = info.rcWork;
-        let (x, y) = (area.left + (area.right - area.left - w) / 2, area.top + (area.bottom - area.top - h) / 2);
-        let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER);
-        let corner = DWMWCP_ROUND;
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner as *const _ as *const _,
-            size_of_val(&corner) as u32,
-        );
+        gfx::place_in_work_area(hwnd, area, WIDTH, HEIGHT, |w, h, _| {
+            (area.left + (area.right - area.left - w) / 2, area.top + (area.bottom - area.top - h) / 2)
+        });
+        gfx::round_corners(hwnd);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
-        // The event loop is not running yet: paint now, not when it gets to WM_PAINT.
-        let _ = UpdateWindow(hwnd);
-        (*splash).schedule(hwnd);
+        if GetWindowLongPtrW(hwnd, GWLP_USERDATA) != 0 {
+            // The event loop is not running yet: paint now, not when it gets to WM_PAINT.
+            let _ = UpdateWindow(hwnd);
+            with_splash(hwnd, |s| s.schedule(hwnd));
+        }
     }
     Ok(())
 }
@@ -375,25 +383,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe {
         if msg == WM_NCCREATE {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            let slot = &mut *create.lpCreateParams.cast::<Option<Box<Cell>>>();
+            if let Some(boxed) = slot.take() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(boxed) as isize);
+            }
         }
-        let splash = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Splash;
-        if splash.is_null() {
-            return DefWindowProcW(hwnd, msg, wparam, lparam);
-        }
-        let s = &mut *splash;
         match msg {
             // The whole window drags it.
             WM_NCHITTEST => return LRESULT(HTCAPTION as isize),
             // Alt+F4 does nothing: the screen goes away when the start is done.
             WM_CLOSE => return LRESULT(0),
             WM_PAINT => {
-                s.paint(hwnd);
+                with_splash(hwnd, |s| s.paint(hwnd));
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                s.schedule(hwnd);
-                let _ = InvalidateRect(Some(hwnd), None, false);
+                with_splash(hwnd, |s| s.schedule(hwnd));
+                gfx::invalidate(hwnd);
             }
             WM_TIMER if wparam.0 == TIMER => {
                 let scale = gfx::scale(hwnd);
@@ -406,13 +412,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let _ = InvalidateRect(Some(hwnd), Some(&bar), false);
                 return LRESULT(0);
             }
+            WM_DPICHANGED => {
+                let r = &*(lparam.0 as *const RECT);
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                return LRESULT(0);
+            }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), TIMER);
                 WINDOW.store(0, Ordering::Relaxed);
             }
             WM_NCDESTROY => {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(splash));
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Cell;
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
             }
             _ => {}
         }

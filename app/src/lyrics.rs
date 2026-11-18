@@ -455,6 +455,7 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
                     &dir,
                     &track,
                     &providers,
+                    &|| generation.load(Ordering::SeqCst) == mine,
                     |lines, source| {
                         if live() {
                             crate::diag::log("lyrics", format_args!("shown: {} lines from {source}", lines.len()));
@@ -470,7 +471,21 @@ pub fn start(app: &AppHandle, profile: &Path, page: bool) {
                     },
                     || {
                         if let Some(lang) = target.as_deref().filter(|_| live()) {
-                            translate(&app, &agent, &dir, &track, &key, lang);
+                            let (app, agent, dir, generation, track, key, lang) = (
+                                app.clone(),
+                                agent.clone(),
+                                dir.clone(),
+                                generation.clone(),
+                                track.clone(),
+                                key.clone(),
+                                lang.to_owned(),
+                            );
+                            std::thread::spawn(move || {
+                                let live = || generation.load(Ordering::SeqCst) == mine;
+                                if live() {
+                                    translate(&app, &agent, &dir, &track, &key, &lang, &live);
+                                }
+                            });
                         }
                     },
                 );
@@ -493,7 +508,18 @@ pub fn translation_target(s: &Settings) -> Option<String> {
 
 /// Finds a translation into `lang` of the current lines (track `key`) and shows it: the source's own
 /// when it covers half the lines, else the cached one, else Unison's.
-fn translate(app: &AppHandle, agent: &ureq::Agent, dir: &Path, track: &Track, key: &str, lang: &str) {
+fn translate(
+    app: &AppHandle,
+    agent: &ureq::Agent,
+    dir: &Path,
+    track: &Track,
+    key: &str,
+    lang: &str,
+    live: &(dyn Fn() -> bool + Sync),
+) {
+    if !live() {
+        return;
+    }
     let found = app.state::<Lyrics>().found.lock().unwrap().as_ref().filter(|f| f.key == key).map(|f| {
         let own = own_translation(&f.lines, lang);
         (f.lines.clone(), f.source, own)
@@ -506,10 +532,13 @@ fn translate(app: &AppHandle, agent: &ureq::Agent, dir: &Path, track: &Track, ke
         }
         None => {
             let file = cache_file(dir, track, track.duration.round() as u32);
-            let Some(machine) = machine_translation(agent, &file, &lines, lang) else { return };
+            let Some(machine) = machine_translation(agent, &file, &lines, lang, live) else { return };
             Translated { lang: lang.to_owned(), lines: machine, source: "Unison" }
         }
     };
+    if !live() {
+        return;
+    }
     let lyrics = app.state::<Lyrics>();
     if let Some(f) = lyrics.found.lock().unwrap().as_mut().filter(|f| f.key == key && f.lines.len() == lines.len()) {
         f.translation = Some(translated);
@@ -535,7 +564,13 @@ fn own_translation(lines: &[Line], lang: &str) -> Option<Vec<Option<String>>> {
 }
 
 /// Unison's translation of the lines, from the cache entry `file` when it has one for `lang`.
-fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &str) -> Option<Vec<Option<String>>> {
+fn machine_translation(
+    agent: &ureq::Agent,
+    file: &Path,
+    lines: &[Line],
+    lang: &str,
+    live: &(dyn Fn() -> bool + Sync),
+) -> Option<Vec<Option<String>>> {
     let mut entry = read_entry(file);
     if let Some(t) =
         entry.as_ref().and_then(|e| e.translations.iter().find(|t| t.lang == lang && t.lines.len() == lines.len()))
@@ -544,7 +579,7 @@ fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &
         return Some(t.lines.clone());
     }
     let at = Instant::now();
-    let out = match unison_translate(agent, lines, lang) {
+    let out = match unison_translate(agent, lines, lang, live) {
         Ok(out) => out,
         Err(e) => {
             crate::diag::log("lyrics", format_args!("translation ({lang}): {e} ({} ms)", at.elapsed().as_millis()));
@@ -572,16 +607,28 @@ fn machine_translation(agent: &ureq::Agent, file: &Path, lines: &[Line], lang: &
 /// `POST /translate` on Unison, `TRANSLATE_CHUNK` lines at a time: one entry per line, `None` where the
 /// line needs no translation (blank, or already in `lang`). A 400 (nothing to translate, or the language
 /// not found) is no translation; a 5xx is sent again after `TRANSLATE_RETRY_WAITS`.
-fn unison_translate(agent: &ureq::Agent, lines: &[Line], lang: &str) -> Result<Vec<Option<String>>, String> {
+fn unison_translate(
+    agent: &ureq::Agent,
+    lines: &[Line],
+    lang: &str,
+    live: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<Option<String>>, String> {
     let mut out = Vec::with_capacity(lines.len());
     for chunk in lines.chunks(TRANSLATE_CHUNK) {
+        if !live() {
+            return Err("cancelled".into());
+        }
         let texts: Vec<&str> = chunk.iter().map(|l| l.text.as_str()).collect();
         let body = json!({ "lines": texts, "to": lang }).to_string();
         let mut waits = TRANSLATE_RETRY_WAITS.iter();
         let sent = loop {
             match agent.post(UNISON_TRANSLATE).header("content-type", "application/json").send(body.as_str()) {
                 Err(ureq::Error::StatusCode(code)) if code >= 500 => match waits.next() {
-                    Some(wait) => std::thread::sleep(*wait),
+                    Some(wait) => {
+                        if !sleep_while(*wait, live) {
+                            return Err("cancelled".into());
+                        }
+                    }
                     None => break Err(ureq::Error::StatusCode(code)),
                 },
                 other => break other,
@@ -766,6 +813,7 @@ fn lookup(
     dir: &Path,
     track: &Track,
     all: &[&'static str],
+    still_live: &(dyn Fn() -> bool + Send + Sync),
     show: impl Fn(Lines, &'static str),
     settle: impl Fn(),
 ) {
@@ -810,106 +858,135 @@ fn lookup(
         ),
     );
     let (tx, rx) = std::sync::mpsc::channel();
-    for (rank, &provider) in providers.iter().enumerate() {
-        let (tx, agent, track) = (tx.clone(), agent.clone(), track.clone());
-        std::thread::spawn(move || {
-            let at = Instant::now();
-            let answer = ask(&agent, provider, &track, duration);
-            let _ = tx.send((rank, at.elapsed().as_millis(), answer));
-        });
-    }
-    drop(tx);
-    // Each source's answer, once it comes.
-    let mut answers: Vec<Option<Result<Option<Lines>, String>>> = vec![None; providers.len()];
-    let mut shown = None;
-    // Set when the first lines are shown: by then `settle` runs even if a better source is still out.
-    let mut deadline: Option<Instant> = None;
-    let mut settled = false;
-    let entry = |answers: &[Option<Result<Option<Lines>, String>>], shown: Option<usize>| {
-        // The sources that answered, those of a cached "not found" included, in the list's order.
-        let tried = all.iter().filter(|p| {
-            known.contains(p)
-                || providers.iter().position(|q| q == *p).is_some_and(|i| matches!(answers[i], Some(Ok(_))))
-        });
-        let tried = tried.map(|p| p.to_string());
-        let lines = shown.and_then(|b| lines_of(answers, b).cloned());
-        let source = shown.map_or(String::new(), |b| providers[b].to_string());
-        Entry { at: now(), rev: ENTRY_REV, lines, source, tried: tried.collect(), translations: Vec::new() }
-    };
-    let note = |rank: usize, ms: u128, answer: &Result<Option<Lines>, String>| match answer {
-        Ok(Some(l)) => crate::diag::log(
-            "lyrics",
-            format_args!("{}: {} lines, word times: {} ({ms} ms)", providers[rank], l.len(), has_words(l)),
-        ),
-        Ok(None) => crate::diag::log("lyrics", format_args!("{}: none ({ms} ms)", providers[rank])),
-        Err(e) => crate::diag::log("lyrics", format_args!("{}: {e} ({ms} ms)", providers[rank])),
-    };
-    loop {
-        let next = match deadline.filter(|_| !settled) {
-            Some(d) => match rx.recv_timeout(d.saturating_duration_since(Instant::now())) {
-                Ok(answer) => Some(answer),
-                Err(RecvTimeoutError::Timeout) => {
-                    crate::diag::log("lyrics", "a better source is late: the lines shown are kept for now");
-                    // Written first, so a machine translation is cached with these lines.
-                    write_entry(&file, &entry(&answers, shown));
-                    settled = true;
-                    settle();
-                    continue;
-                }
-                Err(RecvTimeoutError::Disconnected) => None,
-            },
-            None => rx.recv().ok(),
+    std::thread::scope(|scope| {
+        for (rank, &provider) in providers.iter().enumerate() {
+            let tx = tx.clone();
+            scope.spawn(move || {
+                let at = Instant::now();
+                let answer = ask(agent, provider, track, duration, still_live);
+                let _ = tx.send((rank, at.elapsed().as_millis(), answer));
+            });
+        }
+        drop(tx);
+        // Each source's answer, once it comes.
+        let mut answers: Vec<Option<Result<Option<Lines>, String>>> = vec![None; providers.len()];
+        let mut shown = None;
+        // Set when the first lines are shown: by then `settle` runs even if a better source is still out.
+        let mut deadline: Option<Instant> = None;
+        let mut settled = false;
+        let entry = |answers: &[Option<Result<Option<Lines>, String>>], shown: Option<usize>| {
+            // The sources that answered, those of a cached "not found" included, in the list's order.
+            let tried = all.iter().filter(|p| {
+                known.contains(p)
+                    || providers.iter().position(|q| q == *p).is_some_and(|i| matches!(answers[i], Some(Ok(_))))
+            });
+            let tried = tried.map(|p| p.to_string());
+            let lines = shown.and_then(|b| lines_of(answers, b).cloned());
+            let source = shown.map_or(String::new(), |b| providers[b].to_string());
+            Entry { at: now(), rev: ENTRY_REV, lines, source, tried: tried.collect(), translations: Vec::new() }
         };
-        let Some((rank, ms, answer)) = next else { break };
-        note(rank, ms, &answer);
-        answers[rank] = Some(answer);
-        let Some(mut top) = best(&answers) else { continue };
+        let note = |rank: usize, ms: u128, answer: &Result<Option<Lines>, String>| match answer {
+            Ok(Some(l)) => crate::diag::log(
+                "lyrics",
+                format_args!("{}: {} lines, word times: {} ({ms} ms)", providers[rank], l.len(), has_words(l)),
+            ),
+            Ok(None) => crate::diag::log("lyrics", format_args!("{}: none ({ms} ms)", providers[rank])),
+            Err(e) => crate::diag::log("lyrics", format_args!("{}: {e} ({ms} ms)", providers[rank])),
+        };
+        loop {
+            if !still_live() {
+                return;
+            }
+            let next = match deadline.filter(|_| !settled) {
+                Some(d) => {
+                    match rx.recv_timeout(d.saturating_duration_since(Instant::now()).min(Duration::from_millis(200))) {
+                        Ok(answer) => Some(answer),
+                        Err(RecvTimeoutError::Timeout) => {
+                            if Instant::now() < d {
+                                continue;
+                            }
+                            crate::diag::log("lyrics", "a better source is late: the lines shown are kept for now");
+                            // Written first, so a machine translation is cached with these lines.
+                            write_entry(&file, &entry(&answers, shown));
+                            settled = true;
+                            settle();
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => None,
+                    }
+                }
+                None => match rx.recv_timeout(Duration::from_millis(200)) {
+                    Ok(answer) => Some(answer),
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => None,
+                },
+            };
+            let Some((rank, ms, answer)) = next else { break };
+            if !still_live() {
+                return;
+            }
+            note(rank, ms, &answer);
+            answers[rank] = Some(answer);
+            let Some(mut top) = best(&answers) else { continue };
+            if shown.is_none() {
+                // Lines from a source with a better one still out: give it a moment, so the lines change once.
+                let until = Instant::now() + SHOW_HOLD;
+                while answers[..top].iter().any(Option::is_none) && still_live() {
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    if let Ok((rank, ms, answer)) = rx.recv_timeout(left) {
+                        note(rank, ms, &answer);
+                        answers[rank] = Some(answer);
+                        top = best(&answers).unwrap_or(top);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if !still_live() {
+                return;
+            }
+            if shown != Some(top) {
+                shown = Some(top);
+                deadline.get_or_insert_with(|| Instant::now() + UPGRADE_WAIT);
+                show(lines_of(&answers, top).expect("top has lines").clone(), name(providers[top]));
+                if settled {
+                    settle();
+                }
+            }
+            // Final once no source before it could still answer with word times.
+            if answers[..top].iter().all(Option::is_some) && has_words(lines_of(&answers, top).expect("top")) {
+                break;
+            }
+        }
+        if !still_live() {
+            return;
+        }
         if shown.is_none() {
-            // Lines from a source with a better one still out: give it a moment, so the lines change once.
-            let until = Instant::now() + SHOW_HOLD;
-            while answers[..top].iter().any(Option::is_none) {
-                let Ok((rank, ms, answer)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) else {
-                    break;
-                };
-                note(rank, ms, &answer);
-                answers[rank] = Some(answer);
-                top = best(&answers).unwrap_or(top);
-            }
+            crate::diag::log("lyrics", "no source has synced lyrics");
         }
-        if shown != Some(top) {
-            shown = Some(top);
-            deadline.get_or_insert_with(|| Instant::now() + UPGRADE_WAIT);
-            show(lines_of(&answers, top).expect("top has lines").clone(), name(providers[top]));
-            if settled {
-                settle();
-            }
+        // The outdated entry stays when the sources failed, instead of a "not found".
+        if shown.is_none()
+            && let Some((lines, source)) = stale
+        {
+            show(lines, source);
+            settle();
+            return;
         }
-        // Final once no source before it could still answer with word times.
-        if answers[..top].iter().all(Option::is_some) && has_words(lines_of(&answers, top).expect("top")) {
-            break;
+        let mut last = entry(&answers, shown);
+        // A translation cached with the same lines while the slower sources answered is kept.
+        if let Some(old) = read_entry(&file)
+            .filter(|e| e.source == last.source && e.lines.as_ref().map(Vec::len) == last.lines.as_ref().map(Vec::len))
+        {
+            last.translations = old.translations;
         }
-    }
-    if shown.is_none() {
-        crate::diag::log("lyrics", "no source has synced lyrics");
-    }
-    // The outdated entry stays when the sources failed, instead of a "not found".
-    if shown.is_none()
-        && let Some((lines, source)) = stale
-    {
-        show(lines, source);
-        return settle();
-    }
-    let mut last = entry(&answers, shown);
-    // A translation cached with the same lines while the slower sources answered is kept.
-    if let Some(old) = read_entry(&file)
-        .filter(|e| e.source == last.source && e.lines.as_ref().map(Vec::len) == last.lines.as_ref().map(Vec::len))
-    {
-        last.translations = old.translations;
-    }
-    write_entry(&file, &last);
-    if shown.is_some() && !settled {
-        settle();
-    }
+        write_entry(&file, &last);
+        if shown.is_some() && !settled {
+            settle();
+        }
+    });
 }
 
 /// The source that wins among the answers so far: the first with word times, else the first with lines.
@@ -929,8 +1006,26 @@ fn has_words(lines: &[Line]) -> bool {
     lines.iter().any(|l| !l.words.is_empty())
 }
 
+fn sleep_while(total: Duration, still_live: &dyn Fn() -> bool) -> bool {
+    let deadline = Instant::now() + total;
+    while still_live() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(200)));
+    }
+    false
+}
+
 /// One source's answer; a passing failure is asked again after each of `RETRY_WAITS`.
-fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Result<Option<Lines>, String> {
+fn ask(
+    agent: &ureq::Agent,
+    provider: &str,
+    track: &Track,
+    duration: u32,
+    still_live: &dyn Fn() -> bool,
+) -> Result<Option<Lines>, String> {
     let once = || match provider {
         "lrclib" => lrclib(agent, track, duration),
         "betterlyrics" => better_lyrics(agent, track, duration),
@@ -940,7 +1035,8 @@ fn ask(agent: &ureq::Agent, provider: &str, track: &Track, duration: u32) -> Res
     let mut answer = once();
     for wait in RETRY_WAITS {
         match &answer {
-            Err(e) if passing(e) => std::thread::sleep(wait),
+            Err(e) if passing(e) && sleep_while(wait, still_live) => {}
+            Err(e) if passing(e) => return Err("cancelled".into()),
             _ => break,
         }
         answer = once();
@@ -1063,9 +1159,8 @@ fn clean_title(title: &str, artist: &str) -> String {
             _ => {}
         }
     }
-    let lower = out.to_lowercase();
     for mark in [" feat. ", " ft. ", " feat ", " featuring "] {
-        if let Some(i) = lower.find(mark) {
+        if let Some(i) = out.as_bytes().windows(mark.len()).position(|w| w.eq_ignore_ascii_case(mark.as_bytes())) {
             out.truncate(i);
             break;
         }
@@ -1203,11 +1298,12 @@ fn read_entry(file: &Path) -> Option<Entry> {
 }
 
 fn write_entry(file: &Path, entry: &Entry) {
+    static CACHE_LOCK: Mutex<()> = Mutex::new(());
     let Some(dir) = file.parent() else { return };
-    let _ = std::fs::create_dir_all(dir);
+    let _guard = CACHE_LOCK.lock().unwrap();
     match serde_json::to_vec(entry) {
         Ok(bytes) => {
-            if let Err(e) = std::fs::write(file, bytes) {
+            if let Err(e) = crate::settings::write_atomic(file, bytes) {
                 crate::diag::log("lyrics", format_args!("cache not written: {e}"));
             }
         }
@@ -1389,6 +1485,19 @@ fn unescape(s: &str) -> String {
 /// between spans, usually a space, goes with the word before). Background vocals
 /// (`<span ttm:role="x-bg">`) are left out. Translations in its head (`<translation xml:lang>` with a
 /// `<text for="L1">` per line `<p itunes:key="L1">`) go to the lines' `translations`.
+fn next_p(xml: &str) -> Option<usize> {
+    let bytes = xml.as_bytes();
+    let mut at = 0;
+    while let Some(i) = xml[at..].find("<p") {
+        let pos = at + i;
+        if bytes.get(pos + 2).is_some_and(|c| matches!(c, b'>' | b' ' | b'\t' | b'\r' | b'\n')) {
+            return Some(pos);
+        }
+        at = pos + 2;
+    }
+    None
+}
+
 fn parse_ttml(xml: &str) -> Lines {
     let mut lines: Lines = Vec::new();
     // The key of each line, for its translations.
@@ -1396,7 +1505,7 @@ fn parse_ttml(xml: &str) -> Lines {
     // The singer of each line (`ttm:agent`).
     let mut singers: Vec<Option<&str>> = Vec::new();
     let mut rest = xml;
-    while let Some(i) = rest.find("<p ").or_else(|| rest.find("<p>")) {
+    while let Some(i) = next_p(rest) {
         rest = &rest[i..];
         let Some(open_end) = rest.find('>') else { break };
         let Some(close) = rest.find("</p>") else { break };
@@ -1747,7 +1856,17 @@ mod tests {
         assert_eq!(clean_title("Song feat. Other", "Artist"), "Song");
         assert_eq!(clean_title("Song - Remastered 2011", "Artist"), "Song");
         assert_eq!(clean_title("(Intro)", "Artist"), "(Intro)");
+        assert_eq!(clean_title("İİİİİİİİ feat. Ömer", "Artist"), "İİİİİİİİ");
+        assert_eq!(clean_title("K Kelvin feat. X", "Artist"), "K Kelvin");
         assert!(artists("A & B feat. C").contains(&"c".to_owned()));
+    }
+
+    #[test]
+    fn ttml_parses_plain_and_attributed_paragraphs_in_order() {
+        let xml = r#"<tt><body><p><span begin="1.0" end="2.0">ignored</span></p><p begin="2.0" end="3.0">Kept</p></body></tt>"#;
+        let lines = parse_ttml(xml);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Kept");
     }
 
     #[test]
@@ -1824,7 +1943,7 @@ mod tests {
                         }
                         let t = Instant::now();
                         last = Some(t);
-                        let answer = ask(&agent, id, track, track.duration.round() as u32);
+                        let answer = ask(&agent, id, track, track.duration.round() as u32, &|| true);
                         out.push((t.elapsed().as_millis() as u64, answer));
                     }
                     out

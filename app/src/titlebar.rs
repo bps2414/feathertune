@@ -34,6 +34,7 @@
 //!   track's text layout are kept between frames and rebuilt only when the target, the theme, the
 //!   track or the width change. A theme or shape flow also runs only while the window is on screen.
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,16 +48,14 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler, HistoryChangedEventHandler,
 };
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::{ID2D1LinearGradientBrush, ID2D1SolidColorBrush};
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, IDWriteTextFormat, IDWriteTextLayout,
 };
-use windows::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE,
-};
+use windows::Win32::Graphics::Gdi::InvalidateRect;
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, IsIconic,
@@ -64,11 +63,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowLongPtrW, SetWindowPos,
     WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MOUSEMOVE, WM_MOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
-    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SHOWWINDOW, WM_SIZE,
-    WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
+    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SETTINGCHANGE,
+    WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WS_CLIPCHILDREN,
 };
 
-use crate::gfx::{self, ICON_FONT, point, rect};
+use crate::gfx::{self, ICON_FONT, WM_MOUSELEAVE, point, rect};
 use crate::player::{Event, Player, State};
 use crate::settings::Live;
 
@@ -84,8 +83,6 @@ const NAME_LEFT: f32 = 12.0;
 const NAV: f32 = 34.0;
 const NAV_LEFT: f32 = 6.0;
 const SUBCLASS_ID: usize = 0xfea7;
-/// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
-pub const WM_MOUSELEAVE: u32 = 0x02a3;
 /// Posted by the player thread when the track changed.
 const WM_TRACK: u32 = WM_APP + 2;
 /// Posted to re-check whether the animation timer should run.
@@ -233,9 +230,10 @@ impl TrackLine {
         title: &str,
         artist: &str,
         width: f32,
+        mini: bool,
         dim: &ID2D1SolidColorBrush,
     ) -> Option<Self> {
-        let (left, right) = (name_left() + 150.0, first_button_left(width) - 24.0);
+        let (left, right) = (name_left() + 150.0, first_button_left(width, mini) - 24.0);
         if title.is_empty() || right - left < 80.0 {
             return None;
         }
@@ -301,6 +299,17 @@ struct TitleBar {
     tracking: Option<bool>,
 }
 
+type Cell = RefCell<TitleBar>;
+
+fn with_bar<R>(data: usize, f: impl FnOnce(&mut TitleBar) -> R) -> Option<R> {
+    let ptr = data as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 /// Subclasses the main window and lays the site webview out below the strip.
 pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Result<()> {
     let hwnd = window.hwnd()?.0 as isize;
@@ -340,9 +349,10 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             eprintln!("title bar: DirectWrite unavailable");
             return;
         };
-        let bar = Box::new(TitleBar {
+        let controller = wv.controller();
+        let bar = Box::new(RefCell::new(TitleBar {
             window,
-            controller: wv.controller(),
+            controller: controller.clone(),
             surface: gfx::Surface::default(),
             name,
             track,
@@ -363,21 +373,21 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
             hover: None,
             pressed: None,
             tracking: None,
-        });
+        }));
         unsafe {
             // The strip's paint must never cover the webview.
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CLIPCHILDREN.0 as isize);
-            let bar = Box::into_raw(bar);
-            if !SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, bar as usize).as_bool() {
+            let ptr = Box::into_raw(bar) as usize;
+            if !SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, ptr).as_bool() {
                 eprintln!("title bar: SetWindowSubclass failed");
-                drop(Box::from_raw(bar));
+                drop(Box::from_raw(ptr as *mut Cell));
                 return;
             }
-            (*bar).relayout(hwnd);
+            relayout_controller(&controller, hwnd);
             // The player's fullscreen button: without this the page fills only the webview, and if it
             // never gets its Esc the bar of the player stays hidden.
-            if let Ok(core) = wv.controller().CoreWebView2() {
+            if let Ok(core) = controller.CoreWebView2() {
                 let app = fullscreen_window.app_handle().clone();
                 let stage_app = app.clone();
                 // The stage's leave button enters and leaves the page's fullscreen, so its end closes the stage.
@@ -386,9 +396,15 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
                     if let Some(core) = core {
                         core.ContainsFullScreenElement(&mut on)?;
                     }
-                    set_fullscreen(&fullscreen_window, on.as_bool());
-                    if !on.as_bool() && crate::stage::is_open() {
+                    let full = on.as_bool();
+                    if !full && crate::stage::is_open() {
                         crate::stage::close(&stage_app);
+                    }
+                    if !full && fullscreen_window.hwnd().ok().is_some_and(|h| IsIconic(HWND(h.0)).as_bool()) {
+                        FULLSCREEN.store(false, Ordering::Relaxed);
+                        LEAVE_ON_RESTORE.store(true, Ordering::Relaxed);
+                    } else {
+                        set_fullscreen(&fullscreen_window, full);
                     }
                     Ok(())
                 }));
@@ -523,32 +539,64 @@ fn invalidate_nav(hwnd: HWND) {
     }
 }
 
-impl TitleBar {
-    /// The site webview takes the client area below the strip.
-    fn layout(&self, hwnd: HWND, width: i32, height: i32) {
-        let top = if strip_hidden() { 0 } else { ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height) };
-        unsafe {
-            let _ = self.controller.SetBounds(RECT { left: 0, top: 0, right: width, bottom: height - top });
-            let mut container = HWND::default();
-            if self.controller.ParentWindow(&mut container).is_ok() {
-                let _ = SetWindowPos(container, None, 0, top, width, height - top, SWP_NOZORDER | SWP_NOACTIVATE);
-            }
+/// The site webview takes the client area below the strip.
+fn layout_controller(controller: &ICoreWebView2Controller, hwnd: HWND, width: i32, height: i32) {
+    let top = if strip_hidden() { 0 } else { ((HEIGHT * gfx::scale(hwnd)).round() as i32).min(height) };
+    unsafe {
+        let _ = controller.SetBounds(RECT { left: 0, top: 0, right: width, bottom: height - top });
+        let mut container = HWND::default();
+        if controller.ParentWindow(&mut container).is_ok() {
+            let _ = SetWindowPos(container, None, 0, top, width, height - top, SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        invalidate(hwnd);
     }
+    invalidate(hwnd);
+}
 
-    /// `layout` for the window's current client area (the size, the DPI or the strip changed without a
-    /// WM_SIZE of its own).
-    fn relayout(&self, hwnd: HWND) {
-        let mut client = RECT::default();
-        unsafe {
-            if IsIconic(hwnd).as_bool() || GetClientRect(hwnd, &mut client).is_err() {
-                return;
-            }
+/// `layout_controller` for the window's current client area (the size, DPI or strip changed without a
+/// `WM_SIZE` of its own).
+fn relayout_controller(controller: &ICoreWebView2Controller, hwnd: HWND) {
+    let mut client = RECT::default();
+    unsafe {
+        if IsIconic(hwnd).as_bool() || GetClientRect(hwnd, &mut client).is_err() {
+            return;
         }
-        if client.right > 0 && client.bottom > 0 {
-            self.layout(hwnd, client.right, client.bottom);
+    }
+    if client.right > 0 && client.bottom > 0 {
+        layout_controller(controller, hwnd, client.right, client.bottom);
+    }
+}
+
+fn click(hwnd: HWND, window: &Window, controller: &ICoreWebView2Controller, button: Button) {
+    let command = |c: u32| unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(c as usize), LPARAM(0));
+    };
+    let history = |back: bool| unsafe {
+        if let Ok(core) = controller.CoreWebView2() {
+            let _ = if back { core.GoBack() } else { core.GoForward() };
         }
+    };
+    match button {
+        Button::Back if CAN_BACK.load(Ordering::Relaxed) => history(true),
+        Button::Forward if CAN_FORWARD.load(Ordering::Relaxed) => history(false),
+        Button::Back | Button::Forward => {}
+        Button::Share => crate::share_lyrics::open(window.app_handle()),
+        Button::Stage => crate::stage::open(window.app_handle()),
+        Button::Game => crate::game_mode::toggle(window.app_handle()),
+        Button::MiniPlayer => crate::miniplayer::toggle(window.app_handle()),
+        Button::Settings => crate::settings_window::open(window.app_handle()),
+        Button::Minimize => command(SC_MINIMIZE),
+        Button::Maximize if unsafe { IsZoomed(hwnd) }.as_bool() => command(SC_RESTORE),
+        Button::Maximize => command(SC_MAXIMIZE),
+        // The app's close: hide to the tray (main.rs).
+        Button::Close => unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+        },
+    }
+}
+
+impl TitleBar {
+    fn mini_shown(&self) -> bool {
+        self.window.app_handle().state::<Live>().plugin("mini_player")
     }
 
     /// The button under a point of the strip, in DIPs.
@@ -556,23 +604,16 @@ impl TitleBar {
         if !(0.0..HEIGHT).contains(&y) {
             return None;
         }
-        BUTTONS
-            .into_iter()
-            .filter(|b| shown(*b))
-            .find(|b| (button_left(*b, width)..button_left(*b, width) + button_width(*b)).contains(&x))
+        let mini = self.mini_shown();
+        BUTTONS.into_iter().filter(|b| shown(*b, mini)).find(|b| {
+            let left = button_left(*b, width, mini);
+            (left..left + button_width(*b)).contains(&x)
+        })
     }
 
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Button>, nonclient: bool) {
-        if self.tracking != Some(nonclient) {
-            let mut tme = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: if nonclient { TME_LEAVE | TME_NONCLIENT } else { TME_LEAVE },
-                hwndTrack: hwnd,
-                dwHoverTime: 0,
-            };
-            if unsafe { TrackMouseEvent(&mut tme) }.is_ok() {
-                self.tracking = Some(nonclient);
-            }
+        if self.tracking != Some(nonclient) && gfx::track_mouse_leave(hwnd, nonclient) {
+            self.tracking = Some(nonclient);
         }
         if self.hover != hover {
             self.hover = hover;
@@ -584,34 +625,6 @@ impl TitleBar {
         if self.pressed != button {
             self.pressed = button;
             invalidate(hwnd);
-        }
-    }
-
-    fn click(&mut self, hwnd: HWND, button: Button) {
-        let command = |c: u32| unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(c as usize), LPARAM(0));
-        };
-        let history = |back: bool| unsafe {
-            if let Ok(core) = self.controller.CoreWebView2() {
-                let _ = if back { core.GoBack() } else { core.GoForward() };
-            }
-        };
-        match button {
-            Button::Back if CAN_BACK.load(Ordering::Relaxed) => history(true),
-            Button::Forward if CAN_FORWARD.load(Ordering::Relaxed) => history(false),
-            Button::Back | Button::Forward => {}
-            Button::Share => crate::share_lyrics::open(self.window.app_handle()),
-            Button::Stage => crate::stage::open(self.window.app_handle()),
-            Button::Game => crate::game_mode::toggle(self.window.app_handle()),
-            Button::MiniPlayer => crate::miniplayer::toggle(self.window.app_handle()),
-            Button::Settings => crate::settings_window::open(self.window.app_handle()),
-            Button::Minimize => command(SC_MINIMIZE),
-            Button::Maximize if unsafe { IsZoomed(hwnd) }.as_bool() => command(SC_RESTORE),
-            Button::Maximize => command(SC_MAXIMIZE),
-            // The app's close: hide to the tray (main.rs).
-            Button::Close => unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-            },
         }
     }
 
@@ -670,6 +683,10 @@ impl TitleBar {
     }
 
     fn paint(&mut self, hwnd: HWND) {
+        if strip_hidden() {
+            self.surface.paint(hwnd, RECT::default(), |_| {});
+            return;
+        }
         let scale = gfx::scale(hwnd);
         let mut client = RECT::default();
         unsafe {
@@ -677,6 +694,7 @@ impl TitleBar {
         }
         let area = RECT { bottom: (HEIGHT * scale).round() as i32, ..client };
         let width = client.right as f32 / scale;
+        let mini = self.mini_shown();
         let maximized = unsafe { IsZoomed(hwnd) }.as_bool();
         let pal = gfx::palette();
         let dark = pal.text.r > 0.5;
@@ -738,8 +756,8 @@ impl TitleBar {
             c.fill_with(rect(0.0, 0.0, width, HEIGHT * 0.55), &b.sheen);
             let edge = if dark { gfx::rgba(0xffffff, 0.09) } else { gfx::rgba(0x1a1530, 0.08) };
             c.fill(rect(0.0, HEIGHT - 1.0, width, HEIGHT), edge);
-            for button in BUTTONS.into_iter().filter(|b| shown(*b)) {
-                let left = button_left(button, width);
+            for button in BUTTONS.into_iter().filter(|b| shown(*b, mini)) {
+                let left = button_left(button, width, mini);
                 let right = left + button_width(button);
                 let r = rect(left, 0.0, right, HEIGHT);
                 let mut glyph = if enabled(button) { text } else { gfx::with_alpha(text, 0.3) };
@@ -788,9 +806,9 @@ impl TitleBar {
             }
             let name_left = name_left();
             c.text("feathertune", name, rect(name_left, 0.0, name_left + 140.0, HEIGHT), text);
-            let key = (title, artist, first_button_left(width).to_bits(), *brushes_id, name_left.to_bits());
+            let key = (title, artist, first_button_left(width, mini).to_bits(), *brushes_id, name_left.to_bits());
             if line.as_ref().is_none_or(|l| l.key != key) {
-                *line = TrackLine::new(track, &key.0, &key.1, width, &b.dim).map(|l| TrackLine { key, ..l });
+                *line = TrackLine::new(track, &key.0, &key.1, width, mini, &b.dim).map(|l| TrackLine { key, ..l });
             }
             if let Some(l) = line.as_ref() {
                 unsafe { b.dim.SetColor(&gfx::with_alpha(text, 0.6)) };
@@ -835,11 +853,12 @@ fn nav(b: Button) -> bool {
     matches!(b, Button::Back | Button::Forward)
 }
 
-fn shown(b: Button) -> bool {
+fn shown(b: Button, mini: bool) -> bool {
     match b {
         Button::Back | Button::Forward => NAV_ON.load(Ordering::Relaxed),
         Button::Share => SHARE_ON.load(Ordering::Relaxed) && LYRICS_READY.load(Ordering::Relaxed),
         Button::Stage => crate::stage::available(),
+        Button::MiniPlayer => mini,
         _ => true,
     }
 }
@@ -861,8 +880,12 @@ fn name_left() -> f32 {
 }
 
 /// Where the leftmost button on the right side of the strip starts.
-fn first_button_left(width: f32) -> f32 {
-    BUTTONS.into_iter().filter(|b| shown(*b) && !nav(*b)).map(|b| button_left(b, width)).fold(width, f32::min)
+fn first_button_left(width: f32, mini: bool) -> f32 {
+    BUTTONS
+        .into_iter()
+        .filter(|b| shown(*b, mini) && !nav(*b))
+        .map(|b| button_left(b, width, mini))
+        .fold(width, f32::min)
 }
 
 fn button_width(b: Button) -> f32 {
@@ -875,14 +898,14 @@ fn button_width(b: Button) -> f32 {
     }
 }
 
-fn button_left(b: Button, width: f32) -> f32 {
+fn button_left(b: Button, width: f32, mini: bool) -> f32 {
     match b {
         Button::Back => NAV_LEFT,
         Button::Forward => NAV_LEFT + NAV,
         // Each sits left of the ones after it in `RIGHT` that are shown (a hidden one takes no room).
         Button::Share | Button::Stage | Button::Game | Button::MiniPlayer | Button::Settings => {
             let at = RIGHT.iter().position(|r| *r == b).unwrap_or(0);
-            let slot = 1 + RIGHT[at + 1..].iter().filter(|r| shown(**r)).count();
+            let slot = 1 + RIGHT[at + 1..].iter().filter(|r| shown(**r, mini)).count();
             width - 3.0 * BUTTON - GAP - slot as f32 * SMALL
         }
         Button::Minimize => width - 3.0 * BUTTON,
@@ -898,13 +921,6 @@ fn caption_button(hit: usize) -> Option<Button> {
         HTCLOSE => Some(Button::Close),
         _ => None,
     }
-}
-
-/// Client point of a mouse message, in DIPs.
-fn client_dip(hwnd: HWND, lparam: LPARAM) -> (f32, f32) {
-    let scale = gfx::scale(hwnd);
-    let (x, y) = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
-    (x / scale, y / scale)
 }
 
 fn width_dip(hwnd: HWND) -> f32 {
@@ -923,23 +939,18 @@ unsafe extern "system" fn subclass(
     _id: usize,
     data: usize,
 ) -> LRESULT {
-    let bar = unsafe { &mut *(data as *mut TitleBar) };
     match msg {
         WM_NCHITTEST => {
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
             if result.0 as u32 != HTCLIENT {
                 return result;
             }
-            let mut p = POINT { x: lparam.0 as i16 as i32, y: (lparam.0 >> 16) as i16 as i32 };
-            unsafe {
-                let _ = ScreenToClient(hwnd, &mut p);
-            }
-            let scale = gfx::scale(hwnd);
-            let (x, y) = (p.x as f32 / scale, p.y as f32 / scale);
+            let (x, y) = gfx::screen_dip(hwnd, lparam);
             if y >= HEIGHT || strip_hidden() {
                 return result;
             }
-            let code = match bar.hit(x, y, width_dip(hwnd)) {
+            let hit = with_bar(data, |bar| bar.hit(x, y, width_dip(hwnd))).flatten();
+            let code = match hit {
                 Some(Button::Minimize) => HTMINBUTTON,
                 Some(Button::Maximize) => HTMAXBUTTON,
                 Some(Button::Close) => HTCLOSE,
@@ -948,73 +959,105 @@ unsafe extern "system" fn subclass(
             };
             return LRESULT(code as isize);
         }
-        WM_NCMOUSEMOVE => bar.set_hover(hwnd, caption_button(wparam.0), true),
+        WM_NCMOUSEMOVE => {
+            with_bar(data, |bar| bar.set_hover(hwnd, caption_button(wparam.0), true));
+        }
         WM_MOUSEMOVE => {
-            let (x, y) = client_dip(hwnd, lparam);
-            let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b) && enabled(*b));
-            bar.set_hover(hwnd, hover, false);
+            let (x, y) = gfx::client_dip(hwnd, lparam);
+            with_bar(data, |bar| {
+                let hover = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b) && enabled(*b));
+                bar.set_hover(hwnd, hover, false);
+            });
         }
         WM_NCMOUSELEAVE | WM_MOUSELEAVE => {
-            bar.tracking = None;
-            if bar.hover.take().is_some() | bar.pressed.take().is_some() {
-                invalidate(hwnd);
-            }
+            let from_nc = msg == WM_NCMOUSELEAVE;
+            with_bar(data, |bar| {
+                if bar.tracking == Some(from_nc) {
+                    bar.tracking = None;
+                    if bar.hover.take().is_some() | bar.pressed.take().is_some() {
+                        invalidate(hwnd);
+                    }
+                }
+            });
         }
         WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK => {
             if let Some(b) = caption_button(wparam.0) {
-                bar.press(hwnd, Some(b));
+                with_bar(data, |bar| bar.press(hwnd, Some(b)));
                 return LRESULT(0);
             }
         }
         WM_NCLBUTTONUP => {
-            if let Some(b) = caption_button(wparam.0) {
-                let clicked = bar.pressed == Some(b);
+            let hit = caption_button(wparam.0);
+            let action = with_bar(data, |bar| {
+                let clicked = hit.filter(|b| bar.pressed == Some(*b));
                 bar.press(hwnd, None);
-                if clicked {
-                    bar.click(hwnd, b);
-                }
+                clicked.map(|b| (bar.window.clone(), bar.controller.clone(), b))
+            })
+            .flatten();
+            if let Some((window, controller, b)) = action {
+                click(hwnd, &window, &controller, b);
+                return LRESULT(0);
+            }
+            if hit.is_some() {
                 return LRESULT(0);
             }
         }
-        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_LBUTTONUP => {
-            let (x, y) = client_dip(hwnd, lparam);
-            if let Some(b) = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b)) {
-                if !enabled(b) {
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+            let (x, y) = gfx::client_dip(hwnd, lparam);
+            let handled = with_bar(data, |bar| {
+                if let Some(b) = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b)) {
+                    if enabled(b) {
+                        bar.press(hwnd, Some(b));
+                    }
+                    true
+                } else {
+                    false
+                }
+            });
+            if handled == Some(true) {
+                return LRESULT(0);
+            }
+        }
+        WM_LBUTTONUP => {
+            let (x, y) = gfx::client_dip(hwnd, lparam);
+            let action = with_bar(data, |bar| {
+                let hit = bar.hit(x, y, width_dip(hwnd)).filter(|b| ours(*b));
+                let clicked = hit.filter(|b| enabled(*b) && bar.pressed == Some(*b));
+                bar.press(hwnd, None);
+                (hit.is_some(), clicked.map(|b| (bar.window.clone(), bar.controller.clone(), b)))
+            });
+            if let Some((on_button, Some((window, controller, b)))) = action {
+                click(hwnd, &window, &controller, b);
+                if on_button {
                     return LRESULT(0);
                 }
-                if msg == WM_LBUTTONUP {
-                    let clicked = bar.pressed == Some(b);
-                    bar.press(hwnd, None);
-                    if clicked {
-                        bar.click(hwnd, b);
-                    }
-                } else {
-                    bar.press(hwnd, Some(b));
-                }
+            } else if let Some((true, None)) = action {
                 return LRESULT(0);
             }
         }
         WM_PAINT => {
-            bar.paint(hwnd);
+            with_bar(data, |bar| bar.paint(hwnd));
             return LRESULT(0);
         }
         WM_TRACK => {
-            bar.track_changed(hwnd);
+            with_bar(data, |bar| bar.track_changed(hwnd));
             return LRESULT(0);
         }
         WM_TIMER if wparam.0 == TIMER => {
-            bar.tick(hwnd);
+            with_bar(data, |bar| bar.tick(hwnd));
             return LRESULT(0);
         }
         WM_NAV => {
-            if bar.hover.is_some_and(|b| nav(b) && !enabled(b)) {
-                bar.hover = None;
-            }
+            with_bar(data, |bar| {
+                if bar.hover.is_some_and(|b| nav(b) && !enabled(b)) {
+                    bar.hover = None;
+                }
+            });
             invalidate_nav(hwnd);
             return LRESULT(0);
         }
         WM_ANIMATE => {
-            bar.schedule(hwnd);
+            with_bar(data, |bar| bar.schedule(hwnd));
             invalidate(hwnd);
             return LRESULT(0);
         }
@@ -1023,15 +1066,23 @@ unsafe extern "system" fn subclass(
             unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_ANIMATE, WPARAM(0), LPARAM(0));
             }
-            if wparam.0 != 0 {
-                bar.relayout(hwnd);
+            if wparam.0 != 0
+                && let Some(controller) = with_bar(data, |bar| bar.controller.clone())
+            {
+                relayout_controller(&controller, hwnd);
             }
         }
         // The window got its new size from the layer below; the strip's height changed with the DPI.
         WM_DPICHANGED | WM_DISPLAYCHANGE => {
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-            bar.relayout(hwnd);
+            if let Some(controller) = with_bar(data, |bar| bar.controller.clone()) {
+                relayout_controller(&controller, hwnd);
+            }
             return result;
+        }
+        WM_SETTINGCHANGE => {
+            gfx::refresh_dark_mode();
+            invalidate(hwnd);
         }
         // In fullscreen the client area is the whole window. tao keeps a maximized undecorated window's
         // client area to the monitor's work area (so it does not cover the taskbar) even in borderless
@@ -1050,51 +1101,74 @@ unsafe extern "system" fn subclass(
                     SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
-            bar.relayout(hwnd);
-            bar.schedule(hwnd);
+            if let Some(controller) = with_bar(data, |bar| {
+                bar.schedule(hwnd);
+                bar.controller.clone()
+            }) {
+                relayout_controller(&controller, hwnd);
+            }
             invalidate(hwnd);
             return LRESULT(0);
         }
         WM_SIZE => {
             if wparam.0 != SIZE_MINIMIZED as usize {
-                bar.layout(hwnd, (lparam.0 & 0xffff) as i32, ((lparam.0 >> 16) & 0xffff) as i32);
+                if let Some(controller) = with_bar(data, |bar| bar.controller.clone()) {
+                    layout_controller(
+                        &controller,
+                        hwnd,
+                        (lparam.0 & 0xffff) as i32,
+                        ((lparam.0 >> 16) & 0xffff) as i32,
+                    );
+                }
                 if LEAVE_ON_RESTORE.swap(false, Ordering::Relaxed) && !crate::stage::is_open() {
                     unsafe {
                         let _ = PostMessageW(Some(hwnd), WM_LEAVE_FULLSCREEN, WPARAM(0), LPARAM(0));
                     }
                 }
-            } else if crate::stage::close_page(bar.window.app_handle()) {
+            } else if let Some(app) = with_bar(data, |bar| bar.window.app_handle().clone())
+                && crate::stage::close_page(&app)
+            {
                 // Minimized: the stage ends, and the window leaves fullscreen once it is back (leaving it
                 // now would restore it: tao puts the saved placement back).
                 LEAVE_ON_RESTORE.store(true, Ordering::Relaxed);
             }
-            bar.schedule(hwnd);
+            with_bar(data, |bar| bar.schedule(hwnd));
         }
         WM_LEAVE_FULLSCREEN => {
-            set_fullscreen(&bar.window, false);
+            if let Some(window) = with_bar(data, |bar| bar.window.clone()) {
+                set_fullscreen(&window, false);
+            }
             return LRESULT(0);
         }
-        WM_MOVE => unsafe {
-            let _ = bar.controller.NotifyParentWindowPositionChanged();
-        },
+        WM_MOVE => {
+            if let Some(controller) = with_bar(data, |bar| bar.controller.clone()) {
+                unsafe {
+                    let _ = controller.NotifyParentWindowPositionChanged();
+                }
+            }
+        }
         WM_NCACTIVATE => {
-            bar.active = wparam.0 != 0;
-            bar.schedule(hwnd);
+            with_bar(data, |bar| {
+                bar.active = wparam.0 != 0;
+                bar.schedule(hwnd);
+            });
             invalidate(hwnd);
         }
         WM_ACTIVATE => invalidate(hwnd),
         WM_SETFOCUS => {
             // The window got the focus itself (Alt+Tab, the taskbar): hand it to the page.
             let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-            unsafe {
-                let _ = bar.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+            if let Some(controller) = with_bar(data, |bar| bar.controller.clone()) {
+                unsafe {
+                    let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+                }
             }
             return result;
         }
         WM_NCDESTROY => unsafe {
             let _ = KillTimer(Some(hwnd), TIMER);
             let _ = RemoveWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID);
-            drop(Box::from_raw(data as *mut TitleBar));
+            drop(Box::from_raw(data as *mut Cell));
         },
         _ => {}
     }

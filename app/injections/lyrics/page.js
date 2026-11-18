@@ -454,7 +454,7 @@ const DOT_FRAMES = [
 // it runs, pauses and changes rate with the video. It is set back only past `drift` ms apart: every set is
 // a jump on screen.
 const onClock = (a, video, i, ms, drift = DRIFT_MS) => {
-  const running = !video.paused && video.playbackRate > 0;
+  const running = !video.paused && video.playbackRate > 0 && !document.hidden && document.hasFocus();
   if (running && a.playbackRate !== video.playbackRate) a.playbackRate = video.playbackRate;
   if (running && a.playState === 'paused') a.play();
   if (!running && a.playState === 'running') a.pause();
@@ -485,9 +485,17 @@ const PULSE_FRAMES = [
 const PULSE_DRIFT_MS = 300;
 const pulseAt = (i, video, ms) => {
   const b = meta.beat;
-  // Not with the light effects: a pulse keeps the compositor drawing every frame.
+  // Not with the light effects or while hidden/unfocused: a pulse keeps the compositor drawing every frame.
   const light = feathertune.perf?.light() === true;
-  if (!b || light || !lines[i].text || video.playbackRate !== 1 || meta.look?.glow === 'off') {
+  if (
+    !b ||
+    light ||
+    !lines[i].text ||
+    video.playbackRate !== 1 ||
+    meta.look?.glow === 'off' ||
+    document.hidden ||
+    !document.hasFocus()
+  ) {
     pulses[i]?.cancel();
     pulses[i] = null;
     return;
@@ -572,7 +580,7 @@ const arm = (video, ms, force) => {
 };
 
 const sync = (video, force) => {
-  if (!lines || !box || box.hidden || !video) return;
+  if (!lines || !box || box.hidden || document.hidden || !video) return;
   const ms = songMs(video);
   const index = indexAt(lines, ms);
   light(activeAt(ms, index));
@@ -595,7 +603,10 @@ const sync = (video, force) => {
   const t = tab();
   if (anim || !t || Date.now() < manualUntil) return;
   const top = box.getBoundingClientRect().top - t.getBoundingClientRect().top + t.scrollTop;
-  t.scrollTo({ top: top + center(shownLine) - t.clientHeight / 2, behavior: 'smooth' });
+  t.scrollTo({
+    top: top + center(shownLine) - t.clientHeight / 2,
+    behavior: document.hasFocus() ? 'smooth' : 'instant',
+  });
 };
 
 // Lines scale about their vertical middle and the box moves as a whole, so these hold while either runs.
@@ -908,12 +919,34 @@ const onTime = (e) => {
   }
   sync(e.target, e.type === 'seeked');
 };
+const onVisibility = (e) => {
+  follow();
+  if (document.hidden || !document.hasFocus()) {
+    for (const a of pulses) a?.cancel();
+    pulses = pulses.map(() => null);
+    for (const d of dots) {
+      for (const a of d?.anims ?? []) {
+        if (document.hidden) a.cancel();
+        else a.pause();
+      }
+      if (document.hidden && d) d.anims = null;
+    }
+    if (document.hidden) {
+      clearTimeout(timer);
+      timer = 0;
+    }
+    return;
+  }
+  const v = media();
+  if (v) sync(v, e?.type === 'visibilitychange');
+};
+
 for (const type of ['timeupdate', 'seeked', 'play', 'pause', 'ratechange']) {
   document.addEventListener(type, onTime, true);
 }
-window.addEventListener('focus', follow);
-window.addEventListener('blur', follow);
-document.addEventListener('visibilitychange', follow);
+window.addEventListener('focus', onVisibility);
+window.addEventListener('blur', onVisibility);
+document.addEventListener('visibilitychange', onVisibility);
 // A scroll of the tab while the box glides is a manual one (the scrollbar, keys); scroll events do not
 // bubble, so this listens while capturing.
 document.addEventListener(

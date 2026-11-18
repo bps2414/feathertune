@@ -18,7 +18,7 @@ let observer = null;
 
 const adShowing = (player) => player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
 const trackId = (player) =>
-  player.getVideoData?.().video_id || new URLSearchParams(location.search).get('v');
+  player.getVideoData?.()?.video_id || new URLSearchParams(location.search).get('v');
 
 const act = () => {
   const player = document.querySelector(SELECTORS.player);

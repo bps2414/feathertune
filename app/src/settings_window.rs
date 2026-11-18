@@ -357,7 +357,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             live.write("plugins", id, toml_edit::value(on), plugin.legacy, restart)?;
             match id {
                 "global_shortcuts" => crate::shortcuts::register(&app),
-                "mini_player" if !on => crate::miniplayer::close(&app),
+                "mini_player" => {
+                    if !on {
+                        crate::miniplayer::close(&app);
+                    }
+                    crate::titlebar::refresh(&app);
+                }
                 "desktop_lyrics" if !on => crate::desktop_lyrics::close(&app),
                 "stage" => crate::stage::set_enabled(&app, on),
                 "animated_title_bar" => crate::titlebar::set_animated(&app, on),
@@ -368,7 +373,13 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
                     crate::miniplayer::refresh();
                 }
                 "remote" => crate::remote::apply(&app),
-                "sleep_timer" | "controls" => crate::sync_sleep_items(&app),
+                "sleep_timer" | "controls" => {
+                    if !on {
+                        crate::sleep_timer::choose(&app, crate::sleep_timer::OFF_ID);
+                    } else {
+                        crate::sync_sleep_items(&app);
+                    }
+                }
                 id if crate::audio::PLUGINS.contains(&id) => crate::audio::push(&app),
                 _ => {}
             }

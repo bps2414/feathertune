@@ -161,9 +161,10 @@ html[data-feathertune-light] #feathertune-ambient .ft-bg .ft-layer {
   animation-play-state: paused;
 }
 
-/* Light effects: no blur of what is behind the bar (drawn again whenever anything near it changes); the
-   ink is nearly solid instead, so the controls stay readable. */
-html[data-feathertune-ambient][data-feathertune-light] #player-bar-background {
+/* Light effects or open synced lyrics: no blur of what is behind the bar (drawn again whenever anything
+   near it changes, e.g. 60 fps gliding lines); the ink is nearly solid instead, so the controls stay readable. */
+html[data-feathertune-ambient][data-feathertune-light] #player-bar-background,
+html[data-feathertune-ambient][data-feathertune-lyrics-open] #player-bar-background {
   background-color: color-mix(in srgb, var(--feathertune-ink, #030303) 94%, transparent);
   backdrop-filter: none;
 }

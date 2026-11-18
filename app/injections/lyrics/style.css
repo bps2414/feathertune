@@ -21,6 +21,9 @@ ytmusic-tab-renderer[data-feathertune-lyrics] {
 
 #feathertune-lyrics {
   padding: 32px 24px 50vh;
+}
+
+#feathertune-lyrics.ft-gliding {
   will-change: transform;
 }
 
@@ -116,11 +119,14 @@ html[data-feathertune-font] #feathertune-lyrics {
 
 #feathertune-lyrics .ft-line[data-d]::before {
   opacity: 0.01;
-  will-change: opacity;
 }
 
 #feathertune-lyrics .ft-line.ft-current::before {
   opacity: 1;
+}
+
+#feathertune-lyrics .ft-line.ft-current::before,
+#feathertune-lyrics .ft-line[data-d='1']::before {
   will-change: opacity;
 }
 
@@ -132,7 +138,6 @@ html[data-feathertune-font] #feathertune-lyrics {
    layer): a blur of their own per word repainted the whole line at every word. */
 #feathertune-lyrics .ft-line.ft-current .ft-w {
   opacity: 0.5;
-  will-change: opacity;
 }
 
 #feathertune-lyrics .ft-line.ft-current .ft-w.ft-sung {

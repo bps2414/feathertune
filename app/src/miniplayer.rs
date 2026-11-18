@@ -19,6 +19,7 @@
 //!   with no timer.
 //! - The top buttons (lyrics, full window, close) show what they do in a small label on hover.
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
@@ -36,13 +37,12 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_WRAP,
     IDWriteTextFormat,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromWindow, ScreenToClient,
+    GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
+    MonitorFromWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetClientRect, GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, IDC_ARROW, KillTimer, LoadCursorW,
@@ -52,10 +52,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
-use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
-use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
+use crate::gfx::{self, ICON_FONT, TEXT_FONT, WM_MOUSELEAVE, point, rect};
 use crate::i18n::t;
 use crate::lyric_view::View;
 use crate::player::{Event, Player, State};
@@ -84,7 +83,6 @@ const FILE: &str = "mini-player.json";
 const FRAME_MS: u32 = 33;
 /// 60 fps while a lyric line rolls (under half a second), so the motion is smooth.
 const LYRIC_FRAME_MS: u32 = 16;
-use crate::titlebar::WM_MOUSELEAVE;
 
 /// The open window, 0 when closed. Only the main thread creates and destroys it.
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
@@ -228,6 +226,17 @@ fn hit(x: f32, y: f32) -> Option<Button> {
     })
 }
 
+type Cell = RefCell<Mini>;
+
+fn with_mini<R>(hwnd: HWND, f: impl FnOnce(&mut Mini) -> R) -> Option<R> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 unsafe fn create(app: &AppHandle) -> Result<()> {
     static REGISTER: Once = Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
@@ -256,7 +265,7 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         current.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
     }
     let next = font("Segoe UI Variable Text", 12.5, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-    let mini = Box::new(Mini {
+    let mini = Mini {
         app: app.clone(),
         data: data.clone(),
         surface: gfx::Surface::default(),
@@ -273,8 +282,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         hover: None,
         pressed: None,
         tracking: false,
-    });
-    let mini = Box::into_raw(mini);
+    };
+    let mut slot = Some(Box::new(RefCell::new(mini)));
     // On success WM_NCCREATE takes the box (freed in WM_NCDESTROY).
     let hwnd = unsafe {
         CreateWindowExW(
@@ -289,19 +298,13 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
             None,
             None,
             Some(instance.into()),
-            Some(mini as *const _),
+            Some((&raw mut slot).cast()),
         )?
     };
     WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
     unsafe {
         place(app, hwnd);
-        let corner = DWMWCP_ROUND;
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner as *const _ as *const _,
-            size_of_val(&corner) as u32,
-        );
+        gfx::round_corners(hwnd);
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     }
     let rx = app.state::<Player>().subscribe();
@@ -312,21 +315,23 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// Where it was last closed, or the bottom right of the main window's monitor.
+/// Where it was last closed, or the bottom right of the main window's monitor, clamped inside its work area.
 unsafe fn place(app: &AppHandle, hwnd: HWND) {
-    let scale = gfx::scale(hwnd);
-    let (w, h) = ((WIDTH * scale).round() as i32, (height() * scale).round() as i32);
-    let (x, y) = match *LAST_POSITION.lock().unwrap() {
-        Some(p) => p,
-        None => {
-            let main = app.get_window("main").and_then(|w| w.hwnd().ok()).map(|h| HWND(h.0)).unwrap_or(hwnd);
-            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-            let _ = unsafe { GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTOPRIMARY), &mut info) };
+    let saved = *LAST_POSITION.lock().unwrap();
+    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    if let Some((x, y)) = saved {
+        let _ = unsafe { GetMonitorInfoW(MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST), &mut info) };
+    } else {
+        let main = app.get_window("main").and_then(|w| w.hwnd().ok()).map(|h| HWND(h.0)).unwrap_or(hwnd);
+        let _ = unsafe { GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTOPRIMARY), &mut info) };
+    }
+    let work = info.rcWork;
+    gfx::place_in_work_area(hwnd, work, WIDTH, height(), |w, h, scale| {
+        saved.unwrap_or_else(|| {
             let margin = (16.0 * scale) as i32;
-            (info.rcWork.right - w - margin, info.rcWork.bottom - h - margin)
-        }
-    };
-    let _ = unsafe { SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
+            (work.right - w - margin, work.bottom - h - margin)
+        })
+    });
 }
 
 fn worker(hwnd: isize, data: Arc<Mutex<Data>>, mut rx: Receiver<Event>) {
@@ -373,17 +378,11 @@ fn worker(hwnd: isize, data: Arc<Mutex<Data>>, mut rx: Receiver<Event>) {
 impl Mini {
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Button>) {
         if hover.is_some() && !self.tracking {
-            let mut tme = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: TME_LEAVE,
-                hwndTrack: hwnd,
-                dwHoverTime: 0,
-            };
-            self.tracking = unsafe { TrackMouseEvent(&mut tme) }.is_ok();
+            self.tracking = gfx::track_mouse_leave(hwnd, false);
         }
         if self.hover != hover {
             self.hover = hover;
-            invalidate(hwnd);
+            gfx::invalidate(hwnd);
         }
     }
 
@@ -428,12 +427,13 @@ impl Mini {
         self.schedule(hwnd);
     }
 
-    /// Opens or closes the lyrics band; the window grows or shrinks upward (its bottom stays).
+    /// Opens or closes the lyrics band; the window grows or shrinks upward (its bottom stays),
+    /// clamped inside the monitor's work area.
     fn toggle_lyrics(&mut self, hwnd: HWND) {
         let on = !LYRICS.load(Ordering::Relaxed);
         LYRICS.store(on, Ordering::Relaxed);
         if let Ok(bytes) = serde_json::to_vec(&Saved { lyrics: on })
-            && let Err(e) = std::fs::write(saved_path(&self.app), bytes)
+            && let Err(e) = crate::settings::write_atomic(&saved_path(&self.app), bytes)
         {
             eprintln!("mini player: not saved: {e}");
         }
@@ -441,13 +441,15 @@ impl Mini {
         let mut r = RECT::default();
         unsafe {
             if GetWindowRect(hwnd, &mut r).is_ok() {
+                let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+                let _ = GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
                 let h = (height() * scale).round() as i32;
-                let _ =
-                    SetWindowPos(hwnd, None, r.left, r.bottom - h, r.right - r.left, h, SWP_NOZORDER | SWP_NOACTIVATE);
+                let top = (r.bottom - h).max(info.rcWork.top);
+                let _ = SetWindowPos(hwnd, None, r.left, top, r.right - r.left, h, SWP_NOZORDER | SWP_NOACTIVATE);
             }
         }
         self.update_lyrics(hwnd);
-        invalidate(hwnd);
+        gfx::invalidate(hwnd);
     }
 
     fn paint(&mut self, hwnd: HWND) {
@@ -457,15 +459,22 @@ impl Mini {
         }
         let pal = gfx::palette();
         let themes = gfx::blend();
-        // Both themes of a flow are drawn, each at its share of the opacity.
+        // Both themes of a flow are drawn, each at its share of the opacity (skip zero-opacity layers).
         let layers: Vec<(gfx::Theme, f32)> = [(themes.from, 1.0 - themes.t), (themes.to, themes.t)]
             .into_iter()
-            .filter_map(|(theme, share)| theme.map(|t| (t, share)))
+            .filter_map(|(theme, share)| (share > 0.0).then_some(theme).flatten().map(|t| (t, share)))
             .collect();
+        let (state, art) = {
+            let d = self.data.lock().unwrap();
+            let art = d
+                .art
+                .as_ref()
+                .filter(|a| Some(&a.url) == d.state.as_ref().and_then(|s| s.track.artwork.as_ref()))
+                .cloned();
+            (d.state.clone(), art)
+        };
+        let state = state.as_ref();
         let sets = &mut self.glows;
-        let data = self.data.clone();
-        let data = data.lock().unwrap();
-        let state = data.state.as_ref();
         let generation = self.surface.generation;
         let (hover, pressed) = (self.hover, self.pressed);
         let bitmap = &mut self.bitmap;
@@ -474,7 +483,6 @@ impl Mini {
         let lyrics_open = LYRICS.load(Ordering::Relaxed);
         let full_height = height();
         let lyrics = &mut self.lyrics;
-        let art = data.art.as_ref().filter(|a| Some(&a.url) == state.and_then(|s| s.track.artwork.as_ref()));
         self.surface.paint(hwnd, client, |c| {
             c.fill(rect(0.0, 0.0, WIDTH, full_height), pal.background);
             let themes: Vec<gfx::Theme> = layers.iter().map(|(t, _)| *t).collect();
@@ -504,7 +512,7 @@ impl Mini {
             }
             // The surface may have been rebuilt since the bitmap was made (device lost).
             let fresh = |b: &(String, u32, ID2D1BitmapBrush), a: &Art| b.0 == a.url && b.1 == generation;
-            match art {
+            match art.as_ref() {
                 Some(a) if bitmap.as_ref().is_none_or(|b| !fresh(b, a)) => {
                     let props = D2D1_BITMAP_PROPERTIES {
                         pixelFormat: D2D1_PIXEL_FORMAT {
@@ -522,19 +530,7 @@ impl Mini {
                     }
                     .ok()
                     .map(|brush| {
-                        // Maps the center square of the image (video thumbnails are 16:9) onto the art.
-                        let side = a.width.min(a.height) as f32;
-                        let (x, y) = ((a.width as f32 - side) / 2.0, (a.height as f32 - side) / 2.0);
-                        let k = ART / side;
-                        let m = Matrix3x2 {
-                            M11: k,
-                            M12: 0.0,
-                            M21: 0.0,
-                            M22: k,
-                            M31: art_rect.left - x * k,
-                            M32: art_rect.top - y * k,
-                        };
-                        unsafe { brush.SetTransform(&m) };
+                        gfx::cover_brush(&brush, a.width, a.height, art_rect);
                         (a.url.clone(), generation, brush)
                     });
                 }
@@ -653,91 +649,98 @@ impl Mini {
     }
 }
 
-fn invalidate(hwnd: HWND) {
-    unsafe {
-        let _ = InvalidateRect(Some(hwnd), None, false);
-    }
-}
-
-fn client_dip(hwnd: HWND, x: i32, y: i32) -> (f32, f32) {
-    let scale = gfx::scale(hwnd);
-    (x as f32 / scale, y as f32 / scale)
-}
-
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         if msg == WM_NCCREATE {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            let slot = &mut *create.lpCreateParams.cast::<Option<Box<Cell>>>();
+            if let Some(boxed) = slot.take() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(boxed) as isize);
+            }
         }
-        let mini = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Mini;
-        if mini.is_null() {
-            return DefWindowProcW(hwnd, msg, wparam, lparam);
-        }
-        let m = &mut *mini;
-        let mouse = || client_dip(hwnd, lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32);
         match msg {
             WM_NCHITTEST => {
-                let mut p = POINT { x: lparam.0 as i16 as i32, y: (lparam.0 >> 16) as i16 as i32 };
-                let _ = ScreenToClient(hwnd, &mut p);
-                let (x, y) = client_dip(hwnd, p.x, p.y);
+                let (x, y) = gfx::screen_dip(hwnd, lparam);
                 // Anything but a button drags the window.
                 return LRESULT(if hit(x, y).is_some() { HTCLIENT } else { HTCAPTION } as isize);
             }
-            WM_NCMOUSEMOVE => m.set_hover(hwnd, None),
+            WM_NCMOUSEMOVE => {
+                with_mini(hwnd, |m| m.set_hover(hwnd, None));
+            }
             WM_MOUSEMOVE => {
-                let (x, y) = mouse();
-                m.set_hover(hwnd, hit(x, y));
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                with_mini(hwnd, |m| m.set_hover(hwnd, hit(x, y)));
             }
             WM_MOUSELEAVE => {
-                m.tracking = false;
-                if m.hover.take().is_some() | m.pressed.take().is_some() {
-                    invalidate(hwnd);
-                }
+                with_mini(hwnd, |m| {
+                    m.tracking = false;
+                    if m.hover.take().is_some() | m.pressed.take().is_some() {
+                        gfx::invalidate(hwnd);
+                    }
+                });
             }
             WM_LBUTTONDOWN => {
-                let (x, y) = mouse();
-                m.pressed = hit(x, y);
-                invalidate(hwnd);
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                with_mini(hwnd, |m| {
+                    m.pressed = hit(x, y);
+                    gfx::invalidate(hwnd);
+                });
                 return LRESULT(0);
             }
             WM_LBUTTONUP => {
-                let (x, y) = mouse();
-                let clicked = hit(x, y).filter(|b| m.pressed == Some(*b));
-                m.pressed = None;
-                invalidate(hwnd);
-                // Last: closing destroys the window and frees `m`.
-                match clicked {
-                    Some(Button::Previous) => crate::player(&m.app, "previous"),
-                    Some(Button::PlayPause) => crate::player(&m.app, "playPause"),
-                    Some(Button::Next) => crate::player(&m.app, "next"),
-                    Some(Button::Lyrics) => m.toggle_lyrics(hwnd),
-                    Some(Button::Back) => crate::show_main(&m.app.clone()),
-                    Some(Button::Close) => {
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                let action = with_mini(hwnd, |m| {
+                    let clicked = hit(x, y).filter(|b| m.pressed == Some(*b));
+                    m.pressed = None;
+                    gfx::invalidate(hwnd);
+                    if let Some(Button::Lyrics) = clicked {
+                        m.toggle_lyrics(hwnd);
+                        None
+                    } else {
+                        clicked.map(|b| (b, m.app.clone()))
+                    }
+                })
+                .flatten();
+                match action {
+                    Some((Button::Previous, app)) => crate::player(&app, "previous"),
+                    Some((Button::PlayPause, app)) => crate::player(&app, "playPause"),
+                    Some((Button::Next, app)) => crate::player(&app, "next"),
+                    Some((Button::Back, app)) => crate::show_main(&app),
+                    Some((Button::Close, _)) => {
                         let _ = DestroyWindow(hwnd);
                     }
-                    None => {}
+                    Some((Button::Lyrics, _)) | None => {}
                 }
                 return LRESULT(0);
             }
             WM_PAINT => {
-                m.paint(hwnd);
+                with_mini(hwnd, |m| m.paint(hwnd));
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                m.update_lyrics(hwnd);
-                invalidate(hwnd);
+                with_mini(hwnd, |m| m.update_lyrics(hwnd));
+                gfx::invalidate(hwnd);
             }
             WM_TIMER if wparam.0 == LYRIC_TIMER => {
                 let _ = KillTimer(Some(hwnd), LYRIC_TIMER);
-                m.lyric_timer = false;
-                m.update_lyrics(hwnd);
-                invalidate(hwnd);
+                with_mini(hwnd, |m| {
+                    m.lyric_timer = false;
+                    m.update_lyrics(hwnd);
+                });
+                gfx::invalidate(hwnd);
                 return LRESULT(0);
             }
             WM_TIMER if wparam.0 == TIMER => {
-                invalidate(hwnd);
-                m.schedule(hwnd);
+                if !gfx::fading() {
+                    let scale = gfx::scale(hwnd);
+                    let mut client = RECT::default();
+                    let _ = GetClientRect(hwnd, &mut client);
+                    let lyrics = RECT { top: (HEIGHT * scale).floor() as i32, ..client };
+                    let _ = InvalidateRect(Some(hwnd), Some(&lyrics), false);
+                } else {
+                    gfx::invalidate(hwnd);
+                }
+                with_mini(hwnd, |m| m.schedule(hwnd));
                 return LRESULT(0);
             }
             WM_DPICHANGED => {
@@ -760,12 +763,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if GetWindowRect(hwnd, &mut r).is_ok() {
                     *LAST_POSITION.lock().unwrap() = Some((r.left, r.top));
                 }
-                m.data.lock().unwrap().closed = true;
+                with_mini(hwnd, |m| m.data.lock().unwrap().closed = true);
                 WINDOW.store(0, Ordering::Relaxed);
             }
             WM_NCDESTROY => {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(mini));
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Cell;
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
             }
             _ => {}
         }

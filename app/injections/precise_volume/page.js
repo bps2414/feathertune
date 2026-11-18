@@ -28,11 +28,13 @@ const usable = (player) =>
   !!player && typeof player.getVolume === 'function' && typeof player.setVolume === 'function' && !adShowing(player);
 
 const show = (volume) => {
+  const host = document.body || document.documentElement;
+  if (!host) return;
   if (!hud) {
     hud = document.createElement('div');
     hud.id = HUD_ID;
     hud.setAttribute('aria-hidden', 'true');
-    document.body.append(hud);
+    host.append(hud);
   }
   hud.textContent = `${volume}%`;
   // Beside the site's slider, or above the right end of the player bar when it is hidden (narrow window).
@@ -64,7 +66,9 @@ const apply = (player, volume, raise) => {
 const step = (steps) => {
   const player = document.querySelector(SELECTORS.player);
   if (!usable(player)) return false;
-  apply(player, player.getVolume() + steps, steps > 0);
+  const current = player.getVolume();
+  if (!Number.isFinite(current)) return false;
+  apply(player, current + steps, steps > 0);
   return true;
 };
 

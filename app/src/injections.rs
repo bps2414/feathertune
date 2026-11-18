@@ -20,7 +20,8 @@
 //! Imported extensions (extensions.rs) are not modules: the `extensions` host goes at the end of this script and
 //! each extension is an initialization script of its own; their settings reach the page as the `ext` module's data.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -95,40 +96,117 @@ const INJECTIONS: &[Injection] = &[
     },
 ];
 
-/// The last data `send` gave each module (as JSON text).
+static HIDDEN: AtomicBool = AtomicBool::new(false);
+
+/// The last data `send` gave each module (as JSON text) and any visual updates deferred while hidden.
 #[derive(Default)]
-pub struct PageData(Mutex<BTreeMap<&'static str, String>>);
+pub struct PageData(Mutex<PageState>);
+
+#[derive(Default)]
+struct PageState {
+    values: BTreeMap<&'static str, String>,
+    dirty: BTreeSet<&'static str>,
+}
+
+fn is_visual(module: &str) -> bool {
+    matches!(module, "theme" | "ambient" | "lyrics" | "lyricsLook" | "lyricsFont" | "stage" | "stageFont" | "perf")
+}
 
 /// Gives `module` (a `feathertune.<module>` object with a `set` function) its data. `Value::Null` clears.
 /// The same data as last time is not sent again (the page has it; a `set` would only redo its work).
+/// Visual updates while the main window is hidden are held in `PageData` and flushed together when it shows again.
 /// Callable from any thread.
 pub fn send(app: &AppHandle, module: &'static str, data: &Value) {
     let json = data.to_string();
-    if app.state::<PageData>().0.lock().unwrap().insert(module, json.clone()).as_ref() == Some(&json) {
+    let defer = {
+        let pd = app.state::<PageData>();
+        let mut state = pd.0.lock().unwrap();
+        if state.values.get(module).is_some_and(|prev| prev == &json) {
+            return;
+        }
+        state.values.insert(module, json.clone());
+        if HIDDEN.load(Ordering::Relaxed) && is_visual(module) {
+            state.dirty.insert(module);
+            true
+        } else {
+            state.dirty.remove(module);
+            false
+        }
+    };
+    if !defer && let Some(site) = app.get_webview("site") {
+        push(&site, module, &json);
+    }
+}
+
+/// Tracks whether the main window is hidden in the tray; on show, flushes deferred visual updates in one eval.
+pub fn set_hidden(app: &AppHandle, hidden: bool) {
+    HIDDEN.store(hidden, Ordering::Relaxed);
+    if hidden {
+        return;
+    }
+    let pending: Vec<_> = {
+        let pd = app.state::<PageData>();
+        let mut state = pd.0.lock().unwrap();
+        let dirty = std::mem::take(&mut state.dirty);
+        dirty.into_iter().filter_map(|m| state.values.get(m).cloned().map(|j| (m, j))).collect()
+    };
+    if pending.is_empty() {
         return;
     }
     if let Some(site) = app.get_webview("site") {
-        push(&site, module, &json);
+        push_batch(&site, &pending);
     }
 }
 
 /// Sends every module its last data again (the page finished loading).
 pub fn resend(site: &Webview) {
-    let all: Vec<_> = site.state::<PageData>().0.lock().unwrap().iter().map(|(m, j)| (*m, j.clone())).collect();
-    for (module, json) in all {
-        push(site, module, &json);
+    let hidden = HIDDEN.load(Ordering::Relaxed);
+    let immediate: Vec<_> = {
+        let pd = site.state::<PageData>();
+        let mut state = pd.0.lock().unwrap();
+        let modules: Vec<&'static str> = state.values.keys().copied().collect();
+        let mut now = Vec::new();
+        for module in modules {
+            if hidden && is_visual(module) {
+                state.dirty.insert(module);
+            } else if let Some(json) = state.values.get(module).cloned() {
+                state.dirty.remove(module);
+                now.push((module, json));
+            }
+        }
+        now
+    };
+    if !immediate.is_empty() {
+        push_batch(site, &immediate);
     }
 }
 
 fn push(site: &Webview, module: &str, json: &str) {
+    let ext_js = site.state::<crate::extensions::Extensions>().running().iter().any(|e| e.js.is_some());
+    let mut js = String::new();
+    push_stmt(&mut js, module, json, ext_js);
+    let _ = site.eval(js);
+}
+
+fn push_batch(site: &Webview, items: &[(&'static str, String)]) {
+    let ext_js = site.state::<crate::extensions::Extensions>().running().iter().any(|e| e.js.is_some());
+    let mut js = String::new();
+    for (module, json) in items {
+        push_stmt(&mut js, module, json, ext_js);
+    }
+    let _ = site.eval(js);
+}
+
+fn push_stmt(out: &mut String, module: &str, json: &str, ext_js: bool) {
     // `module` is one of our constant ids; the data goes in as a string literal that the page parses.
     let literal = serde_json::to_string(json).expect("a string serializes");
-    let _ = site.eval(format!("window.__feathertune?.{module}?.set(JSON.parse({literal}))"));
     // The extensions' page code reads the lyrics and the album colors too (`ft.lyrics`, `ft.theme`).
-    if matches!(module, "lyrics" | "theme")
-        && site.state::<crate::extensions::Extensions>().running().iter().any(|e| e.js.is_some())
-    {
-        let _ = site.eval(format!("window.__feathertune?.ext?.feed('{module}', JSON.parse({literal}))"));
+    if matches!(module, "lyrics" | "theme") && ext_js {
+        out.push_str(&format!(
+            "{{const __d=JSON.parse({literal});window.__feathertune?.{module}?.set(__d);window.__feathertune?.ext?.feed('{module}',__d);}}\n"
+        ));
+    } else {
+        out.push_str(&format!("window.__feathertune?.{module}?.set(JSON.parse({literal}));\n"));
     }
 }
 
@@ -195,5 +273,23 @@ mod tests {
                 assert!(crate::plugins::get(p).is_some(), "{} {p}", inj.id);
             }
         }
+    }
+
+    #[test]
+    fn visual_and_immediate_modules_split() {
+        for m in ["theme", "ambient", "lyrics", "lyricsLook", "lyricsFont", "stage", "stageFont", "perf"] {
+            assert!(is_visual(m), "{m}");
+        }
+        for m in ["audio", "controls", "ext"] {
+            assert!(!is_visual(m), "{m}");
+        }
+    }
+
+    #[test]
+    fn null_replaces_large_payload() {
+        let mut state = PageState::default();
+        state.values.insert("lyricsFont", "big-base64".repeat(1000));
+        state.values.insert("lyricsFont", Value::Null.to_string());
+        assert_eq!(state.values.get("lyricsFont").map(String::as_str), Some("null"));
     }
 }

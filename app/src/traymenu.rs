@@ -14,6 +14,7 @@
 //! - It exists only while open, and repaints only on hover and focus changes (no timer). Screen
 //!   readers do not see it as a menu, unlike the Windows one: turn the plugin off for that.
 
+use std::cell::RefCell;
 use std::sync::Once;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
@@ -25,30 +26,24 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING, IDWriteTextFormat,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-};
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_SPACE,
-    VK_UP,
+    ReleaseCapture, SetCapture, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_SPACE, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
     GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, IDC_ARROW, KillTimer,
-    LoadCursorW, RegisterClassExW, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WA_INACTIVE, WM_ACTIVATE, WM_ACTIVATEAPP, WM_CAPTURECHANGED,
-    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_TIMER,
-    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    LoadCursorW, RegisterClassExW, SW_SHOW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, WA_INACTIVE,
+    WM_ACTIVATE, WM_ACTIVATEAPP, WM_CAPTURECHANGED, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
 
-use crate::gfx::{self, ICON_FONT, TEXT_FONT, point, rect};
+use crate::gfx::{self, ICON_FONT, TEXT_FONT, WM_MOUSELEAVE, point, rect};
 use crate::i18n::t;
 use crate::player::Player;
 use crate::settings::Live;
-use crate::titlebar::WM_MOUSELEAVE;
 
 /// Sizes in DIPs.
 const WIDTH: f32 = 272.0;
@@ -291,49 +286,46 @@ impl Menu {
         });
     }
 
-    /// Destroys the window, which frees `self`: call it last.
-    fn close(&mut self, hwnd: HWND) {
-        if !self.closing {
-            self.closing = true;
-            unsafe {
-                let _ = DestroyWindow(hwnd);
-            }
-        }
+    /// Marks closing and returns whether `DestroyWindow` should run after dropping the borrow.
+    fn begin_close(&mut self) -> bool {
+        !std::mem::replace(&mut self.closing, true)
     }
 
-    /// Runs a control or an item, after closing the menu (the command may open another window).
-    /// Frees `self`: call it last.
-    fn activate(&mut self, hwnd: HWND, target: Target) {
+    /// Resolves a control or an item to run after closing the menu.
+    fn pick(&mut self, target: Target) -> Option<(AppHandle, &'static str)> {
         let id = match target {
             Target::Control(i) => CONTROLS[i],
             Target::Item(i) => match self.entries[i] {
                 Entry::Item { id, enabled: true, .. } => id,
-                _ => return,
+                _ => return None,
             },
         };
-        let app = self.app.clone();
-        self.close(hwnd);
-        crate::tray_command(&app, id);
+        Some((self.app.clone(), id))
     }
 
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Target>) {
         if !self.tracking {
-            let mut tme = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: TME_LEAVE,
-                hwndTrack: hwnd,
-                dwHoverTime: 0,
-            };
-            self.tracking = unsafe { TrackMouseEvent(&mut tme) }.is_ok();
+            self.tracking = gfx::track_mouse_leave(hwnd, false);
         }
         if self.hover != hover {
             self.hover = hover;
             if hover.is_some() {
                 self.focus = None;
             }
-            invalidate(hwnd);
+            gfx::invalidate(hwnd);
         }
     }
+}
+
+type Cell = RefCell<Menu>;
+
+fn with_menu<R>(hwnd: HWND, f: impl FnOnce(&mut Menu) -> R) -> Option<R> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
 }
 
 unsafe fn create(app: &AppHandle) -> Result<()> {
@@ -354,7 +346,7 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     });
     let state = app.state::<Player>().current();
     let font = |family: &str, size, weight, align| gfx::text_format(family, size, weight, align);
-    let menu = Box::new(Menu {
+    let menu = Menu {
         app: app.clone(),
         entries: entries(app),
         title: state.as_ref().map(|s| s.track.title.clone()).unwrap_or_default(),
@@ -374,15 +366,14 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         captured: false,
         foreground: 0,
         closing: false,
-    });
+    };
     let total = height(&menu.entries);
     let mut cursor = POINT::default();
     unsafe {
         let _ = GetCursorPos(&mut cursor);
     }
-    let menu = Box::into_raw(menu);
-    // On success WM_NCCREATE takes the box (freed in WM_NCDESTROY). Made at the cursor first, so it
-    // has the DPI of that monitor when it is sized.
+    let mut slot = Some(Box::new(RefCell::new(menu)));
+    // On success WM_NCCREATE takes the box (freed in WM_NCDESTROY).
     let hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
@@ -396,143 +387,173 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
             None,
             None,
             Some(instance.into()),
-            Some(menu as *const _),
+            Some((&raw mut slot).cast()),
         )?
     };
     WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
-    let scale = gfx::scale(hwnd);
-    let (w, h) = ((WIDTH * scale).round() as i32, (total * scale).round() as i32);
     let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
     unsafe {
         let _ = GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &mut info);
     }
-    let work = info.rcWork;
-    // Opens away from the edge the tray is on, inside the work area.
-    let x = if cursor.x + w > work.right { cursor.x - w } else { cursor.x };
-    let y = if cursor.y + h > work.bottom { cursor.y - h } else { cursor.y };
-    let x = x.clamp(work.left, (work.right - w).max(work.left));
-    let y = y.clamp(work.top, (work.bottom - h).max(work.top));
+    // Opens away from the edge the tray is on, inside the target monitor's work area at its DPI.
+    gfx::place_in_work_area(hwnd, info.rcWork, WIDTH, total, |w, h, _| {
+        let x = if cursor.x + w > info.rcWork.right { cursor.x - w } else { cursor.x };
+        let y = if cursor.y + h > info.rcWork.bottom { cursor.y - h } else { cursor.y };
+        (x, y)
+    });
+    gfx::round_corners(hwnd);
     unsafe {
-        let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-        let corner = DWMWCP_ROUND;
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner as *const _ as *const _,
-            size_of_val(&corner) as u32,
-        );
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = BringWindowToTop(hwnd);
-        if !SetForegroundWindow(hwnd).as_bool() {
+        if GetWindowLongPtrW(hwnd, GWLP_USERDATA) != 0 && !SetForegroundWindow(hwnd).as_bool() {
             SetCapture(hwnd);
-            (*menu).captured = true;
-            (*menu).foreground = GetForegroundWindow().0 as isize;
+            let fg = GetForegroundWindow().0 as isize;
+            with_menu(hwnd, |m| {
+                m.captured = true;
+                m.foreground = fg;
+            });
             SetTimer(Some(hwnd), WATCH_TIMER, WATCH_MS, None);
         }
     }
     Ok(())
 }
 
-fn invalidate(hwnd: HWND) {
-    unsafe {
-        let _ = InvalidateRect(Some(hwnd), None, false);
-    }
-}
-
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         if msg == WM_NCCREATE {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            let slot = &mut *create.lpCreateParams.cast::<Option<Box<Cell>>>();
+            if let Some(boxed) = slot.take() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(boxed) as isize);
+            }
         }
-        let menu = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Menu;
-        if menu.is_null() {
-            return DefWindowProcW(hwnd, msg, wparam, lparam);
-        }
-        let m = &mut *menu;
-        let scale = gfx::scale(hwnd);
-        let mouse = || ((lparam.0 as i16) as f32 / scale, ((lparam.0 >> 16) as i16) as f32 / scale);
-        let outside = |(x, y): (f32, f32)| x < 0.0 || y < 0.0 || x >= WIDTH || y >= height(&m.entries);
+        let close_now = || {
+            if with_menu(hwnd, Menu::begin_close) == Some(true) {
+                let _ = DestroyWindow(hwnd);
+            }
+        };
+        let run_target = |target: Target| {
+            if let Some((app, id)) = with_menu(hwnd, |m| m.pick(target)).flatten() {
+                close_now();
+                crate::tray_command(&app, id);
+            }
+        };
         match msg {
             WM_ACTIVATE if (wparam.0 & 0xffff) as u32 == WA_INACTIVE => {
-                m.close(hwnd);
+                close_now();
                 return LRESULT(0);
             }
             WM_ACTIVATEAPP if wparam.0 == 0 => {
-                m.close(hwnd);
+                close_now();
                 return LRESULT(0);
             }
-            WM_CAPTURECHANGED if m.captured => {
-                m.close(hwnd);
-                return LRESULT(0);
+            WM_CAPTURECHANGED => {
+                if with_menu(hwnd, |m| m.captured) == Some(true) {
+                    close_now();
+                    return LRESULT(0);
+                }
             }
             WM_TIMER if wparam.0 == WATCH_TIMER => {
                 let now = GetForegroundWindow().0 as isize;
-                if now != m.foreground && now != hwnd.0 as isize {
-                    m.close(hwnd);
+                if with_menu(hwnd, |m| now != m.foreground && now != hwnd.0 as isize) == Some(true) {
+                    close_now();
                 }
                 return LRESULT(0);
             }
             WM_MOUSEMOVE => {
-                let hover = m.hit(mouse().0, mouse().1);
-                m.set_hover(hwnd, hover);
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                with_menu(hwnd, |m| {
+                    let hover = m.hit(x, y);
+                    m.set_hover(hwnd, hover);
+                });
             }
             WM_MOUSELEAVE => {
-                m.tracking = false;
-                if m.hover.take().is_some() | m.pressed.take().is_some() {
-                    invalidate(hwnd);
-                }
+                with_menu(hwnd, |m| {
+                    m.tracking = false;
+                    if m.hover.take().is_some() | m.pressed.take().is_some() {
+                        gfx::invalidate(hwnd);
+                    }
+                });
             }
             WM_LBUTTONDOWN => {
-                if m.captured && outside(mouse()) {
-                    m.close(hwnd);
-                    return LRESULT(0);
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                let close = with_menu(hwnd, |m| {
+                    if m.captured && (x < 0.0 || y < 0.0 || x >= WIDTH || y >= height(&m.entries)) {
+                        return true;
+                    }
+                    m.pressed = m.hit(x, y);
+                    gfx::invalidate(hwnd);
+                    false
+                });
+                if close == Some(true) {
+                    close_now();
                 }
-                m.pressed = m.hit(mouse().0, mouse().1);
-                invalidate(hwnd);
                 return LRESULT(0);
             }
             WM_LBUTTONUP => {
-                let (x, y) = mouse();
-                let clicked = m.hit(x, y).filter(|t| m.pressed == Some(*t));
-                m.pressed = None;
-                invalidate(hwnd);
-                // Last: running an item destroys the window and frees `m`.
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                let clicked = with_menu(hwnd, |m| {
+                    let clicked = m.hit(x, y).filter(|t| m.pressed == Some(*t));
+                    m.pressed = None;
+                    gfx::invalidate(hwnd);
+                    clicked
+                })
+                .flatten();
                 if let Some(t) = clicked {
-                    m.activate(hwnd, t);
+                    run_target(t);
                 }
                 return LRESULT(0);
             }
             WM_KEYDOWN => {
+                enum KeyAction {
+                    None,
+                    Close,
+                    Activate(Target),
+                }
                 let key = wparam.0 as u16;
-                if key == VK_ESCAPE.0 {
-                    m.close(hwnd);
-                } else if key == VK_DOWN.0 || key == VK_UP.0 {
-                    m.focus = m.step_focus(if key == VK_DOWN.0 { 1 } else { -1 });
-                    m.hover = None;
-                    invalidate(hwnd);
-                } else if (key == VK_RETURN.0 || key == VK_SPACE.0)
-                    && let Some(i) = m.focus
-                {
-                    m.activate(hwnd, Target::Item(i));
+                let action = with_menu(hwnd, |m| {
+                    if key == VK_ESCAPE.0 {
+                        KeyAction::Close
+                    } else if key == VK_DOWN.0 || key == VK_UP.0 {
+                        m.focus = m.step_focus(if key == VK_DOWN.0 { 1 } else { -1 });
+                        m.hover = None;
+                        gfx::invalidate(hwnd);
+                        KeyAction::None
+                    } else if (key == VK_RETURN.0 || key == VK_SPACE.0)
+                        && let Some(i) = m.focus
+                    {
+                        KeyAction::Activate(Target::Item(i))
+                    } else {
+                        KeyAction::None
+                    }
+                });
+                match action {
+                    Some(KeyAction::Close) => close_now(),
+                    Some(KeyAction::Activate(t)) => run_target(t),
+                    _ => {}
                 }
                 return LRESULT(0);
             }
             WM_PAINT => {
-                m.paint(hwnd);
+                with_menu(hwnd, |m| m.paint(hwnd));
                 return LRESULT(0);
             }
             WM_DESTROY => {
-                m.closing = true;
                 let _ = KillTimer(Some(hwnd), WATCH_TIMER);
-                if m.captured {
+                let captured = with_menu(hwnd, |m| {
+                    m.closing = true;
+                    m.captured
+                }) == Some(true);
+                if captured {
                     let _ = ReleaseCapture();
                 }
                 WINDOW.store(0, Ordering::Relaxed);
             }
             WM_NCDESTROY => {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(menu));
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Cell;
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
             }
             _ => {}
         }

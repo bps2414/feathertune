@@ -15,12 +15,13 @@
 //! - The clipboard gets the picture as a DIB and as "PNG" (which chat apps and browsers prefer).
 //! - Nothing runs while it is open but idle: it repaints on input and on a lyrics change only.
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
-use windows::Win32::Foundation::{E_FAIL, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{E_FAIL, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
@@ -35,20 +36,16 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_WRAP, IDWriteTextFormat,
     IDWriteTextLayout,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFOHEADER, GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
-    MonitorFromWindow, ScreenToClient,
+    BI_RGB, BITMAPINFOHEADER, GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_CONTROL, VK_ESCAPE, VK_SHIFT,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_ESCAPE, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetClientRect, GetWindowLongPtrW, HTCAPTION, HTCLIENT, ICON_BIG, ICON_SMALL, IDC_ARROW, IDC_HAND, KillTimer,
@@ -62,12 +59,11 @@ use windows::core::{Error, Result, w};
 use windows_numerics::Matrix3x2;
 
 use crate::artwork::{self, Art};
-use crate::gfx::{self, Canvas, ICON_FONT, TEXT_FONT, point, rect, rgb, rgba, with_alpha};
+use crate::gfx::{self, Canvas, ICON_FONT, TEXT_FONT, WM_MOUSELEAVE, point, rect, rgb, rgba, with_alpha};
 use crate::i18n::{t, tf};
 use crate::lyrics::{Lyrics, track_key};
 use crate::player::Player;
 use crate::settings::Live;
-use crate::titlebar::WM_MOUSELEAVE;
 
 /// Window size in DIPs.
 const WIDTH: f32 = 880.0;
@@ -93,6 +89,7 @@ const FOOTER: f32 = 58.0;
 const SKIP: f32 = 26.0;
 /// The picture is the card at this scale: 1080 px wide.
 const EXPORT_SCALE: f32 = 3.0;
+const MAX_EXPORT_HEIGHT: i32 = 8192;
 /// The side of the Cover look's color field.
 const FIELD: u32 = 48;
 /// Side of the film grain tile, in pixels.
@@ -202,6 +199,7 @@ struct Snapshot {
     artist: String,
     album: String,
     artwork: Option<String>,
+    theme: Option<gfx::Theme>,
     /// The lines with text (instrumental gaps left out), with their times.
     rows: Vec<(u32, String)>,
 }
@@ -283,6 +281,17 @@ struct Share {
     status: Option<String>,
 }
 
+type Cell = RefCell<Share>;
+
+fn with_share<R>(hwnd: HWND, f: impl FnOnce(&mut Share) -> R) -> Option<R> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 unsafe fn create(app: &AppHandle) -> Result<()> {
     static REGISTER: Once = Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
@@ -321,7 +330,7 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         quote: font("Georgia", 96.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?,
         footer: font("Segoe UI Variable Text", 11.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
     };
-    let share = Box::new(Share {
+    let share = Share {
         app: app.clone(),
         surface: gfx::Surface::default(),
         formats,
@@ -338,8 +347,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         pressed: None,
         tracking: false,
         status: None,
-    });
-    let share = Box::into_raw(share);
+    };
+    let mut slot = Some(Box::new(RefCell::new(share)));
     // On success WM_NCCREATE takes the box (freed in WM_NCDESTROY).
     let hwnd = unsafe {
         CreateWindowExW(
@@ -354,22 +363,17 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
             None,
             None,
             Some(instance.into()),
-            Some(share as *const _),
+            Some((&raw mut slot).cast()),
         )?
     };
     WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
-    unsafe {
-        let s = &mut *share;
+    with_share(hwnd, |s| {
         s.take_snapshot(hwnd, true);
         s.look = s.looks()[0];
+    });
+    unsafe {
         place(app, hwnd);
-        let corner = DWMWCP_ROUND;
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner as *const _ as *const _,
-            size_of_val(&corner) as u32,
-        );
+        gfx::round_corners(hwnd);
         // The app's icon on the taskbar button and in Alt+Tab.
         if let Some(main) = app.get_window("main").and_then(|w| w.hwnd().ok()) {
             for size in [ICON_BIG, ICON_SMALL] {
@@ -383,16 +387,15 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// Centered on the main window's monitor.
+/// Centered on the main window's monitor, sized for that monitor's DPI.
 unsafe fn place(app: &AppHandle, hwnd: HWND) {
-    let scale = gfx::scale(hwnd);
-    let (w, h) = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
     let main = app.get_window("main").and_then(|w| w.hwnd().ok()).map(|h| HWND(h.0)).unwrap_or(hwnd);
     let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
     let _ = unsafe { GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTOPRIMARY), &mut info) };
     let work = info.rcWork;
-    let (x, y) = (work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2);
-    let _ = unsafe { SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
+    gfx::place_in_work_area(hwnd, work, WIDTH, HEIGHT, |w, h, _| {
+        (work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2)
+    });
 }
 
 /// Loads the cover and makes its color field. Worker thread.
@@ -433,18 +436,9 @@ fn bitmap_brush(c: &Canvas, width: u32, height: u32, pixels: &[u8]) -> Option<ID
     }
 }
 
-/// Moves a bitmap brush of `width` × `height` so the image covers `r`, centered.
-fn cover(brush: &ID2D1BitmapBrush, width: u32, height: u32, r: D2D_RECT_F) {
-    let (w, h) = (width as f32, height as f32);
-    let k = ((r.right - r.left) / w).max((r.bottom - r.top) / h);
-    let x = r.left + ((r.right - r.left) - w * k) / 2.0;
-    let y = r.top + ((r.bottom - r.top) - h * k) / 2.0;
-    unsafe { brush.SetTransform(&Matrix3x2 { M11: k, M12: 0.0, M21: 0.0, M22: k, M31: x, M32: y }) };
-}
-
 impl CardBrushes {
     /// Rebuilds what belongs to another target or another cover.
-    fn sync(&mut self, c: &Canvas, media: Option<&Media>) {
+    fn sync(&mut self, c: &Canvas, expected: Option<&str>, media: Option<&Media>) {
         if self.generation != c.generation {
             self.generation = c.generation;
             self.url.clear();
@@ -455,6 +449,7 @@ impl CardBrushes {
             self.grain = grain_brush(c);
             self.edge = c.solid(rgb(0xffffff));
         }
+        let media = media.filter(|m| Some(m.url.as_str()) == expected);
         let url = media.map_or("", |m| m.url.as_str());
         if self.url != url {
             self.url = url.to_owned();
@@ -531,10 +526,11 @@ fn draw_card(
     f: &Formats,
     b: &mut CardBrushes,
 ) {
-    b.sync(c, media);
+    let media = media.filter(|m| Some(&m.url) == snap.artwork.as_ref());
+    b.sync(c, snap.artwork.as_deref(), media);
     let h = card.height;
     let full = rect(0.0, 0.0, CARD_W, h);
-    let theme = gfx::blend().to;
+    let theme = snap.theme;
     let ink = theme.map_or(0x161616, |t| t.ink);
     let paper = look == Look::Paper;
     let text = if paper { rgb(0x1d1b18) } else { rgb(0xffffff) };
@@ -573,7 +569,7 @@ fn draw_card(
         Look::Cover => {
             c.fill(full, rgb(ink));
             if let Some(field) = &b.field {
-                cover(field, FIELD, FIELD, full);
+                gfx::cover_brush(field, FIELD, FIELD, full);
                 c.fill_with(full, field);
             }
             glows(b, 0.4);
@@ -633,7 +629,7 @@ fn draw_card(
     }
     match (&b.art, media) {
         (Some(brush), Some(m)) => unsafe {
-            cover(brush, m.art.width, m.art.height, art);
+            gfx::cover_brush(brush, m.art.width, m.art.height, art);
             let rounded = D2D1_ROUNDED_RECT { rect: art, radiusX: ART_RADIUS, radiusY: ART_RADIUS };
             c.target.FillRoundedRectangle(&rounded, brush);
             // A thin light rim, as if the cover caught the light.
@@ -739,7 +735,7 @@ impl Share {
     fn take_snapshot(&mut self, hwnd: HWND, pick_now: bool) {
         let state = self.app.state::<Player>().current();
         let synced = self.app.state::<Lyrics>().current();
-        let mut snap = Snapshot::default();
+        let mut snap = Snapshot { theme: gfx::blend().to, ..Snapshot::default() };
         if let Some(s) = &state {
             snap.title = s.track.title.clone();
             snap.artist = s.track.artist.clone();
@@ -780,10 +776,10 @@ impl Share {
     /// The looks that can be drawn now: Cover needs the cover, Ink the album theme.
     fn looks(&self) -> Vec<Look> {
         let mut looks = Vec::new();
-        if self.media.lock().unwrap().is_some() {
+        if self.media.lock().unwrap().as_ref().is_some_and(|m| Some(&m.url) == self.snapshot.artwork.as_ref()) {
             looks.push(Look::Cover);
         }
-        if gfx::blend().to.is_some() {
+        if self.snapshot.theme.is_some() {
             looks.push(Look::Ink);
         }
         looks.extend([Look::Dark, Look::Paper]);
@@ -813,17 +809,11 @@ impl Share {
 
     fn set_hover(&mut self, hwnd: HWND, hover: Option<Target>) {
         if hover.is_some() && !self.tracking {
-            let mut tme = TRACKMOUSEEVENT {
-                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                dwFlags: TME_LEAVE,
-                hwndTrack: hwnd,
-                dwHoverTime: 0,
-            };
-            self.tracking = unsafe { TrackMouseEvent(&mut tme) }.is_ok();
+            self.tracking = gfx::track_mouse_leave(hwnd, false);
         }
         if self.hover != hover {
             self.hover = hover;
-            invalidate(hwnd);
+            gfx::invalidate(hwnd);
         }
     }
 
@@ -858,10 +848,11 @@ impl Share {
     /// The card as a picture: its pixels (top-down, opaque BGRA), width and height.
     fn render(&mut self) -> Result<(Vec<u8>, u32, u32)> {
         let look = self.look;
-        let media = self.media.lock().unwrap().clone();
+        let media = self.media.lock().unwrap().clone().filter(|m| Some(&m.url) == self.snapshot.artwork.as_ref());
         self.card();
         let card = self.card.as_ref().ok_or_else(|| Error::from_hresult(E_FAIL))?;
-        let (w, h) = ((CARD_W * EXPORT_SCALE).round() as i32, (card.height * EXPORT_SCALE).round() as i32);
+        let w = (CARD_W * EXPORT_SCALE).round() as i32;
+        let h = ((card.height * EXPORT_SCALE).round() as i32).clamp(1, MAX_EXPORT_HEIGHT);
         let mut picture = gfx::Offscreen::new(w, h)?;
         let mut brushes = CardBrushes::default();
         let (snap, formats) = (&self.snapshot, &self.formats);
@@ -925,7 +916,7 @@ impl Share {
             let _ = GetClientRect(hwnd, &mut client);
         }
         let pal = gfx::palette();
-        let media = self.media.lock().unwrap().clone();
+        let media = self.media.lock().unwrap().clone().filter(|m| Some(&m.url) == self.snapshot.artwork.as_ref());
         let look = self.look;
         let has_card = self.card().is_some();
         let Share { surface, formats: f, snapshot: snap, picks, card, brushes, scroll, hover, pressed, status, .. } =
@@ -1084,28 +1075,14 @@ unsafe fn clipboard_set(format: u32, bytes: &[u8]) -> std::result::Result<(), St
     }
 }
 
-fn invalidate(hwnd: HWND) {
-    unsafe {
-        let _ = InvalidateRect(Some(hwnd), None, false);
-    }
-}
-
-fn client_dip(hwnd: HWND, x: i32, y: i32) -> (f32, f32) {
-    let scale = gfx::scale(hwnd);
-    (x as f32 / scale, y as f32 / scale)
-}
-
 fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
     unsafe { GetKeyState(i32::from(key.0)) < 0 }
 }
 
-/// Runs a button. Close destroys the window and frees `s`.
-fn press(s: &mut Share, hwnd: HWND, b: Button) {
+/// Runs a button. Returns `true` when `Close` asks the caller to destroy the window after dropping the borrow.
+fn press(s: &mut Share, hwnd: HWND, b: Button) -> bool {
     match b {
-        Button::Close => {
-            let _ = unsafe { DestroyWindow(hwnd) };
-            return;
-        }
+        Button::Close => return true,
         Button::Look => {
             let looks = s.looks();
             let i = looks.iter().position(|l| *l == s.look).map_or(0, |i| (i + 1) % looks.len());
@@ -1136,112 +1113,136 @@ fn press(s: &mut Share, hwnd: HWND, b: Button) {
             s.set_status(hwnd, status);
         }
     }
-    invalidate(hwnd);
+    gfx::invalidate(hwnd);
+    false
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         if msg == WM_NCCREATE {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            let slot = &mut *create.lpCreateParams.cast::<Option<Box<Cell>>>();
+            if let Some(boxed) = slot.take() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(boxed) as isize);
+            }
         }
-        let share = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Share;
-        if share.is_null() {
-            return DefWindowProcW(hwnd, msg, wparam, lparam);
-        }
-        let s = &mut *share;
-        let mouse = || client_dip(hwnd, lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32);
         match msg {
             WM_NCHITTEST => {
-                let mut p = POINT { x: lparam.0 as i16 as i32, y: (lparam.0 >> 16) as i16 as i32 };
-                let _ = ScreenToClient(hwnd, &mut p);
-                let (x, y) = client_dip(hwnd, p.x, p.y);
+                let (x, y) = gfx::screen_dip(hwnd, lparam);
                 // The header drags the window.
                 let drag = y < HEADER - 8.0 && !inside(button_rect(Button::Close), x, y);
                 return LRESULT(if drag { HTCAPTION } else { HTCLIENT } as isize);
             }
-            WM_SETCURSOR if s.hover.is_some() => {
-                SetCursor(LoadCursorW(None, IDC_HAND).ok());
-                return LRESULT(1);
+            WM_SETCURSOR => {
+                if with_share(hwnd, |s| s.hover.is_some()) == Some(true) {
+                    SetCursor(LoadCursorW(None, IDC_HAND).ok());
+                    return LRESULT(1);
+                }
             }
-            WM_NCMOUSEMOVE => s.set_hover(hwnd, None),
+            WM_NCMOUSEMOVE => {
+                with_share(hwnd, |s| s.set_hover(hwnd, None));
+            }
             WM_MOUSEMOVE => {
-                let (x, y) = mouse();
-                let hover = s.hit(x, y);
-                s.set_hover(hwnd, hover);
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                with_share(hwnd, |s| {
+                    let hover = s.hit(x, y);
+                    s.set_hover(hwnd, hover);
+                });
             }
             WM_MOUSELEAVE => {
-                s.tracking = false;
-                if s.hover.take().is_some() | s.pressed.take().is_some() {
-                    invalidate(hwnd);
-                }
+                with_share(hwnd, |s| {
+                    s.tracking = false;
+                    if s.hover.take().is_some() | s.pressed.take().is_some() {
+                        gfx::invalidate(hwnd);
+                    }
+                });
             }
             WM_MOUSEWHEEL => {
                 let delta = f32::from((wparam.0 >> 16) as u16 as i16) / 120.0;
-                let scroll = (s.scroll - delta * ROW * 2.0).clamp(0.0, max_scroll(s.snapshot.rows.len()));
-                if scroll != s.scroll {
-                    s.scroll = scroll;
-                    invalidate(hwnd);
-                }
+                with_share(hwnd, |s| {
+                    let scroll = (s.scroll - delta * ROW * 2.0).clamp(0.0, max_scroll(s.snapshot.rows.len()));
+                    if scroll != s.scroll {
+                        s.scroll = scroll;
+                        gfx::invalidate(hwnd);
+                    }
+                });
                 return LRESULT(0);
             }
             WM_LBUTTONDOWN => {
-                let (x, y) = mouse();
-                s.pressed = s.hit(x, y);
-                invalidate(hwnd);
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                with_share(hwnd, |s| {
+                    s.pressed = s.hit(x, y);
+                    gfx::invalidate(hwnd);
+                });
                 return LRESULT(0);
             }
             WM_LBUTTONUP => {
-                let (x, y) = mouse();
-                let clicked = s.hit(x, y).filter(|t| s.pressed == Some(*t));
-                s.pressed = None;
-                invalidate(hwnd);
-                match clicked {
-                    Some(Target::Row(i)) => s.toggle_row(hwnd, i, key_down(VK_SHIFT)),
-                    // Last: closing destroys the window and frees `s`.
-                    Some(Target::Button(b)) => press(s, hwnd, b),
-                    None => {}
+                let (x, y) = gfx::client_dip(hwnd, lparam);
+                let shift = key_down(VK_SHIFT);
+                let close = with_share(hwnd, |s| {
+                    let clicked = s.hit(x, y).filter(|t| s.pressed == Some(*t));
+                    s.pressed = None;
+                    gfx::invalidate(hwnd);
+                    match clicked {
+                        Some(Target::Row(i)) => {
+                            s.toggle_row(hwnd, i, shift);
+                            false
+                        }
+                        Some(Target::Button(b)) => press(s, hwnd, b),
+                        None => false,
+                    }
+                });
+                if close == Some(true) {
+                    let _ = DestroyWindow(hwnd);
                 }
                 return LRESULT(0);
             }
             WM_KEYDOWN => {
                 let ctrl = key_down(VK_CONTROL);
-                match wparam.0 as u16 {
+                let key = wparam.0 as u16;
+                let close = with_share(hwnd, |s| match key {
                     k if k == VK_ESCAPE.0 => press(s, hwnd, Button::Close),
                     0x43 if ctrl => press(s, hwnd, Button::Copy),
                     0x53 if ctrl => press(s, hwnd, Button::Save),
-                    _ => {}
+                    _ => false,
+                });
+                if close == Some(true) {
+                    let _ = DestroyWindow(hwnd);
                 }
                 return LRESULT(0);
             }
             WM_PAINT => {
-                s.paint(hwnd);
+                with_share(hwnd, |s| s.paint(hwnd));
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                // New lines while nothing is picked: show the new ones.
-                let rows_changed = s.picks.is_empty() && {
-                    let state = s.app.state::<Player>().current();
-                    let synced = s.app.state::<Lyrics>().current();
-                    let count = state
-                        .zip(synced)
-                        .filter(|(st, l)| l.key == track_key(&st.track))
-                        .map_or(0, |(_, l)| l.lines.iter().filter(|l| !l.text.trim().is_empty()).count());
-                    count != s.snapshot.rows.len()
-                        || s.app.state::<Player>().current().is_some_and(|st| st.track.title != s.snapshot.title)
-                };
-                if rows_changed {
-                    s.take_snapshot(hwnd, false);
-                }
-                if !s.look_chosen || !s.looks().contains(&s.look) {
-                    s.look = s.looks()[0];
-                }
-                invalidate(hwnd);
+                with_share(hwnd, |s| {
+                    // New lines while nothing is picked: show the new ones.
+                    let rows_changed = s.picks.is_empty() && {
+                        let state = s.app.state::<Player>().current();
+                        let synced = s.app.state::<Lyrics>().current();
+                        let count = state
+                            .zip(synced)
+                            .filter(|(st, l)| l.key == track_key(&st.track))
+                            .map_or(0, |(_, l)| l.lines.iter().filter(|l| !l.text.trim().is_empty()).count());
+                        count != s.snapshot.rows.len()
+                            || s.app.state::<Player>().current().is_some_and(|st| st.track.title != s.snapshot.title)
+                    };
+                    if rows_changed {
+                        s.take_snapshot(hwnd, false);
+                    }
+                    if !s.look_chosen || !s.looks().contains(&s.look) {
+                        s.look = s.looks()[0];
+                    }
+                    gfx::invalidate(hwnd);
+                });
             }
             WM_TIMER if wparam.0 == STATUS_TIMER => {
                 let _ = KillTimer(Some(hwnd), STATUS_TIMER);
-                s.status = None;
-                invalidate(hwnd);
+                with_share(hwnd, |s| {
+                    s.status = None;
+                    gfx::invalidate(hwnd);
+                });
                 return LRESULT(0);
             }
             WM_DPICHANGED => {
@@ -1262,8 +1263,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 WINDOW.store(0, Ordering::Relaxed);
             }
             WM_NCDESTROY => {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(share));
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Cell;
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
             }
             _ => {}
         }

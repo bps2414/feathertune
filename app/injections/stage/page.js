@@ -383,10 +383,18 @@ const wordsOf = (i) => {
 };
 
 // The cover of the track playing (the media session's largest), when it is a plain https picture.
+const ART_HOSTS = ['googleusercontent.com', 'ggpht.com', 'ytimg.com'];
 const artwork = () => {
   const list = navigator.mediaSession?.metadata?.artwork;
   const src = list?.length ? list[list.length - 1].src : '';
-  return typeof src === 'string' && /^https:\/\/[^\s"'()]+$/.test(src) ? src : '';
+  if (typeof src !== 'string' || !src) return '';
+  try {
+    const u = new URL(src);
+    const h = u.hostname.toLowerCase();
+    return u.protocol === 'https:' && ART_HOSTS.some((d) => h === d || h.endsWith(`.${d}`)) ? u.href : '';
+  } catch {
+    return '';
+  }
 };
 
 const press = (button, f) => {
@@ -442,7 +450,7 @@ const build = () => {
   el('span', 'ft-grow', controls);
   const hint = el('span', 'ft-hint', controls);
   const leave = el('button', 'ft-button', controls);
-  el('span', 'ft-icon', leave, '');
+  el('span', 'ft-icon', leave, '\uE73F');
   const leaveLabel = el('span', null, leave);
 
   press(play, () => {
@@ -994,7 +1002,7 @@ const project = (bw, bh, rx, ry, rz, persp) => {
   const ys = pts.map((p) => p[1]);
   const x0 = Math.min(...xs);
   const y0 = Math.min(...ys);
-  return { w: Math.max(...xs) - x0, h: Math.max(...ys) - y0, x0, y0 };
+  return { w: Math.max(1, Math.max(...xs) - x0), h: Math.max(1, Math.max(...ys) - y0), x0, y0 };
 };
 
 // The widths (em) of `items` ({ text, cls, fv, letters }) as they will be set, in one layout pass.
@@ -1095,8 +1103,15 @@ const dropScene = () => {
   st.sceneOut = null;
   st.frame = null;
   if (!s) return;
+  for (const anim of [...st.anims]) {
+    const target = anim.effect?.target;
+    if (target && s.contains(target)) {
+      anim.cancel();
+      st.anims.delete(anim);
+    }
+  }
   const gone = () => s.remove();
-  if (a?.playState === 'finished') return gone();
+  if (st.still || a?.playState === 'finished' || a?.playState === 'paused') return gone();
   if (a) return void a.finished.then(gone, gone);
   s.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: 'forwards' }).finished.then(gone, gone);
 };
@@ -2137,7 +2152,7 @@ const draw = (v, playing) => {
   }
   if (st.shown.paused !== v.paused) {
     st.shown.paused = v.paused;
-    ui.playIcon.textContent = v.paused ? '' : '';
+    ui.playIcon.textContent = v.paused ? '\uE768' : '\uE769';
     ui.playLabel.textContent = v.paused ? data.texts.play : data.texts.pause;
   }
   if (st.relief && RELIEF_KINDS.has(sec.kind) && Math.abs(shown - st.relief.p) > 0.0004) {
@@ -2147,7 +2162,7 @@ const draw = (v, playing) => {
   }
 };
 
-const running = (v) => st.open && !st.ad && !document.hidden && !!v && !v.paused;
+const running = (v) => st.open && !st.ad && !document.hidden && document.hasFocus() && !!v && !v.paused;
 
 // Paused: the CSS animations hold (`ft-still`) and so do the words' axis animations.
 const setStill = (still) => {
@@ -2198,6 +2213,7 @@ const cover = () => {
 const onAd = (showing) => {
   if (showing === st.ad) return;
   st.ad = showing;
+  if (showing) document.querySelectorAll('.ft-fly').forEach((e) => e.remove());
   if (!ui) return;
   ui.root.classList.toggle('ft-ad', showing);
   cover();
@@ -2258,6 +2274,7 @@ const open = () => {
 const close = () => {
   if (!st.open) return;
   st.open = false;
+  document.querySelectorAll('.ft-fly').forEach((e) => e.remove());
   cancelAnimationFrame(st.raf);
   st.raf = 0;
   releaseLevel();
@@ -2312,8 +2329,11 @@ feathertune.stage = Object.freeze({
 
 // The display fonts (Anybody, Unbounded, Syne; SIL Open Font License), loaded with the FontFace API so the
 // page fetches nothing. Once they are in, what is on screen is measured and set again with them.
+let stageFaces = [];
 feathertune.stageFont = Object.freeze({
   set(data) {
+    for (const face of stageFaces) document.fonts.delete(face);
+    stageFaces = [];
     const list = Array.isArray(data?.fonts) ? data.fonts : [];
     const loads = list
       .filter((f) => Object.hasOwn(FACES, f?.family) && typeof f.data === 'string')
@@ -2321,7 +2341,10 @@ feathertune.stageFont = Object.freeze({
         try {
           const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
           const face = new FontFace(f.family, bytes.buffer, FACES[f.family]);
-          return face.load().then(() => document.fonts.add(face));
+          return face.load().then(() => {
+            document.fonts.add(face);
+            stageFaces.push(face);
+          });
         } catch (e) {
           return Promise.reject(e);
         }
@@ -2349,3 +2372,5 @@ for (const type of ['play', 'playing', 'pause', 'seeked', 'timeupdate', 'loadedm
   document.addEventListener(type, onMedia, true);
 }
 document.addEventListener('visibilitychange', kick);
+window.addEventListener('focus', kick);
+window.addEventListener('blur', kick);

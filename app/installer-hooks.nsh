@@ -15,9 +15,11 @@
     SetShellVarContext current
     ; WebView2 profile (sign-in), config.toml, Last.fm queue.
     RmDir /r "$LOCALAPPDATA\feathertune"
-    ; Last.fm session key: Credential Manager entry "<user>.<service>" (lastfm.rs KEYRING_*).
-    ; Harmless if it does not exist.
-    nsExec::Exec 'cmdkey /delete:lastfm-session.feathertune'
+    ; Last.fm session key and remote device key: Credential Manager entries "<user>.<service>".
+    ; Harmless if they do not exist.
+    nsExec::Exec '"$SYSDIR\cmdkey.exe" /delete:lastfm-session.feathertune'
+    Pop $0
+    nsExec::Exec '"$SYSDIR\cmdkey.exe" /delete:remote-key.feathertune'
     Pop $0
   ${EndIf}
 !macroend

@@ -12,10 +12,11 @@
 
 use std::cell::OnceCell;
 use std::ptr::null_mut;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND, RECT};
+use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, E_INVALIDARG, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
     D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
@@ -24,8 +25,8 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
     D2D1_GAMMA_1_0, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Brush, ID2D1DCRenderTarget, ID2D1Factory,
-    ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1BitmapBrush, ID2D1Brush, ID2D1DCRenderTarget,
+    ID2D1Factory, ID2D1LinearGradientBrush, ID2D1RadialGradientBrush, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
@@ -33,18 +34,23 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory,
     IDWriteTextFormat, IDWriteTextLayout,
 };
+use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC,
-    DeleteObject, EndPaint, GdiFlush, HBITMAP, HDC, HGDIOBJ, PAINTSTRUCT, SelectObject,
+    DeleteObject, EndPaint, GdiFlush, HBITMAP, HDC, HGDIOBJ, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos};
 use windows::core::{Error, HSTRING, Result, w};
-use windows_numerics::Vector2;
+use windows_numerics::{Matrix3x2, Vector2};
 
 pub const ICON_FONT: &str = "Segoe MDL2 Assets";
 pub const TEXT_FONT: &str = "Segoe UI";
+/// In the `Win32_UI_Controls` feature of `windows`, too big to enable for one constant.
+pub const WM_MOUSELEAVE: u32 = 0x02a3;
 
 #[derive(Clone)]
 struct Factories {
@@ -137,6 +143,82 @@ pub fn scale(hwnd: HWND) -> f32 {
     if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
 }
 
+pub fn invalidate(hwnd: HWND) {
+    unsafe {
+        let _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+/// Signed client mouse coordinates in DIPs from `WM_*MOUSE*` `lparam`.
+pub fn client_dip(hwnd: HWND, lparam: LPARAM) -> (f32, f32) {
+    let s = scale(hwnd);
+    let (x, y) = (i32::from(lparam.0 as i16), i32::from((lparam.0 >> 16) as i16));
+    (x as f32 / s, y as f32 / s)
+}
+
+/// Screen coordinates from `WM_NCHITTEST` `lparam` converted to client DIPs.
+pub fn screen_dip(hwnd: HWND, lparam: LPARAM) -> (f32, f32) {
+    let mut p = POINT { x: i32::from(lparam.0 as i16), y: i32::from((lparam.0 >> 16) as i16) };
+    unsafe {
+        let _ = ScreenToClient(hwnd, &mut p);
+    }
+    let s = scale(hwnd);
+    (p.x as f32 / s, p.y as f32 / s)
+}
+
+pub fn track_mouse_leave(hwnd: HWND, nonclient: bool) -> bool {
+    let mut tme = TRACKMOUSEEVENT {
+        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: if nonclient { TME_LEAVE | TME_NONCLIENT } else { TME_LEAVE },
+        hwndTrack: hwnd,
+        dwHoverTime: 0,
+    };
+    unsafe { TrackMouseEvent(&mut tme) }.is_ok()
+}
+
+pub fn round_corners(hwnd: HWND) {
+    let corner = DWMWCP_ROUND;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&raw const corner).cast(),
+            size_of_val(&corner) as u32,
+        );
+    }
+}
+
+/// Moves a bitmap brush of `width` × `height` so the center-cropped image covers `r`.
+pub fn cover_brush(brush: &ID2D1BitmapBrush, width: u32, height: u32, r: D2D_RECT_F) {
+    let (w, h) = (width as f32, height as f32);
+    let k = ((r.right - r.left) / w).max((r.bottom - r.top) / h);
+    let x = r.left + ((r.right - r.left) - w * k) / 2.0;
+    let y = r.top + ((r.bottom - r.top) - h * k) / 2.0;
+    unsafe { brush.SetTransform(&Matrix3x2 { M11: k, M12: 0.0, M21: 0.0, M22: k, M31: x, M32: y }) };
+}
+
+/// Places a DIP-sized popup window inside `work`: moves 1×1 onto the target monitor first so `scale(hwnd)`
+/// reads that monitor's DPI, asks `desired(w, h, scale)` for `(x, y)`, and clamps inside `work`.
+pub fn place_in_work_area(
+    hwnd: HWND,
+    work: RECT,
+    width_dip: f32,
+    height_dip: f32,
+    desired: impl FnOnce(i32, i32, f32) -> (i32, i32),
+) {
+    unsafe {
+        let _ = SetWindowPos(hwnd, None, work.left, work.top, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    let s = scale(hwnd);
+    let (w, h) = ((width_dip * s).round() as i32, (height_dip * s).round() as i32);
+    let (x, y) = desired(w, h, s);
+    let x = x.clamp(work.left, (work.right - w).max(work.left));
+    let y = y.clamp(work.top, (work.bottom - h).max(work.top));
+    unsafe {
+        let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
 /// Colors of our own surfaces.
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -177,7 +259,11 @@ pub struct Blend {
 }
 
 pub fn blend() -> Blend {
-    let f = THEME.lock().unwrap();
+    let mut f = THEME.lock().unwrap();
+    if f.start.is_some_and(|s| s.elapsed() >= FADE) {
+        f.from = f.to;
+        f.start = None;
+    }
     let t = f.start.map_or(1.0, |s| (s.elapsed().as_secs_f32() / FADE.as_secs_f32()).min(1.0));
     Blend { from: f.from, to: f.to, t: t * t * (3.0 - 2.0 * t) }
 }
@@ -228,8 +314,9 @@ pub fn luminance(c: u32) -> f32 {
     0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
 }
 
-/// The "app mode" of Settings > Personalization > Colors.
-pub fn dark_mode() -> bool {
+static DARK_MODE: OnceLock<AtomicBool> = OnceLock::new();
+
+fn read_dark_mode() -> bool {
     let mut value = 1u32;
     let mut size = 4u32;
     let result = unsafe {
@@ -244,6 +331,23 @@ pub fn dark_mode() -> bool {
         )
     };
     result.is_ok() && value == 0
+}
+
+/// The "app mode" of Settings > Personalization > Colors (cached; refreshed on `WM_SETTINGCHANGE`).
+pub fn dark_mode() -> bool {
+    DARK_MODE.get_or_init(|| AtomicBool::new(read_dark_mode())).load(Ordering::Relaxed)
+}
+
+/// Refreshes the cached "app mode" from Windows.
+pub fn refresh_dark_mode() -> bool {
+    let dark = read_dark_mode();
+    match DARK_MODE.get() {
+        Some(cached) => cached.store(dark, Ordering::Relaxed),
+        None => {
+            let _ = DARK_MODE.set(AtomicBool::new(dark));
+        }
+    }
+    dark
 }
 
 /// A window's Direct2D target, kept between paints and rebuilt when the device is lost.
@@ -384,11 +488,14 @@ impl Surface {
     pub fn paint(&mut self, hwnd: HWND, area: RECT, draw: impl FnOnce(&Canvas)) {
         let mut ps = PAINTSTRUCT::default();
         let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
-        if let Err(e) = self.draw(hdc, hwnd, area, draw) {
+        if area.right > area.left
+            && area.bottom > area.top
+            && let Err(e) = self.draw(hdc, hwnd, area, draw)
+        {
             if e.code() == D2DERR_RECREATE_TARGET {
                 self.target = None;
                 unsafe {
-                    let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, false);
+                    let _ = InvalidateRect(Some(hwnd), None, false);
                 }
             } else {
                 eprintln!("paint failed: {e}");
@@ -453,6 +560,12 @@ pub struct Offscreen {
 
 impl Offscreen {
     pub fn new(width: i32, height: i32) -> Result<Offscreen> {
+        if width <= 0
+            || height <= 0
+            || (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4)).is_none()
+        {
+            return Err(Error::from(E_INVALIDARG));
+        }
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -485,7 +598,17 @@ impl Offscreen {
 
     /// Clears the bitmap to transparent and draws it with `draw`, in DIPs at `scale`. Text is grayscale
     /// antialiased (ClearType needs an opaque background).
-    pub fn draw(&mut self, scale: f32, draw: impl FnOnce(&Canvas)) -> Result<()> {
+    pub fn draw(&mut self, scale: f32, mut draw: impl FnMut(&Canvas)) -> Result<()> {
+        match self.draw_once(scale, &mut draw) {
+            Err(e) if e.code() == D2DERR_RECREATE_TARGET => {
+                self.target = None;
+                self.draw_once(scale, &mut draw)
+            }
+            other => other,
+        }
+    }
+
+    fn draw_once(&mut self, scale: f32, draw: &mut impl FnMut(&Canvas)) -> Result<()> {
         if self.target.is_none() {
             self.target = Some(dc_target(D2D1_ALPHA_MODE_PREMULTIPLIED)?);
             self.generation = self.generation.wrapping_add(1);
@@ -519,12 +642,14 @@ impl Offscreen {
 
     /// The pixels, BGRA premultiplied, row after row from the top.
     pub fn pixels(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.bits, (self.width * self.height * 4) as usize) }
+        let len = (self.width as usize) * (self.height as usize) * 4;
+        unsafe { std::slice::from_raw_parts_mut(self.bits, len) }
     }
 }
 
 impl Drop for Offscreen {
     fn drop(&mut self) {
+        self.target = None;
         unsafe {
             SelectObject(self.dc, self.old);
             let _ = DeleteObject(self.bitmap.into());

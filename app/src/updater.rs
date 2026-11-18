@@ -30,8 +30,19 @@ pub struct Update {
 /// Whether this exe is the installed one (in `profile`, the install folder).
 pub fn installed(profile: &Path) -> bool {
     let Ok(exe) = std::env::current_exe() else { return false };
+    let Some(dir) = exe.parent() else { return false };
+    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(dir), std::fs::canonicalize(profile)) {
+        return a == b;
+    }
     let norm = |p: &Path| p.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
-    exe.parent().is_some_and(|dir| norm(dir).trim_end_matches('\\') == norm(profile).trim_end_matches('\\'))
+    norm(dir).trim_end_matches('\\') == norm(profile).trim_end_matches('\\')
+}
+
+/// Removes any installers left in `<profile>/update` by earlier runs when installed.
+pub fn cleanup(profile: &Path) {
+    if installed(profile) {
+        let _ = std::fs::remove_dir_all(profile.join("update"));
+    }
 }
 
 fn agent(redirects: u32, timeout: Duration) -> ureq::Agent {
@@ -105,8 +116,11 @@ pub fn version(text: &str) -> Option<(u64, u64, u64)> {
 pub fn install(update: &Update, profile: &Path, mut progress: impl FnMut(Option<f32>)) -> Result<(), String> {
     let dir = profile.join("update");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let part = dir.join(format!("{}.part", update.name));
     let path = dir.join(&update.name);
-    let result = download(update, &path, &mut progress).and_then(|()| {
+    let result = download(update, &part, &mut progress).and_then(|()| {
+        let _ = std::fs::remove_file(&path);
+        std::fs::rename(&part, &path).map_err(|e| e.to_string())?;
         Command::new(&path)
             .args(["/S", "/R", "/UPDATE"])
             .spawn()
@@ -114,6 +128,7 @@ pub fn install(update: &Update, profile: &Path, mut progress: impl FnMut(Option<
             .map_err(|e| format!("could not start it: {e}"))
     });
     if result.is_err() {
+        let _ = std::fs::remove_file(&part);
         let _ = std::fs::remove_file(&path);
     }
     result

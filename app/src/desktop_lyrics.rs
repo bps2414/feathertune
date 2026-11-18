@@ -11,9 +11,10 @@
 //!   set to the next change (no frame loop); a change cross-fades on a 60 fps timer that exists only
 //!   for the fade. Hidden (no timers) while paused, between tracks or without synced lyrics.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::Once;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use std::sync::{Arc, Once};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -24,8 +25,8 @@ use windows::Win32::Graphics::DirectWrite::{
     IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
-    ScreenToClient,
+    AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
+    MONITORINFO, MonitorFromPoint,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -84,7 +85,7 @@ fn save(app: &AppHandle, f: impl FnOnce(&mut Saved)) {
     let mut saved = load(app);
     f(&mut saved);
     if let Ok(bytes) = serde_json::to_vec(&saved)
-        && let Err(e) = std::fs::write(saved_path(app), bytes)
+        && let Err(e) = crate::settings::write_atomic(&saved_path(app), bytes)
     {
         eprintln!("floating lyrics: position not saved: {e}");
     }
@@ -162,6 +163,7 @@ pub fn toggle(app: &AppHandle) {
 
 /// Locked: clicks pass through. Unlocked: a panel to drag it by.
 pub fn set_locked(locked: bool) {
+    LOCKED.store(locked, Ordering::Relaxed);
     post(WM_LOCK, WPARAM(usize::from(locked)));
 }
 
@@ -181,8 +183,6 @@ fn post(msg: u32, wparam: WPARAM) {
 
 struct Floating {
     app: AppHandle,
-    /// The worker stops when this is set.
-    closed: Arc<AtomicBool>,
     bitmap: Option<gfx::Offscreen>,
     view: View,
     small: IDWriteTextFormat,
@@ -191,8 +191,20 @@ struct Floating {
     fading: bool,
 }
 
+type Cell = RefCell<Floating>;
+
+fn with_floating<R>(hwnd: HWND, f: impl FnOnce(&mut Floating) -> R) -> Option<R> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Cell;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut guard = unsafe { &*ptr }.try_borrow_mut().ok()?;
+    Some(f(&mut guard))
+}
+
 unsafe fn create(app: &AppHandle) -> Result<()> {
     static REGISTER: Once = Once::new();
+    static SUBSCRIBER: Once = Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
     let class = w!("feathertune-floating-lyrics");
     REGISTER.call_once(|| unsafe {
@@ -215,10 +227,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
     unsafe { big.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)? };
     let small =
         gfx::text_format("Segoe UI Variable Text", 17.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-    let closed = Arc::new(AtomicBool::new(false));
-    let floating = Box::new(Floating {
+    let floating = Floating {
         app: app.clone(),
-        closed: closed.clone(),
         bitmap: None,
         view: View::new(
             big,
@@ -231,8 +241,8 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
         icons: gfx::text_format(ICON_FONT, 14.0, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
         visible: false,
         fading: false,
-    });
-    let floating = Box::into_raw(floating);
+    };
+    let mut slot = Some(Box::new(RefCell::new(floating)));
     let mut style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     if is_locked() {
         style |= WS_EX_TRANSPARENT;
@@ -251,44 +261,37 @@ unsafe fn create(app: &AppHandle) -> Result<()> {
             None,
             None,
             Some(instance.into()),
-            Some(floating as *const _),
+            Some((&raw mut slot).cast()),
         )?
     };
     WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
     unsafe { place(app, hwnd) };
-    let mut rx = app.state::<Player>().subscribe();
-    let raw = hwnd.0 as isize;
-    std::thread::spawn(move || {
-        loop {
-            match rx.blocking_recv() {
-                Err(RecvError::Closed) => break,
-                _ if closed.load(Ordering::Relaxed) => break,
-                Ok(_) | Err(RecvError::Lagged(_)) => unsafe {
-                    let _ = PostMessageW(Some(HWND(raw as _)), WM_UPDATE, WPARAM(0), LPARAM(0));
-                },
+    SUBSCRIBER.call_once(|| {
+        let mut rx = app.state::<Player>().subscribe();
+        std::thread::spawn(move || {
+            loop {
+                match rx.blocking_recv() {
+                    Err(RecvError::Closed) => break,
+                    Ok(_) | Err(RecvError::Lagged(_)) => refresh(),
+                }
             }
-        }
+        });
     });
     refresh();
     Ok(())
 }
 
-/// Where it stood, or centered near the bottom of the primary monitor.
+/// Where it stood, or centered near the bottom of the primary monitor, clamped inside its work area.
 unsafe fn place(app: &AppHandle, hwnd: HWND) {
     let saved = load(app).position;
     let anchor = saved.map_or(POINT::default(), |(x, y)| POINT { x, y });
+    let flags = if saved.is_some() { MONITOR_DEFAULTTONEAREST } else { MONITOR_DEFAULTTOPRIMARY };
     let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-    let _ = unsafe { GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTOPRIMARY), &mut info) };
-    // Sized for the DPI of the monitor it goes to: move first, then size.
-    let (x, y) = saved.unwrap_or((info.rcWork.left, info.rcWork.top));
-    let _ = unsafe { SetWindowPos(hwnd, None, x, y, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE) };
-    let scale = gfx::scale(hwnd);
-    let (w, h) = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
-    let (x, y) = saved.unwrap_or_else(|| {
-        let work = info.rcWork;
-        ((work.left + work.right - w) / 2, work.bottom - h - (48.0 * scale) as i32)
+    let _ = unsafe { GetMonitorInfoW(MonitorFromPoint(anchor, flags), &mut info) };
+    let work = info.rcWork;
+    gfx::place_in_work_area(hwnd, work, WIDTH, HEIGHT, |w, h, scale| {
+        saved.unwrap_or_else(|| ((work.left + work.right - w) / 2, work.bottom - h - (48.0 * scale) as i32))
     });
-    let _ = unsafe { SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
 }
 
 impl Floating {
@@ -388,19 +391,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe {
         if msg == WM_NCCREATE {
             let create = &*(lparam.0 as *const CREATESTRUCTW);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            let slot = &mut *create.lpCreateParams.cast::<Option<Box<Cell>>>();
+            if let Some(boxed) = slot.take() {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(boxed) as isize);
+            }
         }
-        let floating = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Floating;
-        if floating.is_null() {
-            return DefWindowProcW(hwnd, msg, wparam, lparam);
-        }
-        let f = &mut *floating;
         match msg {
             WM_NCHITTEST => {
-                let mut p = POINT { x: lparam.0 as i16 as i32, y: (lparam.0 >> 16) as i16 as i32 };
-                let _ = ScreenToClient(hwnd, &mut p);
-                let scale = gfx::scale(hwnd);
-                let (x, y) = (p.x as f32 / scale, p.y as f32 / scale);
+                let (x, y) = gfx::screen_dip(hwnd, lparam);
                 let (l, t, r, b) = LOCK;
                 let on_lock = (l..r).contains(&x) && (t..b).contains(&y);
                 return LRESULT(if on_lock { HTCLIENT } else { HTCAPTION } as isize);
@@ -415,21 +413,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 let transparent = WS_EX_TRANSPARENT.0 as isize;
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, if locked { style | transparent } else { style & !transparent });
-                if locked {
-                    save_position(&f.app, hwnd);
-                }
-                f.update(hwnd, true);
+                with_floating(hwnd, |f| {
+                    if locked {
+                        save_position(&f.app, hwnd);
+                    }
+                    f.update(hwnd, true);
+                });
                 return LRESULT(0);
             }
             WM_UPDATE => {
-                f.update(hwnd, false);
+                with_floating(hwnd, |f| f.update(hwnd, false));
                 return LRESULT(0);
             }
             WM_TIMER if wparam.0 == LINE_TIMER || wparam.0 == FRAME_TIMER => {
-                f.update(hwnd, false);
+                with_floating(hwnd, |f| f.update(hwnd, false));
                 return LRESULT(0);
             }
-            WM_EXITSIZEMOVE => save_position(&f.app, hwnd),
+            WM_EXITSIZEMOVE => {
+                with_floating(hwnd, |f| save_position(&f.app, hwnd));
+            }
             WM_DPICHANGED => {
                 let r = &*(lparam.0 as *const RECT);
                 let _ = SetWindowPos(
@@ -441,18 +443,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     r.bottom - r.top,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
-                f.update(hwnd, true);
+                with_floating(hwnd, |f| f.update(hwnd, true));
                 return LRESULT(0);
             }
             WM_DESTROY => {
                 let _ = KillTimer(Some(hwnd), LINE_TIMER);
                 let _ = KillTimer(Some(hwnd), FRAME_TIMER);
-                f.closed.store(true, Ordering::Relaxed);
                 WINDOW.store(0, Ordering::Relaxed);
             }
             WM_NCDESTROY => {
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(floating));
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Cell;
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
             }
             _ => {}
         }

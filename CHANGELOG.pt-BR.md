@@ -2,6 +2,15 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.2.0 — 2026-11-17
+
+- **Palco: a letra em tela cheia dirigida** (Letras): abra o Palco pela aba Letras ou pela barra de título para ver a letra em tela cheia com palavras nascendo junto com a voz, cenas variadas, lados de dueto, cortes instrumentais, linhas em eco e um tema claro de papel além do escuro.
+- **Análise de faixa pelo relógio de áudio** (Experimental): as batidas e o volume agora seguem o próprio relógio do áudio e o andamento é refinado ao longo da faixa inteira, mantendo os efeitos na batida firmes e levando a análise junto quando o crossfade sobrepõe.
+- **Aba Letras e janela mais leves:** as linhas da letra não ficam mais promovidas em camadas próprias da GPU quando paradas, o ícone da bandeja é reaproveitado nas atualizações, e `config.toml`, estatísticas e dados de extensões salvam de forma atômica para não deixar arquivo pela metade.
+- **Crossfade, efeitos sonoros e anúncios mais firmes:** uma faixa que demora um pouco mais para acabar segura o fade em vez de voltar ao volume cheio, pular silêncio e o nível Automático de efeitos evitam disparos falsos, e todo efeito de áudio, fade e voz de transição sai do caminho assim que entra um anúncio.
+- **Controle pelo celular 0.2.2 e extensões:** o pareamento espera confirmação criptografada antes de gastar o código único, o app do celular mantém a tela fluida e lida melhor com falhas do cofre do aparelho, requisições de extensões ficam restritas a hosts públicos, extensões WebAssembly rodam com limite de combustível e timers, e uma atualização de extensão que peça permissões novas espera sua aprovação.
+- Ainda não conferido no app rodando: o Palco numa sessão completa, os ajustes de tempo do áudio e do crossfade de ouvido, e o pareamento do controle pelo celular 0.2.2 numa rede Wi-Fi real; as medições de custo dos plugins novos ficam pendentes.
+
 ## 1.1.1 — 2026-11-16
 
 - **Efeito sonoro novo: festa no outro cômodo** (Áudio): a música abafada atrás de uma parede, como se você estivesse no banheiro ou na garagem de uma festa.

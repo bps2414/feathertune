@@ -2,6 +2,15 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.2.0 — 2026-11-17
+
+- **Stage: a full-screen lyrics show** (Lyrics): open Stage from the Lyrics tab or the title bar for a directed full-screen view with words born with the voice, varied scene layouts, duet sides, instrumental cuts, echo lines and a light paper look alongside the dark one.
+- **Track analysis on the audio clock** (Experimental): beats and loudness are timed by the audio clock itself and tempo is refined across the whole track, keeping beat effects steady and carrying analysis across an overlapping crossfade.
+- **Lighter Lyrics tab and shell:** lyric lines no longer stay promoted to separate GPU layers when idle, the tray icon is shared across updates, and config, stats and extension storage write atomically so an interrupted save never leaves a half-written file.
+- **Steadier crossfade, sound effects and ad bypass:** a track ending later than expected holds the fade instead of popping back to full volume, skip-silence and Automatic effects level avoid false triggers, and every audio effect, fade and transition voice steps aside cleanly when an ad starts.
+- **Phone remote 0.2.2 and extensions:** pairing waits for an encrypted confirmation before consuming the one-time code, the phone app keeps screen updates smooth and handles unavailable secure storage cleanly, extension network requests stay on public hosts, WASM extensions run with fuel and bounded timers, and an extension update that asks for new permissions waits for your approval.
+- Not verified yet in the running app: Stage across a full session, the audio timing and crossfade fixes by ear, and phone remote 0.2.2 pairing on a live Wi-Fi network; plugin cost measurements are pending.
+
 ## 1.1.1 — 2026-11-16
 
 - **New sound effect: party in the next room** (Audio): the music muffled through a wall, as if you were in the bathroom or the garage of a party.

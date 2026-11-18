@@ -273,5 +273,6 @@ jobs:
           path: apks
       - env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" apks/feathertune-remote-*.apk --clobber
+        run: gh release upload "$TAG" apks/feathertune-remote-*.apk --repo "$REPO" --clobber

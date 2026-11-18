@@ -6,6 +6,7 @@
 //! Rules (docs/DESIGN.md, Audio): the sound is processed and measured on the page only, for the
 //! listener; every effect is bypassed while an ad plays.
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Map, Value, json};
@@ -78,7 +79,10 @@ pub fn start(app: &AppHandle) {
                         push(&app);
                     }
                 }
-                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(_)) => {
+                    last = app.state::<Player>().current().and_then(|s| s.track.id);
+                    push(&app);
+                }
                 Err(RecvError::Closed) => break,
             }
         }
@@ -92,9 +96,11 @@ pub fn loaded() -> bool {
 
 /// Gives the page the current settings (after a change in the settings window).
 pub fn push(app: &AppHandle) {
+    static LOCK: Mutex<()> = Mutex::new(());
     if !loaded() {
         return;
     }
+    let _guard = LOCK.lock().unwrap();
     let mut data = payload(&app.state::<Live>().get());
     let current = app.state::<Player>().current().and_then(|s| s.track.id);
     let mix = crate::mixes::page_data(app, current.as_deref());

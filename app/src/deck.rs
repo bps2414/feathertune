@@ -370,6 +370,9 @@ fn level(a: &Main) -> serde_json::Value {
 }
 
 pub fn start(app: &AppHandle) {
+    if !crate::audio::loaded() {
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         let mut last_fade = None;
@@ -613,6 +616,9 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, id: &str, swapped: &mut
 
     // After the swap: the voice plays the end, silenced at once on an ad on the main page.
     let mut rx = app.state::<Player>().subscribe();
+    if app.state::<Player>().current().is_some_and(|s| s.ad) {
+        return Outcome::Fallback("an ad on the main page");
+    }
     let end = w + SWAP_MS + tail_ms;
     let mut paused_since: Option<Instant> = None;
     let poll = "window.__feathertuneDeck?.poll() ?? null";
@@ -622,7 +628,12 @@ fn run(app: &AppHandle, site: &Webview, voice: &Webview, id: &str, swapped: &mut
             use tokio::sync::broadcast::error::TryRecvError;
             match rx.try_recv() {
                 Ok(event) if event.state().ad => return Outcome::Fallback("an ad on the main page"),
-                Ok(_) | Err(TryRecvError::Lagged(_)) => {}
+                Err(TryRecvError::Lagged(_)) => {
+                    if app.state::<Player>().current().is_some_and(|s| s.ad) {
+                        return Outcome::Fallback("an ad on the main page");
+                    }
+                }
+                Ok(_) => {}
                 Err(TryRecvError::Empty | TryRecvError::Closed) => break,
             }
         }
@@ -745,7 +756,7 @@ fn open(app: &AppHandle, id: &str) -> Option<Webview> {
         .on_navigation(|url| url.scheme() == "https" && url.host_str() == Some("music.youtube.com"))
         .on_new_window(|_, _| NewWindowResponse::Deny);
     let voice = window
-        .add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0))
+        .add_child(builder, LogicalPosition::new(-10.0, -10.0), LogicalSize::new(1.0, 1.0))
         .map_err(|e| log(format_args!("the voice did not open: {e}")))
         .ok()?;
     let _ = voice.with_webview(|wv| unsafe {

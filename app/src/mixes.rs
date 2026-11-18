@@ -264,10 +264,13 @@ impl Mixes {
     }
 
     fn save(&self, list: &str, mix: &Mix) -> Result<(), String> {
+        if !valid_list(list) {
+            return Err("invalid playlist".into());
+        }
         check(mix)?;
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(mix).expect("a mix serializes");
-        std::fs::write(self.path(list), json).map_err(|e| format!("could not save the mix: {e}"))
+        crate::settings::write_atomic(&self.path(list), json).map_err(|e| format!("could not save the mix: {e}"))
     }
 
     /// The playlists whose mix is on, each with its edited pairs as "from>to" (for the page's buttons).
@@ -309,6 +312,12 @@ pub fn observe(app: &AppHandle, context: Context) {
     let changed = {
         let mut inner = mixes.inner.lock().unwrap();
         if let (Some(list), Some(queue)) = (&context.list, context.queue) {
+            if !inner.queues.contains_key(list)
+                && inner.queues.len() >= 64
+                && let Some(evict) = inner.queues.keys().find(|k| Some(*k) != inner.list.as_ref()).cloned()
+            {
+                inner.queues.remove(&evict);
+            }
             inner.queues.insert(list.clone(), queue);
         }
         let changed = inner.list != context.list || inner.next != context.next;
@@ -325,7 +334,7 @@ pub fn observe(app: &AppHandle, context: Context) {
 /// window: nothing is saved and the player is not touched. At most once a second.
 #[tauri::command]
 pub fn mix_open(webview: Webview, app: AppHandle, list: String, from: String, to: String) {
-    if webview.label() != "site" || !valid_list(&list) || !valid_id(&from) || !valid_id(&to) {
+    if webview.label() != "site" || !valid_list(&list) || !valid_id(&from) || !valid_id(&to) || from == to {
         return;
     }
     let Some(mixes) = app.try_state::<Mixes>() else { return };

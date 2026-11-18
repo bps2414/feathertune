@@ -67,6 +67,7 @@ let recent = [];
 let mainRate = 1;
 let frozen = false;
 let offsetMs = null;
+let mainLevel = { volume: 1, muted: false };
 
 // Nothing plays until `go`: play() waits (the site's promise stays pending), autoplay is paused.
 HTMLMediaElement.prototype.play = function () {
@@ -137,17 +138,63 @@ const onClock = (time, fn) => {
   setTimeout(once, (Math.max(0, time - ctx.currentTime) + 0.25) * 1000);
 };
 
-// Silence at once (an ad, a fallback): everything, the echo too, then paused.
-const stop = () => {
+// Silence at once (an ad, wrong track, or a fallback): everything, the echo too, then paused.
+const stop = (immediate = false) => {
+  if (stopped) return;
   stopped = true;
   allowed = false;
   const v = video();
-  if (n) {
+  if (n && ctx) {
     n.level.gain.cancelAndHoldAtTime(ctx.currentTime);
     n.level.gain.setTargetAtTime(0, ctx.currentTime, RAMP / 3);
   }
-  setTimeout(() => v?.pause(), 60);
+  if (immediate || !ctx) v?.pause();
+  else onClock(ctx.currentTime + 0.06, () => v?.pause());
 };
+
+const trackId = () => player()?.getVideoData?.()?.video_id ?? null;
+const guardPlayback = () => {
+  if (!started || stopped || ended) return;
+  if (adShowing()) {
+    stop(true);
+    return;
+  }
+  const id = trackId();
+  if (id && EXPECT && id !== EXPECT) stop(true);
+};
+let observedPlayer = null;
+const adObserver = new MutationObserver(() => {
+  if (adShowing() && started && !stopped) stop(true);
+});
+const watchPlayer = () => {
+  const p = player();
+  if (p && p !== observedPlayer) {
+    adObserver.disconnect();
+    adObserver.observe(p, { attributes: true, attributeFilter: ['class'] });
+    observedPlayer = p;
+  }
+};
+for (const type of ['loadedmetadata', 'playing', 'timeupdate']) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (e.target !== video()) return;
+      watchPlayer();
+      if (type === 'timeupdate') guardPlayback();
+    },
+    true,
+  );
+}
+document.addEventListener(
+  'volumechange',
+  (e) => {
+    const v = video();
+    if (!v || e.target !== v || stopped || adNow()) return;
+    if (v.muted && !mainLevel?.muted) v.muted = false;
+    if (n && ctx) n.level.gain.setTargetAtTime(levelOf(mainLevel, v), ctx.currentTime, RAMP);
+  },
+  true,
+);
 
 // The track ended (or the site moved this page on): nothing else plays; the echo may ring on.
 document.addEventListener(
@@ -172,7 +219,7 @@ document.addEventListener(
 // Plays, unless it was stopped or an ad showed up meanwhile.
 const begin = () => {
   if (allowed || stopped || ended) return;
-  if (adNow()) return stop();
+  if (adNow()) return stop(true);
   pending = false;
   allowed = true;
   realPlay.call(video()).catch((e) => (blocked = String(e?.name)));
@@ -181,14 +228,14 @@ const begin = () => {
 const levelOf = (l, v) => (l?.muted || !v.volume ? 0 : Math.min(MAX_LEVEL, num(l?.volume, 0, 1, 0) / v.volume));
 
 const state = () => {
+  watchPlayer();
   const v = video();
   const held = adNow();
-  if (held && started && !stopped) stop();
-  const data = v ? player()?.getVideoData?.() : null;
-  const id = data?.video_id ?? null;
+  if (held && started && !stopped) stop(true);
+  const id = v ? trackId() : null;
   // The site moved this page to another track: it must not play it (after the end, play() is held
   // already and the echo may ring on).
-  if (started && !stopped && !ended && id && EXPECT && id !== EXPECT) stop();
+  if (started && !stopped && !ended && id && EXPECT && id !== EXPECT) stop(true);
   return {
     id,
     ad: adShowing(),
@@ -268,7 +315,8 @@ window.__feathertuneDeck = Object.freeze({
     const fade = link(ctx.createGain());
     fade.gain.value = 0;
     const level = link(ctx.createGain());
-    level.gain.value = levelOf(o?.level, v);
+    if (o?.level) mainLevel = o.level;
+    level.gain.value = levelOf(mainLevel, v);
     level.connect(ctx.destination);
     // The echo: sweep → send → delay ⇄ feedback, delay → wet → level (connected at the swap, if used).
     const send = ctx.createGain();
@@ -362,7 +410,8 @@ window.__feathertuneDeck = Object.freeze({
   // The main page's volume changed.
   volume: (l) => {
     const v = video();
-    if (n && v && !stopped) n.level.gain.setTargetAtTime(levelOf(l, v), ctx.currentTime, RAMP);
+    if (l) mainLevel = l;
+    if (n && v && !stopped) n.level.gain.setTargetAtTime(levelOf(mainLevel, v), ctx.currentTime, RAMP);
   },
-  stop,
+  stop: () => stop(false),
 });

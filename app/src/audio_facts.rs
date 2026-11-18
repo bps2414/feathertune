@@ -63,7 +63,7 @@ pub fn parse(json: &str) -> Option<Facts> {
         return None;
     }
     let f: Facts = serde_json::from_str(json).ok()?;
-    let ms = f.duration_s * 1000.0;
+    let ms = (f.duration_s * 1000.0).round();
     let in_track = |x: f64| x.is_finite() && (0.0..=ms).contains(&x);
     let ok = f.v <= VERSION
         && valid_id(&f.id)
@@ -122,12 +122,15 @@ impl Store {
     }
 
     fn save(&self, facts: &Facts) {
-        if !self.written.lock().unwrap().insert(facts.id.clone()) {
-            return;
+        {
+            let mut written = self.written.lock().unwrap();
+            if written.len() >= 1000 || !written.insert(facts.id.clone()) {
+                return;
+            }
         }
         let _ = std::fs::create_dir_all(&self.dir);
         let json = serde_json::to_string(facts).expect("facts serialize");
-        if let Err(e) = std::fs::write(self.dir.join(format!("{}.json", facts.id)), json) {
+        if let Err(e) = crate::settings::write_atomic(&self.dir.join(format!("{}.json", facts.id)), json) {
             eprintln!("audio facts: {e}");
         }
         self.prune();
@@ -253,6 +256,10 @@ mod tests {
             minimal.as_object_mut().unwrap().remove(k);
         }
         assert!(parse(&minimal.to_string()).is_some());
+        let edge = serde_json::json!({
+            "v": 2, "id": "dQw4w9WgXcQ", "duration_s": 1.001, "lead_in_ms": 0.0, "tail_ms": 1001.0, "envelope": "AAEC",
+        });
+        assert!(parse(&edge.to_string()).is_some());
     }
 
     #[test]

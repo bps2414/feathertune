@@ -214,10 +214,12 @@ const makeUnit = (kind) => {
     depth.gain.value = CIRCLE_DEPTH;
     lfo.connect(depth).connect(pan.pan);
     lfo.start();
+    u.lfo = lfo;
     u.in.connect(pan).connect(u.wet);
   } else if (kind === 'reverb') {
     const convolver = ctx.createConvolver();
     convolver.buffer = impulse(REVERB_S);
+    u.convolvers = [convolver];
     u.in.connect(convolver).connect(u.wet);
   } else if (kind === 'party') {
     let wall = u.in.connect(channels(ctx.createGain(), 1));
@@ -236,6 +238,7 @@ const makeUnit = (kind) => {
     wall.connect(u.wet);
     const room = ctx.createConvolver();
     room.buffer = impulse(PARTY_ROOM_S);
+    u.convolvers = [room];
     const roomWet = ctx.createGain();
     roomWet.gain.value = PARTY_ROOM_WET;
     wall.connect(room).connect(roomWet).connect(u.wet);
@@ -349,6 +352,18 @@ const apply = () => {
       inChain = inChain.filter((n) => !leaving.has(n));
       leaving.clear();
       wire();
+      for (const [k, u] of Object.entries(units)) {
+        if (inChain.includes(u)) continue;
+        try {
+          u.lfo?.stop();
+          u.in.disconnect();
+          u.out.disconnect();
+          u.dry.disconnect();
+          u.wet.disconnect();
+          for (const c of u.convolvers ?? []) c.buffer = null;
+        } catch {}
+        delete units[k];
+      }
     }, 100);
   }
 };
@@ -457,30 +472,33 @@ const checkGuard = (v) => {
     useAnalyser('guard', false);
     return;
   }
-  const t = songTime(v);
+  const nowS = performance.now() / 1000;
   if (ctx.state !== 'running') {
     if (guard.resumeAt === null) {
-      guard.resumeAt = t;
+      guard.resumeAt = nowS;
       ctx.resume().catch(() => {});
-    } else if (t - guard.resumeAt > 1.5) {
+    } else if (nowS - guard.resumeAt > 1.5) {
       trip('the audio context does not run');
     }
     return;
   }
   guard.resumeAt = null;
+  const t = songTime(v);
   if (t < GUARD_FROM_S || t > GUARD_UNTIL_S) {
     useAnalyser('guard', false);
     guard.zeroFrom = null;
     return;
   }
+  const connected = analyserUsers.has('guard');
   useAnalyser('guard', true);
+  if (!connected) return;
   if (level() > -Infinity) {
     guard.done = true;
     useAnalyser('guard', false);
     return;
   }
-  guard.zeroFrom ??= t;
-  if (t - guard.zeroFrom >= GUARD_ZERO_S) trip('only silence passes through the graph');
+  guard.zeroFrom ??= nowS;
+  if (nowS - guard.zeroFrom >= GUARD_ZERO_S) trip('only silence passes through the graph');
 };
 
 // --- crossfade (one player) ---
@@ -537,14 +555,13 @@ const slice = (curve, p) => {
 
 let trackId = null;
 // The analysis of the current and next track (from Rust; see track_analysis).
-const facts = () => {
-  const f = data?.facts?.current;
-  return f && f.id === trackId ? f : null;
-};
+const factsFor = (id) => (id ? [data?.facts?.current, data?.facts?.next].find((f) => f?.id === id) ?? null : null);
+const facts = () => factsFor(trackId);
 // The fade of the current track: { out, dur, curve, curveName, echo, filter, bass_swap, tempo, mode, to,
 // in } in video seconds, or null.
 let fade = null;
 let armed = false;
+let held = false;
 // The fade-out reached its end (or was cut short by a track change).
 let faded = false;
 // Where our own seek goes (null: none). A seek elsewhere is the user's, even while ours is pending.
@@ -606,8 +623,12 @@ const planFade = (v) => {
   const own = facts()?.fade_ms;
   if (own) end = Math.min(end, own / 1000 + dur / 2);
   let out = end - dur;
-  if (m && Number.isFinite(m.out_ms)) out = Math.min(m.out_ms / 1000, length - dur);
-  else if (end < 3 * dur) return null;
+  if (m && Number.isFinite(m.out_ms)) {
+    if (m.mode !== 'pair' && end < 3 * dur) return null;
+    out = Math.min(m.out_ms / 1000, length - dur);
+  } else if (end < 3 * dur) {
+    return null;
+  }
   if (out < 0) return null;
   const name = m ? m.curve : c.curve;
   const curveName = CURVES[name] ? name : 'equal_power';
@@ -637,13 +658,16 @@ const arm = (v) => {
   const begin = Math.max(now + RAMP, now + (fade.out - t) / rate);
   const p = Math.min(1, Math.max(0, (t + (begin - now) * rate - fade.out) / fade.dur));
   g.cancelAndHoldAtTime(now);
+  g.setValueAtTime(g.value, now);
   g.linearRampToValueAtTime(valueAt(fade.curve, p), begin);
   const length = ((1 - p) * fade.dur) / rate;
   try {
     if (length > 0.02) g.setValueCurveAtTime(slice(fade.curve, p), begin + 0.001, length);
+    else g.linearRampToValueAtTime(0, begin + Math.max(0.001, length));
   } catch {
-    g.linearRampToValueAtTime(0, begin + length);
+    g.linearRampToValueAtTime(0, begin + Math.max(0.001, length));
   }
+  held = false;
   armed = true;
   if (fade.echo) armEcho(v, begin, p, length);
   if (fade.filter) armSweep(begin, p, length);
@@ -676,7 +700,7 @@ const armEcho = (v, begin, p, length) => {
   const send = nodes.echoSend.gain;
   send.cancelAndHoldAtTime(ctx.currentTime);
   const at = (q) => begin + Math.max(0, ((q - p) / (1 - p || 1)) * length);
-  send.setValueAtTime(0, ctx.currentTime);
+  send.setValueAtTime(p < 0.5 ? 0 : send.value, ctx.currentTime);
   if (p < 0.85) {
     send.setTargetAtTime(1, at(0.5), RAMP / 3);
     send.setTargetAtTime(0, at(0.85), RAMP / 3);
@@ -689,7 +713,10 @@ const armEcho = (v, begin, p, length) => {
 const stopEcho = (now) => {
   if (!echo.on) return;
   ramp(nodes.echoSend.gain, 0);
-  if (now) ramp(nodes.echoWet.gain, 0);
+  if (now) {
+    ramp(nodes.echoWet.gain, 0);
+    echo.until = ctx.currentTime + 0.1;
+  }
 };
 
 // Pause, seek, rate change or ad: hold the fade where it is; it is armed again from timeupdate. An
@@ -701,9 +728,11 @@ const holdFade = () => {
   nodes.echoSend.gain.cancelAndHoldAtTime(ctx.currentTime);
   nodes.sweep.frequency.cancelAndHoldAtTime(ctx.currentTime);
   armed = false;
+  held = true;
 };
 // Back to full level in 30 ms, nothing scheduled.
 const cancelFade = () => {
+  held = false;
   armed = false;
   ramp(nodes.master.gain, 1);
   stopEcho(false);
@@ -715,15 +744,18 @@ const inWindow = (t) => fade && t >= fade.out - ARM_BEFORE_S && t < fade.out + f
 // The next track starts: it fades in if the last one faded out (a short fade if it was cut off).
 const startTrack = (v, id) => {
   if (analysis && analysis.id !== id) stopAnalysis(analysis.t >= analysis.duration - 1.5);
-  const cut = armed && !faded;
+  const cut = (armed || held) && !faded;
   const prev = nodes.master.gain.value;
   // A mix's incoming track: where it starts (see enterAt).
   if (pendingIn && pendingIn.id !== id) pendingIn = null;
   trackId = id;
+  held = false;
   armed = false;
   faded = false;
   preview = null;
   ownSeek = null;
+  guard.zeroFrom = null;
+  guard.resumeAt = null;
   stopSweep();
   stopBassCut();
   if (rateBack) {
@@ -738,12 +770,18 @@ const startTrack = (v, id) => {
     // Another track before the swap: back to one player.
     if (!overlap.swapped) overlapOff();
   }
-  if (ad || !on('crossfade') || prev > 0.98) return;
+  if (!on('crossfade')) {
+    overlapOff();
+    if (!ad && prev < 0.99) ramp(nodes.master.gain, 1);
+    return;
+  }
+  if (ad || prev > 0.98) return;
   const curveName = data?.crossfade?.curve;
   const dur = cut ? SKIP_FADE_IN_S : (data?.crossfade?.fade_in_ms ?? 0) / 1000;
   const g = nodes.master.gain;
   const now = ctx.currentTime;
   g.cancelAndHoldAtTime(now);
+  g.setValueAtTime(g.value, now);
   if (dur < 0.05) {
     g.setTargetAtTime(1, now, RAMP / 3);
     return;
@@ -776,6 +814,7 @@ const onTime = (v) => {
   skipSilence(v, t);
   // Repeat of the same track after its fade (a one-track queue on repeat-all): back in.
   if (faded && t < 2) startTrack(v, id);
+  if (held && (!fade || !inWindow(t))) cancelFade();
   if (!fade || overlap) return;
   // The length can change late, also once the fade is armed (the player's 154 s becomes the track's
   // 153.6 s): planned again, and re-armed from where it is, so the fade ends with the track and its
@@ -869,6 +908,7 @@ const startOverlap = (o) => {
   // Nothing of the one-player fade stays (it arms 1 s before `out`, so it may have been scheduled).
   const g = nodes.master.gain;
   g.cancelAndHoldAtTime(now);
+  g.setValueAtTime(g.value, now);
   nodes.echoSend.gain.cancelAndHoldAtTime(now);
   nodes.sweep.frequency.cancelAndHoldAtTime(now);
   stopEcho(false);
@@ -876,6 +916,7 @@ const startOverlap = (o) => {
   const at = Math.max(now + RAMP, ctxAt(o.at_ms));
   g.linearRampToValueAtTime(1, at);
   g.linearRampToValueAtTime(0, at + swap / 1000);
+  held = false;
   armed = true;
   // The advance on the audio clock (this window may be hidden, which holds timers back); timeupdate
   // is the fallback (onTime).
@@ -885,7 +926,7 @@ const startOverlap = (o) => {
   clock.connect(silent).connect(ctx.destination);
   clock.onended = () => {
     silent.disconnect();
-    advance();
+    if (overlap === o) advance();
   };
   clock.start();
   clock.stop(at + swap / 1000 + 0.02);
@@ -913,6 +954,7 @@ const overlapIn = (v, id) => {
   const p = Math.min(1, Math.max(0, (begin - start) / dur));
   const curve = FADE_IN[o.curve] || FADE_IN.equal_power;
   g.cancelAndHoldAtTime(now);
+  g.setValueAtTime(g.value, now);
   if (p >= 1 || (1 - p) * dur < 0.05) {
     g.setTargetAtTime(1, now, RAMP / 3);
   } else {
@@ -964,9 +1006,12 @@ const overlapOff = () => {
   const o = overlap;
   if (!o) return;
   overlap = null;
-  if (o.clock) o.clock.onended = null;
+  try {
+    o.clock?.stop();
+  } catch {}
   if (o.swapped || !nodes || ad) return;
   ramp(nodes.master.gain, 1);
+  held = false;
   armed = false;
 };
 // The tempo effect back to 1.0, in steps on timeupdate (a rate is not an AudioParam).
@@ -1051,8 +1096,17 @@ const KEY_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', '
 const MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
 const MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 const TAP_CODE = `registerProcessor('feathertune-tap', class extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(4096); this.n = 0; this.at = 0; this.next = -1; }
+  constructor() {
+    super();
+    this.buf = new Float32Array(4096);
+    this.n = 0;
+    this.at = 0;
+    this.next = -1;
+    this.stopped = false;
+    this.port.onmessage = () => { this.stopped = true; };
+  }
   process(inputs) {
+    if (this.stopped) return false;
     const ch = inputs[0];
     if (!ch || !ch.length) return true;
     const a = ch[0], b = ch[1] || ch[0];
@@ -1168,8 +1222,15 @@ const dropTap = () => {
   const node = tapNode;
   tapNode = null;
   wire();
-  if (node.port) node.port.onmessage = null;
-  else node.onaudioprocess = null;
+  if (node.port) {
+    node.port.onmessage = null;
+    try {
+      node.port.postMessage(0);
+      node.port.close();
+    } catch {}
+  } else {
+    node.onaudioprocess = null;
+  }
 };
 
 const startAnalysis = (v, id) => {
@@ -1310,6 +1371,7 @@ const feed = (samples, at) => {
     }
   }
   a.t = t0 + samples.length / a.sr;
+  if (analysis === a && t0 >= A.MAX_BINS * A.BIN_S && !inBeatWindow(a)) dropTap();
 };
 const inBeatWindow = (a) => a.onsetFrom !== null && a.t - a.onsetFrom < A.BEAT_S;
 
@@ -1548,7 +1610,9 @@ const resetQuiet = () => {
 };
 // Whether the input has been under the threshold for long enough (reading the analyser now).
 const quietFor = (t, s = QUIET.FOR_S) => {
+  const connected = analyserUsers.has('silence');
   useAnalyser('silence', true);
+  if (!connected) return false;
   if (level() > A.SILENCE_DB) {
     quiet.from = null;
     return false;
@@ -1625,11 +1689,13 @@ const setAd = (now) => {
 // An ad: nothing stays scheduled (apply() brings every parameter back to neutral).
 const onAd = (now) => {
   if (!now || !nodes) return;
+  held = false;
   armed = false;
   fade = null;
   preview = null;
   pendingIn = null;
-  overlap = null;
+  overlapOff();
+  resetQuiet();
   sweep.on = false;
   bassCut.on = false;
   // The tempo effect never touches an ad.
@@ -1660,16 +1726,28 @@ const rowId = (row) => {
 const pageList = () => new URLSearchParams(location.search).get('list');
 
 const renderButtons = () => {
-  const list = pageList();
-  const edited = list && data?.mixes?.[list];
-  for (const selector of [SELECTORS.listRows, SELECTORS.queueRows]) {
+  const scopes = [
+    [SELECTORS.listRows, pageList()],
+    [SELECTORS.queueRows, data?.list || pageList()],
+  ];
+  const valid = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{11}$/.test(x);
+  const labels = data?.labels || {};
+  const text = (s, fallback) => (typeof s === 'string' ? s.slice(0, 80) : fallback);
+  const autoLabel = `⇄ ${text(labels.auto, 'Auto')}`;
+  const editedLabel = `⇄ ${text(labels.edited, 'Edited')}`;
+  const titleLabel = text(labels.edit, 'Edit the transition between these tracks');
+  for (const [selector, list] of scopes) {
+    const edited = list && data?.mixes?.[list];
+    if (!Array.isArray(edited)) {
+      for (const b of document.querySelectorAll(`${selector} > .${BUTTON_CLASS}`)) b.remove();
+      continue;
+    }
     const rows = [...document.querySelectorAll(selector)];
     rows.forEach((row, i) => {
       let button = row.querySelector(`:scope > .${BUTTON_CLASS}`);
       const from = rowId(row);
       const to = rows[i + 1] && rowId(rows[i + 1]);
-      const valid = (x) => typeof x === 'string' && /^[A-Za-z0-9_-]{11}$/.test(x);
-      if (!Array.isArray(edited) || !valid(from) || !valid(to) || from === to) {
+      if (!valid(from) || !valid(to) || from === to) {
         button?.remove();
         return;
       }
@@ -1689,10 +1767,9 @@ const renderButtons = () => {
       const mark = edited.includes(`${from}>${to}`);
       Object.assign(button.dataset, { list, from, to });
       button.classList.toggle('edited', mark);
-      const labels = data?.labels || {};
-      const text = (s, fallback) => (typeof s === 'string' ? s.slice(0, 80) : fallback);
-      button.textContent = `⇄ ${mark ? text(labels.edited, 'Edited') : text(labels.auto, 'Auto')}`;
-      button.title = text(labels.edit, 'Edit the transition between these tracks');
+      const label = mark ? editedLabel : autoLabel;
+      if (button.textContent !== label) button.textContent = label;
+      if (button.title !== titleLabel) button.title = titleLabel;
     });
   }
   watchRows();
@@ -1760,9 +1837,11 @@ const visUpdate = () => {
     visColor();
     vis.canvas.hidden = false;
     vis.raf = requestAnimationFrame(visFrame);
-  } else if (!want && vis.raf) {
-    cancelAnimationFrame(vis.raf);
-    vis.raf = 0;
+  } else if (!want) {
+    if (vis.raf) {
+      cancelAnimationFrame(vis.raf);
+      vis.raf = 0;
+    }
     useAnalyser('visualizer', false);
   }
   if (vis.canvas && (ad || !on('visualizer') || !playerOpen())) vis.canvas.hidden = true;
@@ -1837,7 +1916,7 @@ window.addEventListener('blur', visUpdate);
 
 const onMedia = (e) => {
   const v = e.target;
-  if (!(v instanceof HTMLVideoElement)) return;
+  if (!(v instanceof HTMLVideoElement) || !v.closest(SELECTORS.player)) return;
   watchPlayer();
   if (off) return;
   if (e.type === 'play' && anyOn()) {
@@ -1865,6 +1944,9 @@ const onMedia = (e) => {
       if (v.playbackRate !== 1) stopAnalysis(false);
       break;
     case 'seeking':
+      guard.zeroFrom = null;
+      onSeek(v, e.type);
+      break;
     case 'seeked':
       onSeek(v, e.type);
       break;
@@ -1874,12 +1956,13 @@ const onMedia = (e) => {
       break;
     case 'waiting':
       waiting = true;
+      guard.zeroFrom = null;
       break;
     case 'loadedmetadata':
     case 'durationchange':
       // A new duration: the fade is planned again, in place (a gapless queue changes it near the end).
       if (!armed) fade = planFade(v);
-      if (analysis && data?.facts?.current?.id === analysis.id && complete(data.facts.current)) stopAnalysis(false);
+      if (analysis && complete(factsFor(analysis.id))) stopAnalysis(false);
       break;
     case 'playing':
       // After a pause or a stall (the samples meanwhile were dropped): the anchor read again.
@@ -1901,8 +1984,13 @@ feathertune.audio = Object.freeze({
   set: (d) => {
     data = d;
     if (off) return;
-    // New crossfade settings: planned again (a fade under way is cut if the plugin went off).
-    if (nodes && armed && !on('crossfade')) cancelFade();
+    if (analysis && complete(factsFor(analysis.id))) stopAnalysis(false);
+    // New crossfade settings: planned again (any fade or overlap under way is cut if the plugin went off).
+    if (nodes && !on('crossfade')) {
+      overlapOff();
+      if (armed || held) cancelFade();
+      fade = null;
+    }
     // In place: the transition voice reads `fade`, and a command in this same call needs it.
     if (!armed) fade = nodes && video ? planFade(video) : null;
     // Settings arrived after the first play: start now on the playing element.

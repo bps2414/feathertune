@@ -152,19 +152,27 @@ pub fn error(text: &str) {
 /// Allocates `len` bytes for the app to write an event into (the `ft_alloc` export).
 #[doc(hidden)]
 pub fn __alloc(len: i32) -> i32 {
-    let block = vec![0u8; len.max(0) as usize].into_boxed_slice();
+    let Ok(len) = usize::try_from(len) else {
+        return 0;
+    };
+    let block = vec![0u8; len].into_boxed_slice();
     Box::into_raw(block) as *mut u8 as usize as i32
 }
 
 /// Reads the event at `ptr`, frees it and hands it to `handler` (the `ft_event` export).
 #[doc(hidden)]
 pub fn __event(ptr: i32, len: i32, handler: fn(Event)) {
-    let bytes = unsafe {
-        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-            ptr as usize as *mut u8,
-            len.max(0) as usize,
-        ))
+    let Ok(len) = usize::try_from(len) else {
+        return;
     };
+    if ptr == 0 && len > 0 {
+        return;
+    }
+    #[cfg(target_arch = "wasm32")]
+    let raw = ptr as u32 as usize as *mut u8;
+    #[cfg(not(target_arch = "wasm32"))]
+    let raw = ptr as usize as *mut u8;
+    let bytes = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(raw, len)) };
     match serde_json::from_slice(&bytes) {
         Ok(event) => handler(event),
         Err(e) => error(&format!("bad event: {e}")),

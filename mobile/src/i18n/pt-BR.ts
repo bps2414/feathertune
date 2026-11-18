@@ -10,7 +10,7 @@ export const ptBR: typeof en = {
 
   welcomeTitle: 'Controle o feathertune pelo celular',
   welcomeBody:
-    'Pareie este celular com o feathertune do seu PC. No PC, abra as Configurações, vá à aba Experimental, ligue o Controle pelo celular e toque em Parear um celular. Um código aparece ali por 2 minutos.',
+    'Pareie este celular com o feathertune do seu PC. No PC, abra as Configurações, vá em Controle pelo celular, ligue a opção e toque em Parear um celular. Um código aparece ali por 2 minutos.',
   welcomeStart: 'Ler o código de pareamento',
 
   cameraTitle: 'A câmera, para o código de pareamento',
@@ -115,7 +115,7 @@ export const ptBR: typeof en = {
   problemTooBig: 'Algo deu errado no app',
   problemTooBigBody: 'O app mandou ao PC uma mensagem que ele não aceita. Por favor relate.',
   problemOff: 'O controle pelo celular está desligado no PC',
-  problemOffBody: 'Ligue o Controle pelo celular nas configurações do feathertune, na aba Experimental.',
+  problemOffBody: 'Ligue o Controle pelo celular nas configurações do feathertune, em Controle pelo celular.',
   problemFull: 'Este PC já tem 16 celulares pareados',
   problemFullBody: 'Remova um nas configurações de Controle pelo celular do feathertune e pareie de novo.',
   problemUnreachable: 'PC desligado ou em suspensão',

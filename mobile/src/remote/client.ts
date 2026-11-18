@@ -156,7 +156,11 @@ export class Session {
     if (this.ended) return;
     const plain = new TextEncoder().encode(JSON.stringify(message));
     if (plain.length > MAX_OUT) throw new Error('remote: message too large');
-    this.inbox.socket.send(this.transport.send.encrypt(plain));
+    try {
+      this.inbox.socket.send(this.transport.send.encrypt(plain));
+    } catch {
+      this.close();
+    }
   }
 
   /**

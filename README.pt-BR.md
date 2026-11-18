@@ -73,7 +73,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 **Leve e privado**
 - Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
-- Exportar diagnóstico (Configurações > Advanced): um arquivo de texto para mandar quando algo der errado.
+- Exportar diagnóstico (Configurações > Sobre): um arquivo de texto para mandar quando algo der errado.
 - Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 **Além do PC**
@@ -104,7 +104,7 @@ cargo build --release
 
 ## Configuração
 
-`%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução com a lista de plugins, fora do repositório; um arquivo que já existe mantém os valores escritos nele). A janela de configurações (engrenagem da barra de título, ou menu da bandeja > Settings) edita tudo abaixo e mantém seus comentários; editar à mão também funciona. Tudo é opcional:
+`%LOCALAPPDATA%\feathertune\config.toml` (criado na primeira execução com a lista de plugins, fora do repositório; um arquivo que já existe mantém os valores escritos nele). A janela de configurações (engrenagem da barra de título, ou menu da bandeja > Configurações) edita tudo abaixo e mantém seus comentários; editar à mão também funciona. Tudo é opcional:
 
 <details>
 <summary>Todas as opções, comentadas</summary>

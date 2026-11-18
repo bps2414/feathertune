@@ -24,7 +24,8 @@ $log = Join-Path $results "$Name.log"
 New-Item -ItemType Directory -Force $results | Out-Null
 
 # Two instances with the same WebView2 profile share one browser process, which breaks the tree.
-$running = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Exe }
+$leaf = Split-Path $Exe -Leaf
+$running = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Exe -or ($null -eq $_.ExecutablePath -and $_.Name -eq $leaf) }
 if ($running) { throw "$(Split-Path $Exe -Leaf) is already running (pid $($running.ProcessId -join ', ')). Close it first." }
 
 Add-Type -Namespace Measure -Name Win32 -MemberDefinition @'
@@ -64,7 +65,7 @@ function Snapshot([int]$root) {
 function Compare-Snapshots($a, $b, [double]$seconds) {
     foreach ($x in $b) {
         $prev = $a | Where-Object pid -eq $x.pid
-        $cpu = if ($prev) { ($x.cpu - $prev.cpu) / $seconds * 100 } else { 0 }
+        $cpu = if ($prev) { ($x.cpu - $prev.cpu) / $seconds * 100 } else { [math]::Min($x.cpu / $seconds * 100, 100 * [Environment]::ProcessorCount) }
         [pscustomobject]@{ type = $x.type; cpuPct = [math]::Round($cpu, 1); wsMB = [math]::Round($x.ws, 1); privMB = [math]::Round($x.priv, 1) }
     }
 }

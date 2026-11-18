@@ -19,7 +19,7 @@
 ## Checklist
 
 - [ ] One subject; commits and title in English (`Area: what changed`)
-- [ ] `cargo fmt`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo test --locked` pass in `app/`
+- [ ] `cargo fmt`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo test --locked` pass in `app/` (plus `sdk/rust`, `examples/extensions/track-counter`, `mobile/`, or `site/` checks if touched)
 - [ ] No limit in AGENTS.md is crossed (ads, audio, private APIs, credentials, what the page may call, brand names)
 - [ ] New interface text is in `t("...")` and in `app/locales/pt-BR.json`
 - [ ] New plugin: on by default (or Experimental), cost written in `plugins.rs` and `docs/DESIGN.md` ("not measured yet" is fine)

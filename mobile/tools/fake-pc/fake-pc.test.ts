@@ -9,6 +9,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { WebSocket } from 'ws';
 
 import { createHandshake, generateKeyPair, type KeyPair, type Transport } from '../../src/noise';
+import { parsePairingUri } from '../../src/remote/protocol';
 import { FakePc, allowedSource, type FakePcOptions } from './server';
 
 const random = (length: number) => crypto.getRandomValues(new Uint8Array(length));
@@ -325,12 +326,22 @@ describe('refusals', () => {
     expect(pc.getDevices()).toHaveLength(1);
   });
 
-  it('answers a wrong secret with a reply the phone cannot read, and burns the window', async () => {
+  it('answers a wrong secret with a reply the phone cannot read, and leaves the window open', async () => {
     const { pc, port } = await start();
     const uri = await pc.startPairing();
     await expect(pair(port, uri, generateKeyPair(random), 'Guess', random(32))).rejects.toThrow();
-    expect(await pair(port, uri, generateKeyPair(random), 'Real')).toBe(4001);
-    expect(pc.getDevices()).toHaveLength(0);
+    const phone = (await pair(port, uri, generateKeyPair(random), 'Real')) as Phone;
+    await asked(pc);
+    expect(pc.answer(true)).toBe(true);
+    expect((await phone.recv()).t).toBe('hello');
+    expect(pc.getDevices()).toHaveLength(1);
+  });
+
+  it('validates pairing URI version and port range', () => {
+    const { k, s } = { k: 'aa'.repeat(32), s: 'bb'.repeat(32) };
+    expect(parsePairingUri(`feathertune://pair?v=1&k=${k}&s=${s}&a=192.168.1.2&p=47652`)?.port).toBe(47652);
+    expect(parsePairingUri(`feathertune://pair?v=2&k=${k}&s=${s}&a=192.168.1.2&p=47652`)).toBeNull();
+    expect(parsePairingUri(`feathertune://pair?v=1&k=${k}&s=${s}&a=192.168.1.2&p=80`)).toBeNull();
   });
 
   it('closes junk with invalid and leaves the window open', async () => {

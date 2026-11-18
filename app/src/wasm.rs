@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
@@ -33,14 +33,16 @@ use crate::player::{Event, Player, State};
 
 const MAX_MEMORY: usize = 64 << 20;
 const FUEL: u64 = 2_000_000_000;
+const HOST_CALL_FUEL: u64 = 500_000;
 const MAX_REQUEST: usize = 1 << 20;
 const MAX_TIMERS: usize = 16;
+const MAX_TIMER_ID: usize = 1024;
 const QUEUE: usize = 256;
 pub const MAX_PAGE_MESSAGE: usize = 256 << 10;
 
 /// The running modules' event queues, by extension id.
 #[derive(Default)]
-pub struct Wasm(Mutex<HashMap<String, SyncSender<Value>>>);
+pub struct Wasm(Mutex<HashMap<String, Arc<SyncSender<Value>>>>);
 
 impl Wasm {
     fn send(&self, id: &str, event: Value) {
@@ -68,10 +70,12 @@ pub fn start(app: &AppHandle) {
     }
     for ext in running {
         let (tx, rx) = sync_channel(QUEUE);
-        app.state::<Wasm>().0.lock().unwrap().insert(ext.id.clone(), tx.clone());
+        let tx = Arc::new(tx);
+        let weak = Arc::downgrade(&tx);
+        app.state::<Wasm>().0.lock().unwrap().insert(ext.id.clone(), tx);
         let app = app.clone();
         let _ = std::thread::Builder::new().name(format!("wasm {}", ext.id)).spawn(move || {
-            if let Err(e) = run(&app, &ext, tx, rx) {
+            if let Err(e) = run(&app, &ext, weak, rx) {
                 app.state::<Extensions>().error(&ext.id, &format!("WebAssembly stopped: {e}"));
             }
             app.state::<Wasm>().0.lock().unwrap().remove(&ext.id);
@@ -80,31 +84,76 @@ pub fn start(app: &AppHandle) {
     let mut rx = app.state::<Player>().subscribe();
     let app = app.clone();
     std::thread::spawn(move || {
-        let mut ad = false;
+        let mut ad: Option<bool> = None;
+        let mut last: Option<(Instant, bool, f64, u8, bool)> = None;
         loop {
-            let event = match rx.blocking_recv() {
-                Ok(Event::Track(s)) => json!({ "type": "track", "state": state_json(&s) }),
-                Ok(Event::Playback(s)) if s.ad != ad => {
-                    ad = s.ad;
-                    json!({ "type": "ad", "ad": ad, "state": state_json(&s) })
+            let mut events = Vec::new();
+            let s = match rx.blocking_recv() {
+                Ok(Event::Track(s)) => {
+                    events.push(json!({ "type": "track", "state": state_json(&s) }));
+                    if ad != Some(s.ad) {
+                        ad = Some(s.ad);
+                        events.push(json!({ "type": "ad", "ad": s.ad, "state": state_json(&s) }));
+                    }
+                    s
                 }
-                Ok(Event::Playback(s)) => json!({ "type": "state", "state": state_json(&s) }),
-                Ok(Event::Progress(_)) | Err(RecvError::Lagged(_)) => continue,
+                Ok(Event::Playback(s)) => {
+                    if ad != Some(s.ad) {
+                        ad = Some(s.ad);
+                        events.push(json!({ "type": "ad", "ad": s.ad, "state": state_json(&s) }));
+                    } else {
+                        events.push(json!({ "type": "state", "state": state_json(&s) }));
+                    }
+                    s
+                }
+                Ok(Event::Progress(s)) => {
+                    let pos = s.position_now();
+                    let expected_pos = last.map_or(
+                        pos,
+                        |(at, paused, p, _, _)| {
+                            if paused { p } else { p + at.elapsed().as_secs_f64() }
+                        },
+                    );
+                    if ad != Some(s.ad) {
+                        ad = Some(s.ad);
+                        events.push(json!({ "type": "ad", "ad": s.ad, "state": state_json(&s) }));
+                    } else if last.is_some_and(|(_, _, _, vol, muted)| {
+                        s.volume != vol || s.muted != muted || (pos - expected_pos).abs() > 1.5
+                    }) {
+                        events.push(json!({ "type": "state", "state": state_json(&s) }));
+                    }
+                    s
+                }
+                Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             };
-            app.state::<Wasm>().broadcast(&event);
+            last = Some((Instant::now(), s.paused, s.position_now(), s.volume, s.muted));
+            let wasm = app.state::<Wasm>();
+            for event in &events {
+                wasm.broadcast(event);
+            }
         }
     });
 }
 
 /// A message of an extension's page code to its own module (`ext_call` `native`).
 pub fn page_message(app: &AppHandle, id: &str, data: Value) -> Result<(), String> {
-    let wasm = app.state::<Wasm>();
-    if !wasm.0.lock().unwrap().contains_key(id) {
-        return Err("no WebAssembly running for this extension".into());
+    let tx = app
+        .state::<Wasm>()
+        .0
+        .lock()
+        .unwrap()
+        .get(id)
+        .cloned()
+        .ok_or_else(|| "no WebAssembly running for this extension".to_owned())?;
+    match tx.try_send(json!({ "type": "page", "data": data })) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => Err("extension message queue is full".into()),
+        Err(TrySendError::Disconnected(_)) => {
+            app.state::<Wasm>().0.lock().unwrap().remove(id);
+            Err("no WebAssembly running for this extension".into())
+        }
     }
-    wasm.send(id, json!({ "type": "page", "data": data }));
-    Ok(())
 }
 
 /// Gives the running modules their settings of now.
@@ -138,8 +187,14 @@ struct Host {
     /// The last answer of `ft.call`, until `ft.take` copies it.
     answer: Vec<u8>,
     limits: StoreLimits,
-    tx: SyncSender<Value>,
+    tx: Weak<SyncSender<Value>>,
     timers: Arc<AtomicUsize>,
+}
+
+fn charge_fuel(caller: &mut Caller<'_, Host>, cost: u64) -> Result<(), Error> {
+    let left = caller.get_fuel().map_err(|e| Error::new(e.to_string()))?;
+    let next = left.checked_sub(cost).ok_or_else(|| Error::new("out of fuel"))?;
+    caller.set_fuel(next).map_err(|e| Error::new(e.to_string()))
 }
 
 fn guest_bytes(caller: &Caller<'_, Host>, ptr: i32, len: i32) -> Result<Vec<u8>, Error> {
@@ -153,7 +208,7 @@ fn guest_bytes(caller: &Caller<'_, Host>, ptr: i32, len: i32) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-fn run(app: &AppHandle, ext: &Arc<Extension>, tx: SyncSender<Value>, rx: Receiver<Value>) -> Result<(), String> {
+fn run(app: &AppHandle, ext: &Arc<Extension>, tx: Weak<SyncSender<Value>>, rx: Receiver<Value>) -> Result<(), String> {
     let path = app.state::<Extensions>().dir().join(&ext.id).join("plugin.wasm");
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     let mut config = Config::default();
@@ -172,7 +227,8 @@ fn run(app: &AppHandle, ext: &Arc<Extension>, tx: SyncSender<Value>, rx: Receive
     store.limiter(|h| &mut h.limits);
     let mut linker = <Linker<Host>>::new(&engine);
     linker
-        .func_wrap("ft", "log", |caller: Caller<'_, Host>, ptr: i32, len: i32| -> Result<(), Error> {
+        .func_wrap("ft", "log", |mut caller: Caller<'_, Host>, ptr: i32, len: i32| -> Result<(), Error> {
+            charge_fuel(&mut caller, HOST_CALL_FUEL)?;
             let text = String::from_utf8_lossy(&guest_bytes(&caller, ptr, len)?).into_owned();
             let host = caller.data();
             let _ = crate::extension_api::call(&host.app, &host.ext, "log", &json!({ "message": text }));
@@ -181,6 +237,7 @@ fn run(app: &AppHandle, ext: &Arc<Extension>, tx: SyncSender<Value>, rx: Receive
         .map_err(|e| e.to_string())?;
     linker
         .func_wrap("ft", "call", |mut caller: Caller<'_, Host>, ptr: i32, len: i32| -> Result<i32, Error> {
+            charge_fuel(&mut caller, HOST_CALL_FUEL)?;
             let request = guest_bytes(&caller, ptr, len)?;
             let answer = match serde_json::from_slice::<Value>(&request) {
                 Ok(request) => match host_call(caller.data(), &request) {
@@ -224,13 +281,13 @@ fn run(app: &AppHandle, ext: &Arc<Extension>, tx: SyncSender<Value>, rx: Receive
     loop {
         let bytes = event.to_string().into_bytes();
         let len = i32::try_from(bytes.len()).map_err(|_| "event too large")?;
+        if event["type"] == "timer" {
+            store.data().timers.fetch_sub(1, Ordering::Relaxed);
+        }
         store.set_fuel(FUEL).map_err(|e| e.to_string())?;
         let ptr = alloc.call(&mut store, len).map_err(|e| e.to_string())?;
         memory.write(&mut store, ptr as u32 as usize, &bytes).map_err(|e| e.to_string())?;
         on_event.call(&mut store, (ptr, len)).map_err(|e| e.to_string())?;
-        if event["type"] == "timer" {
-            store.data().timers.fetch_sub(1, Ordering::Relaxed);
-        }
         event = rx.recv().map_err(|_| "closed")?;
     }
 }
@@ -277,15 +334,23 @@ fn host_call(host: &Host, request: &Value) -> Result<Value, String> {
         "timer" => {
             let ms = request.get("ms").and_then(Value::as_u64).filter(|ms| (10..=86_400_000).contains(ms));
             let ms = ms.ok_or("ms from 10 to 86400000")?;
+            let id = request.get("id").cloned().unwrap_or(Value::Null);
+            if id.to_string().len() > MAX_TIMER_ID {
+                return Err("timer id is over 1 KB".into());
+            }
             if host.timers.fetch_add(1, Ordering::Relaxed) >= MAX_TIMERS {
                 host.timers.fetch_sub(1, Ordering::Relaxed);
                 return Err(format!("at most {MAX_TIMERS} timers waiting"));
             }
             let tx = host.tx.clone();
-            let event = json!({ "type": "timer", "id": request.get("id").cloned().unwrap_or(Value::Null) });
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(ms));
-                let _ = tx.send(event);
+            let timers = host.timers.clone();
+            let event = json!({ "type": "timer", "id": id });
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+                let sent = tx.upgrade().is_some_and(|tx| tx.try_send(event).is_ok());
+                if !sent {
+                    timers.fetch_sub(1, Ordering::Relaxed);
+                }
             });
             Ok(Value::Null)
         }

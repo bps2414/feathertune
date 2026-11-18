@@ -3,7 +3,7 @@
 //!
 //! - Listens on `[remote] port` (IPv4, and IPv6 when it can) only while the plugin is on; `apply` follows the
 //!   switch, and turning it off closes the port and every connection. A source outside the private,
-//!   link-local, loopback and CGNAT ranges is dropped before the WebSocket handshake, as is a sixth try from
+//!   link-local, loopback and CGNAT ranges is dropped before the WebSocket handshake, as is a 16th try from
 //!   one address within a minute. At most 4 sessions at once.
 //! - One binary WebSocket frame is one Noise message. `/v1/pair`: `Noise_IKpsk2` with the QR's one-time secret
 //!   as the PSK, then the user allows the phone after comparing a 6-digit code. `/v1`: `Noise_KK` with a paired
@@ -18,7 +18,7 @@
 //!   `pending`, `answer`, `devices`, `remove`, `forget_all`, `listening` and `on_change`.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -33,7 +33,7 @@ use tauri::async_runtime::{self, JoinHandle};
 use tauri::{AppHandle, Manager};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, error::RecvError};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::time::{Instant, timeout, timeout_at};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -65,7 +65,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// The controller pings every 15 s; three missed and the session is closed.
 const SILENCE: Duration = Duration::from_secs(45);
 const MINUTE: Duration = Duration::from_secs(60);
-const HANDSHAKES_PER_MINUTE: usize = 5;
+const HANDSHAKES_PER_MINUTE: usize = 15;
+const MAX_ATTEMPT_BUCKETS: usize = 256;
+const MAX_HANDSHAKES_IN_FLIGHT: usize = 16;
 const MAX_SESSIONS: usize = 4;
 /// Paired phones; also bounds the keys a `KK` knock is tried against.
 const MAX_DEVICES: usize = 16;
@@ -319,6 +321,27 @@ struct Running {
     tasks: Vec<JoinHandle<()>>,
 }
 
+#[derive(Hash, PartialEq, Eq)]
+enum RateKey {
+    V4(Ipv4Addr),
+    V6Net([u8; 8]),
+}
+
+impl RateKey {
+    fn from_ip(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(v4) => Self::V4(v4),
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => Self::V4(v4),
+                None => {
+                    let o = v6.octets();
+                    Self::V6Net([o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]])
+                }
+            },
+        }
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     keys: Option<Keys>,
@@ -328,7 +351,7 @@ struct Inner {
     pairing: Option<Pairing>,
     sessions: HashMap<u64, Session>,
     next_session: u64,
-    attempts: HashMap<IpAddr, Vec<Instant>>,
+    attempts: HashMap<RateKey, Vec<Instant>>,
     running: Option<Running>,
 }
 
@@ -502,16 +525,16 @@ impl Shared {
 
     /// Forgets one phone and closes its session at once. False: no such phone.
     pub fn remove(&self, key: &str) -> bool {
-        let found = {
+        let devices = {
             let mut inner = self.lock();
             let before = inner.devices.len();
             inner.devices.retain(|d| d.key != key);
-            let found = inner.devices.len() != before;
-            if found {
-                self.save(&inner.devices);
-            }
-            found
+            (inner.devices.len() != before).then(|| inner.devices.clone())
         };
+        let found = devices.is_some();
+        if let Some(devices) = devices {
+            self.save(&devices);
+        }
         self.kick(|k| k == key, Close::Removed);
         self.changed();
         found
@@ -523,14 +546,15 @@ impl Shared {
         if self.keyring {
             store_keys(&keys)?;
         }
-        {
+        let devices = {
             let mut inner = self.lock();
             inner.keys = Some(keys);
             inner.devices.clear();
             inner.last_seen.clear();
             inner.pairing = None;
-            self.save(&inner.devices);
-        }
+            inner.devices.clone()
+        };
+        self.save(&devices);
         self.kick(|_| true, Close::Removed);
         self.changed();
         Ok(())
@@ -538,7 +562,7 @@ impl Shared {
 
     fn save(&self, devices: &[Device]) {
         let text = serde_json::to_string_pretty(devices).expect("devices serialize");
-        if let Err(e) = std::fs::write(&self.devices_file, text) {
+        if let Err(e) = crate::settings::write_atomic(&self.devices_file, text) {
             eprintln!("remote: could not save the paired devices: {e}");
         }
     }
@@ -611,13 +635,17 @@ impl Shared {
 
     /// Whether `ip` may try a handshake now: at most `HANDSHAKES_PER_MINUTE` a minute each.
     fn admit(&self, ip: IpAddr) -> bool {
+        let key = RateKey::from_ip(ip);
         let now = Instant::now();
         let mut inner = self.lock();
         inner.attempts.retain(|_, times| {
             times.retain(|t| now.duration_since(*t) < MINUTE);
             !times.is_empty()
         });
-        let times = inner.attempts.entry(ip).or_default();
+        if !inner.attempts.contains_key(&key) && inner.attempts.len() >= MAX_ATTEMPT_BUCKETS {
+            return false;
+        }
+        let times = inner.attempts.entry(key).or_default();
         if times.len() >= HANDSHAKES_PER_MINUTE {
             return false;
         }
@@ -638,8 +666,6 @@ impl Shared {
             }
             (secret, pairing.until, keys)
         };
-        // The QR on the settings screen is spent from here on.
-        self.changed();
         let mut hs = snow::Builder::new(params(PAIR_PATTERN))
             .local_private_key(&keys.private)
             .and_then(|b| b.psk(2, &secret))
@@ -647,16 +673,8 @@ impl Shared {
             .and_then(|b| b.build_responder())
             .map_err(|_| Close::Invalid)?;
         let mut buf = vec![0u8; NOISE_MAX];
-        // Bytes that do not read as a first message for this PC (anyone on the network can send them) leave the
-        // window open; one that reads was made with the PC's key, from the QR.
+        // Bytes that do not read as a first message for this PC leave the window open.
         let n = hs.read_message(&first, &mut buf).map_err(|_| Close::Invalid)?;
-        // One try per secret: it is gone from here on, whatever happens next.
-        self.lock()
-            .pairing
-            .as_mut()
-            .filter(|p| p.until == until)
-            .and_then(|p| p.secret.take())
-            .ok_or(Close::Expired)?;
         let hello: PairHello = serde_json::from_slice(&buf[..n]).map_err(|_| Close::Invalid)?;
         let name = valid_name(&hello.name).ok_or(Close::Invalid)?;
         let key = hs.get_remote_static().map(hex).ok_or(Close::Invalid)?;
@@ -665,27 +683,34 @@ impl Shared {
         let code = pairing_code(hs.get_handshake_hash());
         let mut transport = hs.into_transport_mode().map_err(|_| Close::Invalid)?;
         // The PSK is only mixed in by the PC's reply: the phone's first transport message is what proves it had
-        // the secret, so only then is the user asked.
-        let frame = read_frame(ws, until).await?;
+        // the secret, so only once it decrypts under the PSK keys do we consume the QR secret and ask the user.
+        let frame = read_frame(ws, Instant::now() + HANDSHAKE_TIMEOUT).await?;
         let n = transport.read_message(&frame, &mut buf).map_err(|_| Close::Invalid)?;
         serde_json::from_slice::<Confirm>(&buf[..n]).map_err(|_| Close::Invalid)?;
         let (tx, rx) = oneshot::channel();
         {
             let mut inner = self.lock();
-            let pairing = inner.pairing.as_mut().filter(|p| p.until == until).ok_or(Close::Expired)?;
+            let pairing = inner
+                .pairing
+                .as_mut()
+                .filter(|p| p.until == until && p.until > Instant::now())
+                .ok_or(Close::Expired)?;
+            if pairing.secret != Some(secret) {
+                return Err(Close::Expired);
+            }
+            pairing.secret = None;
             pairing.asking = Some(Asking { name: name.clone(), code, answer: tx });
         }
         self.changed();
-        let result = match timeout_at(until, rx).await {
+        let (devices, result) = match timeout_at(until, rx).await {
             Ok(Ok(true)) => {
                 let mut inner = self.lock();
                 inner.devices.retain(|d| d.key != key);
                 inner.devices.push(Device { name, key: key.clone(), paired: now_s() });
-                self.save(&inner.devices);
-                Ok((transport, key, None))
+                (Some(inner.devices.clone()), Ok((transport, key, None)))
             }
-            Ok(Ok(false)) => Err(Close::Denied),
-            _ => Err(Close::Expired),
+            Ok(Ok(false)) => (None, Err(Close::Denied)),
+            _ => (None, Err(Close::Expired)),
         };
         // The window ends with its one pairing, whatever the answer.
         {
@@ -693,6 +718,9 @@ impl Shared {
             if inner.pairing.as_ref().is_some_and(|p| p.until == until) {
                 inner.pairing = None;
             }
+        }
+        if let Some(devices) = devices {
+            self.save(&devices);
         }
         self.changed();
         result
@@ -851,10 +879,12 @@ async fn accept(shared: Arc<Shared>, listener: std::net::TcpListener) {
         Ok(l) => l,
         Err(e) => return eprintln!("remote: {e}"),
     };
+    let permits = Arc::new(Semaphore::new(MAX_HANDSHAKES_IN_FLIGHT));
     loop {
         match listener.accept().await {
             Ok((tcp, peer)) => {
-                async_runtime::spawn(connection(shared.clone(), tcp, peer));
+                let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
+                async_runtime::spawn(connection(shared.clone(), tcp, peer, permit));
             }
             Err(e) => {
                 eprintln!("remote: accept failed: {e}");
@@ -864,7 +894,7 @@ async fn accept(shared: Arc<Shared>, listener: std::net::TcpListener) {
     }
 }
 
-async fn connection(shared: Arc<Shared>, tcp: TcpStream, peer: SocketAddr) {
+async fn connection(shared: Arc<Shared>, tcp: TcpStream, peer: SocketAddr, permit: OwnedSemaphorePermit) {
     // Dropped before any handshake: a source outside the local network, or too many tries from one address.
     if !allowed_source(peer.ip()) || !shared.admit(peer.ip()) {
         return;
@@ -886,6 +916,7 @@ async fn connection(shared: Arc<Shared>, tcp: TcpStream, peer: SocketAddr) {
         timeout(HANDSHAKE_TIMEOUT, tokio_tungstenite::accept_hdr_async_with_config(tcp, callback, Some(config))).await;
     let (Ok(Ok(mut ws)), Some(pair)) = (accepted, pair) else { return };
     let result = if pair { shared.pair(&mut ws).await } else { shared.knock(&mut ws).await };
+    drop(permit);
     match result {
         Ok((transport, key, ping)) => shared.session(ws, transport, key, ping).await,
         Err(why) => {
@@ -1029,16 +1060,30 @@ fn allowed_source(ip: IpAddr) -> bool {
     }
 }
 
-/// The address of the interface the default route uses, found without sending anything (connecting a UDP
-/// socket only picks a route).
+/// Local IPv4 addresses for the pairing QR: default route first, then other local adapters from COMPUTERNAME.
 fn lan_addresses() -> Vec<IpAddr> {
-    let ip = UdpSocket::bind(("0.0.0.0", 0))
-        .and_then(|s| {
-            s.connect(("192.0.2.1", 9))?;
-            s.local_addr()
-        })
-        .map(|a| a.ip());
-    ip.into_iter().filter(|ip| allowed_source(*ip) && !ip.is_loopback()).collect()
+    let mut out = Vec::new();
+    if let Ok(addr) = UdpSocket::bind(("0.0.0.0", 0)).and_then(|s| {
+        s.connect(("192.0.2.1", 9))?;
+        s.local_addr()
+    }) {
+        let ip = addr.ip();
+        if allowed_source(ip) && !ip.is_loopback() && ip.is_ipv4() {
+            out.push(ip);
+        }
+    }
+    if let Ok(name) = std::env::var("COMPUTERNAME")
+        && !name.is_empty()
+        && let Ok(addrs) = (name.as_str(), 0).to_socket_addrs()
+    {
+        for addr in addrs {
+            let ip = addr.ip();
+            if allowed_source(ip) && !ip.is_loopback() && ip.is_ipv4() && !out.contains(&ip) {
+                out.push(ip);
+            }
+        }
+    }
+    out
 }
 
 fn pairing_uri(addrs: &[IpAddr], port: u16, key: &[u8; 32], secret: &[u8; 32]) -> String {
@@ -1451,7 +1496,7 @@ mod tests {
     }
 
     #[test]
-    fn junk_leaves_the_secret_but_a_first_message_made_with_the_pc_key_spends_it() {
+    fn wrong_psk_attempt_leaves_the_pairing_window_open_for_the_real_phone() {
         block_on(async {
             let (shared, _host, addr) = server();
             let (_, pc, secret) = shared.new_pairing().unwrap();
@@ -1459,10 +1504,11 @@ mod tests {
             let mut ws = open(addr, "/v1/pair").await;
             ws.send(Message::binary(vec![7u8; 96])).await.unwrap();
             assert_eq!(read(&mut ws).await.err(), Some(Some(4006)));
-            // The PC's key but a wrong secret: message 1 reads (the secret only enters with the reply), so it is spent.
-            let mut ws = open(addr, "/v1/pair").await;
+            // A peer that knows the PC's public key but not the secret fails to decrypt the reply under the
+            // wrong PSK and cannot forge confirm; the window stays open for the real phone.
+            let guess = Keys::generate();
             let mut hs = snow::Builder::new(params(PAIR_PATTERN))
-                .local_private_key(&Keys::generate().private)
+                .local_private_key(&guess.private)
                 .and_then(|b| b.remote_public_key(&pc))
                 .and_then(|b| b.psk(2, &[0u8; 32]))
                 .and_then(|b| b.prologue(PAIR_PROLOGUE))
@@ -1470,11 +1516,20 @@ mod tests {
                 .unwrap();
             let mut buf = vec![0u8; NOISE_MAX];
             let n = hs.write_message(json!({ "name": "Guess" }).to_string().as_bytes(), &mut buf).unwrap();
-            ws.send(Message::binary(buf[..n].to_vec())).await.unwrap();
-            read(&mut ws).await.unwrap();
-            drop(ws);
-            assert_eq!(pair(addr, &pc, &secret, &Keys::generate(), "Late").await.err(), Some(Some(4001)));
+            let mut bad = open(addr, "/v1/pair").await;
+            bad.send(Message::binary(buf[..n].to_vec())).await.unwrap();
+            let reply = read(&mut bad).await.unwrap();
+            assert!(hs.read_message(&reply, &mut buf).is_err());
+            bad.send(Message::binary(vec![9u8; 32])).await.unwrap();
+            assert_eq!(read(&mut bad).await.err(), Some(Some(4006)));
+            assert!(shared.pending().is_none());
             assert!(shared.devices().is_empty());
+
+            let mut real = pair(addr, &pc, &secret, &Keys::generate(), "Real").await.unwrap();
+            asked(&shared).await;
+            assert!(shared.answer(true));
+            assert_eq!(real.recv().await.unwrap()["t"], "hello");
+            assert_eq!(shared.devices().len(), 1);
         });
     }
 
@@ -1733,7 +1788,15 @@ mod tests {
                 assert!(shared.admit(ip));
             }
             assert!(!shared.admit(ip));
+            assert!(!shared.admit("::ffff:192.168.1.9".parse().unwrap()));
             assert!(shared.admit("192.168.1.10".parse().unwrap()));
+
+            let v6_a: IpAddr = "fd12:3456:789a:1::1".parse().unwrap();
+            let v6_b: IpAddr = "fd12:3456:789a:1::2".parse().unwrap();
+            for _ in 0..HANDSHAKES_PER_MINUTE {
+                assert!(shared.admit(v6_a));
+            }
+            assert!(!shared.admit(v6_b));
         });
     }
 

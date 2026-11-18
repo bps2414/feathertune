@@ -124,7 +124,8 @@ impl SettingDef {
                 .is_some_and(|n| n.is_finite() && self.min.is_none_or(|m| n >= m) && self.max.is_none_or(|m| n <= m)),
             "enum" => v.as_str().is_some_and(|s| self.options.iter().any(|o| o == s)),
             "string" => v.as_str().is_some_and(|s| {
-                s.chars().count() <= self.max.map_or(200, |m| m as usize) && !s.chars().any(char::is_control)
+                let cap = self.max.map_or(200, |m| m.clamp(1.0, 2000.0) as usize);
+                s.chars().count() <= cap && !s.chars().any(char::is_control)
             }),
             "color" => v.as_str().is_some_and(is_color),
             _ => false,
@@ -144,8 +145,17 @@ impl SettingDef {
         if self.kind == "enum" && (self.options.is_empty() || self.options.len() > 50) {
             return Err(format!("setting {}: an enum needs 1 to 50 options", self.key));
         }
-        if self.options.iter().any(|o| o.is_empty() || o.len() > 64) {
-            return Err(format!("setting {}: options are 1 to 64 bytes", self.key));
+        if self.options.iter().any(|o| o.is_empty() || !short(o, 64)) {
+            return Err(format!("setting {}: options are 1 to 64 characters", self.key));
+        }
+        if self.min.is_some_and(|m| !m.is_finite()) || self.max.is_some_and(|m| !m.is_finite()) {
+            return Err(format!("setting {}: min or max is not finite", self.key));
+        }
+        if self.step.is_some_and(|s| !s.is_finite() || s <= 0.0) {
+            return Err(format!("setting {}: step must be positive", self.key));
+        }
+        if self.kind == "string" && self.max.is_some_and(|m| !(1.0..=2000.0).contains(&m)) {
+            return Err(format!("setting {}: string max must be 1 to 2000", self.key));
         }
         if let (Some(min), Some(max)) = (self.min, self.max)
             && min > max
@@ -189,6 +199,7 @@ pub fn json_to_toml(v: &Value) -> Option<toml_edit::Value> {
 
 /// `autor.nome`: 3 to 64 of a-z, 0-9, `_` and `-`, in at least two parts separated by dots (built-in plugin ids
 /// have none, so they never collide).
+/// Valid extension id: `author.name`, lowercase ASCII letters/digits/underscores/hyphens and not Windows-reserved.
 pub fn valid_id(id: &str) -> bool {
     (3..=64).contains(&id.len())
         && id.contains('.')
@@ -196,22 +207,67 @@ pub fn valid_id(id: &str) -> bool {
             !part.is_empty()
                 && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
         })
+        && !crate::player::windows_reserved(id)
 }
 
 fn valid_host(host: &str) -> bool {
     let host = host.strip_prefix("*.").unwrap_or(host);
-    (3..=253).contains(&host.len())
-        && host.contains('.')
-        && host.split('.').all(|l| {
-            !l.is_empty()
-                && l.len() <= 63
-                && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        })
+    if !(3..=253).contains(&host.len()) || !host.contains('.') || host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    let labels_ok = host.split('.').all(|l| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    });
+    let Some(tld) = host.rsplit('.').next() else {
+        return false;
+    };
+    labels_ok
+        && tld.len() >= 2
+        && !tld.bytes().all(|b| b.is_ascii_digit())
+        && !matches!(tld, "localhost" | "local" | "internal")
+}
+
+fn host_covers(granted: &str, requested: &str) -> bool {
+    match granted.strip_prefix("*.") {
+        Some(base) => {
+            let req = requested.strip_prefix("*.").unwrap_or(requested);
+            req == base || req.strip_suffix(base).is_some_and(|p| p.ends_with('.'))
+        }
+        None => granted == requested,
+    }
+}
+
+fn permission_covered(prev: &[String], next: &str) -> bool {
+    if let Some(req_host) = next.strip_prefix("net:") {
+        prev.iter().filter_map(|p| p.strip_prefix("net:")).any(|granted| host_covers(granted, req_host))
+    } else {
+        prev.iter().any(|p| p == next)
+    }
+}
+
+fn escalated(prev: &Extension, next: &Extension) -> bool {
+    (prev.js.is_none() && next.js.is_some())
+        || (!prev.wasm && next.wasm)
+        || next.permissions.iter().any(|p| !permission_covered(&prev.permissions, p))
+}
+
+fn max_file_bytes(name: &str) -> usize {
+    match name {
+        "plugin.json" => MAX_MANIFEST_BYTES,
+        "page.js" | "style.css" => MAX_PAGE_BYTES,
+        "plugin.wasm" => MAX_WASM_BYTES,
+        "icon.png" => MAX_ICON_BYTES,
+        _ => 0,
+    }
 }
 
 /// Builds an extension from a package's files (names at its root), checking everything.
 fn parse(files: &BTreeMap<String, Vec<u8>>) -> Result<Extension, String> {
-    let manifest = files.get("plugin.json").ok_or("no plugin.json")?;
+    let manifest = files.get("plugin.json").ok_or_else(|| crate::i18n::t("no plugin.json"))?;
     if manifest.len() > MAX_MANIFEST_BYTES {
         return Err("plugin.json is too large".into());
     }
@@ -306,7 +362,11 @@ pub struct Found {
 pub fn scan(profile: &Path) -> Found {
     let mut found = Found::default();
     let Ok(entries) = std::fs::read_dir(profile.join(DIR)) else { return found };
-    let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| std::fs::symlink_metadata(p).is_ok_and(|m| !m.file_type().is_symlink() && m.file_type().is_dir()))
+        .collect();
     dirs.sort();
     for dir in dirs {
         let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -314,10 +374,38 @@ pub fn scan(profile: &Path) -> Found {
             continue;
         }
         let mut files = BTreeMap::new();
+        let mut read_err = None;
         for f in FILES {
-            if let Ok(bytes) = std::fs::read(dir.join(f)) {
-                files.insert((*f).to_owned(), bytes);
+            let path = dir.join(f);
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    read_err = Some(format!("{f}: {e}"));
+                    break;
+                }
+            };
+            if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+                read_err = Some(format!("{f} is not a regular file"));
+                break;
             }
+            if meta.len() > max_file_bytes(f) as u64 {
+                read_err = Some(format!("{f} is too large"));
+                break;
+            }
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    files.insert((*f).to_owned(), bytes);
+                }
+                Err(e) => {
+                    read_err = Some(format!("{f}: {e}"));
+                    break;
+                }
+            }
+        }
+        if let Some(err) = read_err {
+            found.broken.push((name, err));
+            continue;
         }
         match parse(&files) {
             Ok(e) if e.id != name => found.broken.push((name, format!("the folder must be named {}", e.id))),
@@ -429,28 +517,63 @@ impl Extensions {
     pub fn import(&self, files: BTreeMap<String, Vec<u8>>) -> Result<Value, String> {
         let files = package(files)?;
         let ext = parse(&files)?;
-        let previous = self.found(&ext.id).map(|e| e.version.clone());
-        if previous.is_none() && self.found.lock().unwrap().list.len() >= MAX_EXTENSIONS {
+        let prev = self.found(&ext.id);
+        if prev.is_none() && self.found.lock().unwrap().list.len() >= MAX_EXTENSIONS {
             return Err(format!("at most {MAX_EXTENSIONS} extensions"));
         }
+        let is_escalated = prev.as_ref().is_some_and(|p| escalated(p, &ext));
+        let previous = prev.map(|e| e.version.clone());
         let dir = self.dir();
         let tmp = dir.join(format!(".import-{}", ext.id));
+        let old = dir.join(format!(".old-{}", ext.id));
         let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::remove_dir_all(&old);
         std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
         for (name, bytes) in &files {
-            std::fs::write(tmp.join(name), bytes).map_err(|e| e.to_string())?;
+            std::fs::write(tmp.join(name), bytes).map_err(|e| {
+                let _ = std::fs::remove_dir_all(&tmp);
+                e.to_string()
+            })?;
         }
         let target = dir.join(&ext.id);
-        if target.exists() {
-            std::fs::remove_dir_all(&target).map_err(|e| format!("could not replace the old version: {e}"))?;
+        let had_target = match std::fs::symlink_metadata(&target) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.file_type().is_dir() => {
+                std::fs::remove_dir(&target).or_else(|_| std::fs::remove_file(&target)).map_err(|e| {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    format!("could not replace the old version: {e}")
+                })?;
+                false
+            }
+            Ok(_) => {
+                std::fs::rename(&target, &old).map_err(|e| {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    format!("could not replace the old version: {e}")
+                })?;
+                true
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                return Err(e.to_string());
+            }
+        };
+        if let Err(e) = std::fs::rename(&tmp, &target) {
+            if had_target {
+                let _ = std::fs::rename(&old, &target);
+            }
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e.to_string());
         }
-        std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+        if had_target {
+            let _ = std::fs::remove_dir_all(&old);
+        }
         *self.found.lock().unwrap() = scan(&self.profile);
         Ok(json!({
             "id": ext.id,
             "name": ext.tr(&ext.name),
             "version": ext.version,
             "previous": previous,
+            "escalated": is_escalated,
             "permissions": ext.permissions,
             "page": ext.js.is_some(),
             "wasm": ext.wasm,
@@ -463,10 +586,18 @@ impl Extensions {
             return Err("unknown extension".into());
         }
         let dir = self.dir().join(id);
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+        match std::fs::symlink_metadata(&dir) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.file_type().is_dir() => {
+                std::fs::remove_dir(&dir).or_else(|_| std::fs::remove_file(&dir)).map_err(|e| e.to_string())?;
+            }
+            Ok(_) => std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
         }
-        let _ = std::fs::remove_file(self.profile.join(DATA_DIR).join(format!("{id}.json")));
+        let data = self.profile.join(DATA_DIR).join(format!("{id}.json"));
+        if std::fs::symlink_metadata(&data).is_ok_and(|m| !m.file_type().is_symlink()) {
+            let _ = std::fs::remove_file(data);
+        }
         *self.found.lock().unwrap() = scan(&self.profile);
         Ok(())
     }
@@ -479,7 +610,6 @@ pub const DATA_DIR: &str = "extension-data";
 /// one top folder, or a single `.css` (a theme) or `.js` with a `==Feathertune==` header.
 fn package(files: BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let mut clean = BTreeMap::new();
-    let mut total = 0;
     for (path, bytes) in files {
         let path = path.replace('\\', "/");
         let path = path.trim_start_matches("./");
@@ -489,10 +619,6 @@ fn package(files: BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>
             || path.split('/').any(|p| p.is_empty() || p == "." || p == "..")
         {
             return Err(format!("invalid path in the package: {path:?}"));
-        }
-        total += bytes.len();
-        if total > MAX_PACKAGE_BYTES {
-            return Err("the package is over 32 MB".into());
         }
         clean.insert(path.to_owned(), bytes);
     }
@@ -506,16 +632,22 @@ fn package(files: BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<String, Vec<u8>>
         let mut tops = clean.keys().filter_map(|k| k.strip_suffix("/plugin.json")).filter(|top| !top.contains('/'));
         match (tops.next(), tops.next()) {
             (Some(top), None) => format!("{top}/"),
-            _ => return Err("no plugin.json at the top of the package, or more than one".into()),
+            _ => return Err(crate::i18n::t("no plugin.json at the top of the package, or more than one").into()),
         }
     };
-    Ok(clean
-        .into_iter()
-        .filter_map(|(path, bytes)| {
-            let name = path.strip_prefix(&prefix)?;
-            FILES.contains(&name).then(|| (name.to_owned(), bytes))
-        })
-        .collect())
+    let mut kept = BTreeMap::new();
+    let mut total = 0usize;
+    for (path, bytes) in clean {
+        let Some(name) = path.strip_prefix(&prefix) else { continue };
+        if FILES.contains(&name) {
+            total = total.saturating_add(bytes.len());
+            if total > MAX_PACKAGE_BYTES {
+                return Err(crate::i18n::t("The package is over 32 MB.").into());
+            }
+            kept.insert(name.to_owned(), bytes);
+        }
+    }
+    Ok(kept)
 }
 
 fn slug(name: &str) -> String {
@@ -536,10 +668,17 @@ fn slug(name: &str) -> String {
 /// `// ==Feathertune==`, then `// @id a.b`, `@name`, `@version`, `@author`, `@description`, `@permission x` (one
 /// per line), then `// ==/Feathertune==`.
 fn single_file(name: &str, bytes: Vec<u8>) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    if bytes.len() > MAX_PAGE_BYTES {
+        return Err("page.js and style.css together are over 2 MB".into());
+    }
     let file = name.rsplit('/').next().unwrap_or(name);
-    let (stem, ext) = file.rsplit_once('.').ok_or("pick a folder, a .zip, a .js or a .css")?;
+    let (stem, ext) = file.rsplit_once('.').ok_or_else(|| crate::i18n::t("pick a folder, a .zip, a .js or a .css"))?;
     let text = String::from_utf8(bytes).map_err(|_| format!("{file} is not UTF-8"))?;
-    let mut manifest = json!({ "id": format!("local.{}", slug(stem)), "name": stem, "version": "1.0.0", "api": API });
+    let default_name: String = stem.chars().filter(|c| !c.is_control()).take(64).collect();
+    let default_name = default_name.trim();
+    let default_name = if default_name.is_empty() { "Extension" } else { default_name };
+    let mut manifest =
+        json!({ "id": format!("local.{}", slug(stem)), "name": default_name, "version": "1.0.0", "api": API });
     let page = match ext.to_ascii_lowercase().as_str() {
         "css" => "style.css",
         "js" => {
@@ -573,7 +712,7 @@ fn single_file(name: &str, bytes: Vec<u8>) -> Result<BTreeMap<String, Vec<u8>>, 
             manifest["permissions"] = json!(permissions);
             "page.js"
         }
-        _ => return Err("pick a folder, a .zip, a .js or a .css".into()),
+        _ => return Err(crate::i18n::t("pick a folder, a .zip, a .js or a .css").into()),
     };
     Ok(BTreeMap::from([
         ("plugin.json".to_owned(), manifest.to_string().into_bytes()),
@@ -616,4 +755,139 @@ pub fn page_scripts(running: &[Arc<Extension>], settings: &Settings) -> Vec<Stri
             out
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("feathertune-ext-test-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn host_and_id_validation() {
+        assert!(valid_host("api.example.com"));
+        assert!(valid_host("*.cdn.example.co.uk"));
+        assert!(!valid_host("127.0.0.1"));
+        assert!(!valid_host("192.168.1.1"));
+        assert!(!valid_host("foo.123"));
+        assert!(!valid_host("foo.a"));
+        assert!(!valid_host("app.localhost"));
+        assert!(!valid_host("*.local"));
+        assert!(!valid_host("svc.internal"));
+        assert!(!valid_host("-bad.com"));
+        assert!(!valid_host("bad-.com"));
+
+        assert!(valid_id("author.cool-ext"));
+        assert!(!valid_id("con.test"));
+        assert!(!valid_id("nul.plugin"));
+    }
+
+    #[test]
+    fn string_max_is_bounded_and_single_file_truncates_name() {
+        let bad: SettingDef = serde_json::from_value(json!({
+            "key": "s",
+            "type": "string",
+            "default": "ok",
+            "max": 50000
+        }))
+        .unwrap();
+        assert!(bad.validate().is_err());
+
+        let neg: SettingDef = serde_json::from_value(json!({
+            "key": "s",
+            "type": "string",
+            "default": "",
+            "max": -5
+        }))
+        .unwrap();
+        assert!(neg.validate().is_err());
+
+        let long_name = format!("{}.css", "a".repeat(80));
+        let pkg = single_file(&long_name, b"body {}".to_vec()).unwrap();
+        let ext = parse(&pkg).unwrap();
+        assert_eq!(ext.name.len(), 64);
+    }
+
+    #[test]
+    fn package_ignores_extra_files_before_size_limit() {
+        let manifest = br#"{"id":"test.pkg","name":"Test","version":"1.0.0","api":1}"#.to_vec();
+        let big_extra = vec![b'x'; MAX_PACKAGE_BYTES + 1024];
+        let pkg = package(BTreeMap::from([
+            ("my-ext/plugin.json".into(), manifest),
+            ("my-ext/style.css".into(), b"body {}".to_vec()),
+            ("my-ext/target/giant.bin".into(), big_extra),
+        ]))
+        .unwrap();
+        assert_eq!(pkg.len(), 2);
+        assert!(parse(&pkg).is_ok());
+    }
+
+    #[test]
+    fn import_detects_capability_escalation_and_swaps_atomically() {
+        let dir = unique_dir("escalate");
+        let _ = std::fs::remove_dir_all(&dir);
+        let exts = Extensions {
+            profile: dir.clone(),
+            running: Vec::new(),
+            found: Mutex::new(Found::default()),
+            errors: Mutex::new(BTreeMap::new()),
+        };
+
+        let v1 = BTreeMap::from([
+            (
+                "plugin.json".into(),
+                br#"{"id":"test.swap","name":"Swap","version":"1.0.0","api":1,"permissions":["storage","net:api.example.com"]}"#.to_vec(),
+            ),
+            ("page.js".into(), b"console.log(1);".to_vec()),
+        ]);
+        let r1 = exts.import(v1).unwrap();
+        assert_eq!(r1["escalated"], json!(false));
+
+        let v2_same = BTreeMap::from([
+            (
+                "plugin.json".into(),
+                br#"{"id":"test.swap","name":"Swap","version":"1.0.1","api":1,"permissions":["storage","net:api.example.com"]}"#.to_vec(),
+            ),
+            ("page.js".into(), b"console.log(2);".to_vec()),
+        ]);
+        let r2 = exts.import(v2_same).unwrap();
+        assert_eq!(r2["escalated"], json!(false));
+
+        let v3_wild = BTreeMap::from([
+            (
+                "plugin.json".into(),
+                br#"{"id":"test.swap","name":"Swap","version":"1.0.2","api":1,"permissions":["storage","net:*.example.com"]}"#.to_vec(),
+            ),
+            ("page.js".into(), b"console.log(3);".to_vec()),
+        ]);
+        let r3 = exts.import(v3_wild).unwrap();
+        assert_eq!(r3["escalated"], json!(true));
+
+        let v4_narrow = BTreeMap::from([
+            (
+                "plugin.json".into(),
+                br#"{"id":"test.swap","name":"Swap","version":"1.0.3","api":1,"permissions":["storage","net:sub.example.com"]}"#.to_vec(),
+            ),
+            ("page.js".into(), b"console.log(4);".to_vec()),
+        ]);
+        let r4 = exts.import(v4_narrow).unwrap();
+        assert_eq!(r4["escalated"], json!(false));
+
+        let v5_wasm = BTreeMap::from([
+            (
+                "plugin.json".into(),
+                br#"{"id":"test.swap","name":"Swap","version":"1.0.4","api":1,"permissions":["storage","net:sub.example.com"]}"#.to_vec(),
+            ),
+            ("page.js".into(), b"console.log(5);".to_vec()),
+            ("plugin.wasm".into(), b"\0asm\x01\0\0\0".to_vec()),
+        ]);
+        let r5 = exts.import(v5_wasm).unwrap();
+        assert_eq!(r5["escalated"], json!(true));
+        assert!(!dir.join(DIR).join(".old-test.swap").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

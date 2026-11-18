@@ -5,7 +5,9 @@ interface Props {
   locale: Locale;
 }
 
-const s = strings[Astro.props.locale].weight;
+const { locale } = Astro.props;
+const s = strings[locale].weight;
+const designDoc = locale === 'pt-br' ? 'DESIGN.pt-BR.md#medições' : 'DESIGN.md#measurements';
 ---
 
 <section class="wrap section weight" aria-labelledby="weight-title">
@@ -28,7 +30,7 @@ const s = strings[Astro.props.locale].weight;
   </dl>
   <p class="note">
     {s.note}
-    <a href={`${links.repo}/blob/main/docs/DESIGN.md#measurements`}>{s.noteLink}</a>
+    <a href={`${links.repo}/blob/main/docs/${designDoc}`}>{s.noteLink}</a>
   </p>
 </section>
 

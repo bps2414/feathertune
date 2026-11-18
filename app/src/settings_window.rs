@@ -7,10 +7,12 @@
 //! Isolation from the site (both directions):
 //! - The scheme is registered for every webview (a Tauri limitation), so the handler answers 403 to
 //!   any webview but `settings`: the site cannot load, embed or fetch these pages.
-//! - `capabilities/settings-window.json` grants the `settings_*` commands to the webview labelled
-//!   `settings` and local origins only. The site webview is `site` with a remote origin, so it never
-//!   matches; `capabilities/player-bridge.json` gives the site `player_state` only. Each command also
-//!   checks the caller's label itself.
+//! - `capabilities/settings-window.json` grants the `settings_*` commands (`settings_get`, `settings_set`,
+//!   `settings_action`, `settings_stats`, `settings_mix`, `settings_remote`, `settings_fonts`,
+//!   `settings_extensions`) to the webview labelled `settings` and local origins only. The site webview
+//!   is `site` with a remote origin, so it never matches; `capabilities/player-bridge.json` grants only the
+//!   site's read-only/sandboxed commands (`player_state`, `audio_facts`, `mix_open`, `ext_call`). Each
+//!   command also checks the caller's label itself.
 //! - The settings window gets no other permission (no core window, event or webview API), and no
 //!   command here evaluates script in, or sends data to, the site webview. The one script Rust runs in
 //!   the settings window itself is fixed text that tells its Remote section to ask again (`remote_changed`).
@@ -338,7 +340,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
         ("ui", "language") => {
             let lang = value.as_str().ok_or("expected a language")?;
             if lang != "auto" && !crate::i18n::LANGUAGES.iter().any(|(tag, _)| *tag == lang) {
-                return Err("unknown language".into());
+                return Err(t("unknown language").into());
             }
             live.write("ui", name, toml_edit::value(lang), None, true)?;
             Ok(true)
@@ -485,7 +487,7 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             let lang = value.as_str().ok_or("expected a language")?;
             if !["auto", "off"].contains(&lang) && !crate::lyrics::TRANSLATION_LANGUAGES.iter().any(|(c, _)| *c == lang)
             {
-                return Err("unknown language".into());
+                return Err(t("unknown language").into());
             }
             live.write("lyrics", name, toml_edit::value(lang), None, false)?;
             crate::lyrics::republish(&app);
@@ -711,7 +713,7 @@ pub async fn settings_fonts(webview: Webview, app: AppHandle, op: String, arg: V
                 let name = field("name")?;
                 crate::fonts::remove(&app, name)?;
                 let live = app.state::<Live>();
-                if live.get().lyrics.font == name {
+                if !name.is_empty() && live.get().lyrics.font.to_lowercase() == name.to_lowercase() {
                     live.write("lyrics", "font", toml_edit::value(""), None, false)?;
                     crate::fonts::push(&app);
                 }
@@ -730,63 +732,76 @@ pub async fn settings_fonts(webview: Webview, app: AppHandle, op: String, arg: V
 /// confirmation shows); `toggle` ({id, on}; applies after a restart); `set` ({id, values}: every setting, checked
 /// against the manifest; applies at once); `remove` ({id}); `open_folder`. Only the settings window may call it.
 #[tauri::command]
-pub fn settings_extensions(webview: Webview, app: AppHandle, op: String, arg: Value) -> Result<Value, String> {
+pub async fn settings_extensions(webview: Webview, app: AppHandle, op: String, arg: Value) -> Result<Value, String> {
     use crate::extensions::{Extensions, valid_id};
     use base64::Engine;
 
     guard(&webview)?;
-    let live = app.state::<Live>();
-    let extensions = app.state::<Extensions>();
-    let id = || arg.get("id").and_then(Value::as_str).filter(|id| valid_id(id)).ok_or("unknown extension");
-    match op.as_str() {
-        "list" => Ok(extensions.view(&live.get())),
-        "import" => {
-            let given = arg.get("files").and_then(Value::as_object).ok_or("expected files")?;
-            let mut files = std::collections::BTreeMap::new();
-            for (path, data) in given {
-                let data = data.as_str().ok_or("expected base64")?;
-                let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
-                files.insert(path.clone(), bytes);
+    tauri::async_runtime::spawn_blocking(move || {
+        let live = app.state::<Live>();
+        let extensions = app.state::<Extensions>();
+        let id = || arg.get("id").and_then(Value::as_str).filter(|id| valid_id(id)).ok_or("unknown extension");
+        match op.as_str() {
+            "list" => Ok(extensions.view(&live.get())),
+            "import" => {
+                let given = arg.get("files").and_then(Value::as_object).ok_or("expected files")?;
+                let mut files = std::collections::BTreeMap::new();
+                for (path, data) in given {
+                    let data = data.as_str().ok_or("expected base64")?;
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+                    files.insert(path.clone(), bytes);
+                }
+                let result = extensions.import(files)?;
+                if result["escalated"].as_bool() == Some(true)
+                    && let Some(ext_id) = result["id"].as_str()
+                {
+                    let was_on = live.get().extension(ext_id);
+                    if was_on {
+                        live.write("extensions", ext_id, toml_edit::value(false), None, true)?;
+                    }
+                }
+                Ok(result)
             }
-            extensions.import(files)
-        }
-        "toggle" => {
-            let id = id()?;
-            extensions.found(id).ok_or("unknown extension")?;
-            let on = arg.get("on").and_then(Value::as_bool).ok_or("expected true or false")?;
-            live.write("extensions", id, toml_edit::value(on), None, true)?;
-            Ok(json!(true))
-        }
-        "set" => {
-            let id = id()?;
-            let ext = extensions.found(id).ok_or("unknown extension")?;
-            let values = arg.get("values").and_then(Value::as_object).ok_or("expected values")?;
-            let mut table = toml_edit::InlineTable::new();
-            for def in &ext.settings {
-                let v = values.get(&def.key).ok_or_else(|| format!("missing {}", def.key))?;
-                def.check(v)?;
-                table.insert(&def.key, crate::extensions::json_to_toml(v).ok_or("invalid value")?);
+            "toggle" => {
+                let id = id()?;
+                extensions.found(id).ok_or("unknown extension")?;
+                let on = arg.get("on").and_then(Value::as_bool).ok_or("expected true or false")?;
+                live.write("extensions", id, toml_edit::value(on), None, true)?;
+                Ok(json!(true))
             }
-            live.write("extension_settings", id, toml_edit::value(table), None, false)?;
-            push_extension_settings(&app);
-            Ok(Value::Null)
-        }
-        "remove" => {
-            let id = id()?;
-            extensions.remove(id)?;
-            if let Err(e) = live.clear_extension(id) {
-                crate::diag::log("extensions", format_args!("could not clear {id} from config: {e}"));
+            "set" => {
+                let id = id()?;
+                let ext = extensions.found(id).ok_or("unknown extension")?;
+                let values = arg.get("values").and_then(Value::as_object).ok_or("expected values")?;
+                let mut table = toml_edit::InlineTable::new();
+                for def in &ext.settings {
+                    let v = values.get(&def.key).ok_or_else(|| format!("missing {}", def.key))?;
+                    def.check(v)?;
+                    table.insert(&def.key, crate::extensions::json_to_toml(v).ok_or("invalid value")?);
+                }
+                live.write("extension_settings", id, toml_edit::value(table), None, false)?;
+                push_extension_settings(&app);
+                Ok(Value::Null)
             }
-            Ok(Value::Null)
+            "remove" => {
+                let id = id()?;
+                extensions.remove(id)?;
+                if let Err(e) = live.clear_extension(id) {
+                    crate::diag::log("extensions", format_args!("could not clear {id} from config: {e}"));
+                }
+                Ok(Value::Null)
+            }
+            "open_folder" => {
+                let dir = extensions.dir();
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
+                Ok(Value::Null)
+            }
+            _ => Err("unknown operation".into()),
         }
-        "open_folder" => {
-            let dir = extensions.dir();
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
-            Ok(Value::Null)
-        }
-        _ => Err("unknown operation".into()),
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Gives the running extensions their settings of now (page and WebAssembly).
@@ -817,7 +832,7 @@ pub(crate) fn downloads() -> Result<std::path::PathBuf, String> {
 fn text(value: &Value, max: usize) -> Result<String, String> {
     let s = value.as_str().ok_or("expected text")?.trim();
     if s.len() > max || s.chars().any(char::is_control) {
-        return Err("too long or invalid".into());
+        return Err(t("too long or invalid").into());
     }
     Ok(s.to_owned())
 }

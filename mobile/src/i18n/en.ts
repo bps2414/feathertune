@@ -8,7 +8,7 @@ export const en = {
 
   welcomeTitle: 'Control feathertune from your phone',
   welcomeBody:
-    'Pair this phone with feathertune on your PC. On the PC, open Settings, go to the Experimental tab, turn on Phone remote and press Pair a phone. A code appears there for 2 minutes.',
+    'Pair this phone with feathertune on your PC. On the PC, open Settings, go to Phone remote, turn it on and press Pair a phone. A code appears there for 2 minutes.',
   welcomeStart: 'Scan the pairing code',
 
   cameraTitle: 'The camera, for the pairing code',
@@ -113,7 +113,7 @@ export const en = {
   problemTooBig: 'Something went wrong in the app',
   problemTooBigBody: 'The app sent the PC a message it does not take. Please report it.',
   problemOff: 'The remote is off on the PC',
-  problemOffBody: 'Turn on Phone remote in feathertune’s settings, in the Experimental tab.',
+  problemOffBody: 'Turn on Phone remote in feathertune’s settings, under Phone remote.',
   problemFull: 'This PC has 16 paired phones',
   problemFullBody: 'Remove one in feathertune’s Phone remote settings, then pair again.',
   problemUnreachable: 'PC offline or asleep',

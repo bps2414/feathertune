@@ -88,8 +88,8 @@ export function parsePairingUri(text: string): PairingQr | null {
   const s = params.get('s') ?? '';
   const addresses = (params.get('a') ?? '').split(',').filter((a) => IPV4.test(a) && privateIpv4(a));
   const port = Number(params.get('p') ?? DEFAULT_PORT);
-  if (!Number.isInteger(v) || v < 1 || !HEX64.test(k) || !HEX64.test(s) || addresses.length === 0) return null;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  if (v !== 1 || !HEX64.test(k) || !HEX64.test(s) || addresses.length === 0) return null;
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
   return { v, key: hexToBytes(k), secret: hexToBytes(s), addresses: [...new Set(addresses)], port };
 }
 

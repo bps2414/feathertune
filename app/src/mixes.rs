@@ -443,7 +443,7 @@ pub fn settings_mix(webview: Webview, app: AppHandle, op: String, arg: Value) ->
         "defaults" => {
             let list = list_arg()?;
             let defaults: Transition = serde_json::from_value(arg.get("defaults").cloned().unwrap_or(Value::Null))
-                .map_err(|e| format!("invalid transition: {e}"))?;
+                .map_err(|e| crate::i18n::tf("invalid transition: {}", &[&e.to_string()]))?;
             let mut mix = mixes.load(&list).unwrap_or_default();
             mix.defaults = defaults;
             mixes.save(&list, &mix)?;
@@ -452,16 +452,18 @@ pub fn settings_mix(webview: Webview, app: AppHandle, op: String, arg: Value) ->
         }
         "export" => {
             let list = list_arg()?;
-            let mix = mixes.load(&list).ok_or("this playlist has no mix yet")?;
+            let mix = mixes.load(&list).ok_or_else(|| crate::i18n::t("this playlist has no mix yet"))?;
             let file = crate::settings_window::downloads()?.join(format!("feathertune-mix-{list}.json"));
             std::fs::write(&file, serde_json::to_string_pretty(&mix).expect("a mix serializes"))
-                .map_err(|e| format!("could not write the file: {e}"))?;
+                .map_err(|e| crate::i18n::tf("could not write the file: {}", &[&e.to_string()]))?;
             app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
         "import" => {
             let list = list_arg()?;
-            let mix = parse(arg.get("json").and_then(Value::as_str).ok_or("paste the mix\u{2019}s JSON")?)?;
+            let raw =
+                arg.get("json").and_then(Value::as_str).ok_or_else(|| crate::i18n::t("paste the mix\u{2019}s JSON"))?;
+            let mix = parse(raw)?;
             mixes.save(&list, &mix)?;
             changed(&list);
             Ok(Value::Null)

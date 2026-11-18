@@ -73,7 +73,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 **Light and private**
 - Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
 - A privacy filter for third-party analytics (never ads).
-- Export diagnostics (Settings > Advanced): a text file to send when something goes wrong.
+- Export diagnostics (Settings > About): a text file to send when something goes wrong.
 - Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, phone remote), which start off and are marked Experimental on the page of their subject. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 **Beyond the PC**

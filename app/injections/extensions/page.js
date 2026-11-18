@@ -6,7 +6,8 @@
 const contexts = new Map();
 // The ids that should run: one that never asked for its context did not start (a syntax error, most likely).
 const expected = new Set(EXPECTED);
-const call = (id, op, arg) => window.__TAURI_INTERNALS__.invoke('ext_call', { id, op, arg: arg ?? null });
+const call = (id, op, arg) =>
+  window.__TAURI_INTERNALS__.invoke('ext_call', { id, op, arg: JSON.stringify(arg ?? null) });
 // At most 20 reports per extension per page load reach Rust (the Extensions tab lists the last 20).
 const reports = new Map();
 const report = (id, message) => {
@@ -19,7 +20,7 @@ const text = (e) => String(e?.stack || e?.message || e).slice(0, 2000);
 
 // What the extensions read: the last player state core sent, the queue, the lyrics and the album colors.
 let player = null;
-let queue = { queue: [], current: null, next: null, list: null };
+let queue = Object.freeze({ queue: Object.freeze([]), current: null, next: null, list: null });
 let lyrics = null;
 let colors = null;
 const EVENTS = ['state', 'track', 'play', 'pause', 'seek', 'ad', 'queue', 'lyrics', 'colors', 'settings', 'native'];
@@ -50,6 +51,7 @@ const CONTROLS = ['play', 'pause', 'playPause', 'next', 'previous', 'seek', 'set
 
 const context = (meta) => {
   const id = meta.id;
+  if (!expected.delete(id)) throw new Error('unexpected extension');
   const has = (p) => meta.permissions.includes(p);
   const settings = Object.freeze({ ...meta.settings });
   const listeners = Object.fromEntries(EVENTS.map((t) => [t, new Set()]));
@@ -83,15 +85,24 @@ const context = (meta) => {
     },
     log(...args) {
       console.log(`[${id}]`, ...args);
-      call(id, 'log', { message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ').slice(0, 2000) }).catch(
-        () => {},
-      );
+      const message = args
+        .map((a) => {
+          if (typeof a === 'string') return a;
+          try {
+            return JSON.stringify(a);
+          } catch {
+            return String(a);
+          }
+        })
+        .join(' ')
+        .slice(0, 2000);
+      call(id, 'log', { message }).catch(() => {});
     },
     error: (e) => report(id, text(e)),
     player: Object.freeze({
       state: snapshot,
       queue: () => queue,
-      clock: feathertune.clock,
+      clock: Object.freeze({ time: feathertune.clock.time, duration: feathertune.clock.duration }),
       video,
       ...controls,
     }),
@@ -112,7 +123,6 @@ const context = (meta) => {
     }),
   };
   contexts.set(id, { ft, listeners });
-  expected.delete(id);
   return ft;
 };
 
@@ -149,16 +159,21 @@ feathertune.ext = Object.freeze({
   state(s) {
     const before = player;
     const { queue: q, list, next, current, ...rest } = s;
-    if (q || before?.list !== list || before?.current !== current) {
-      queue = Object.freeze({ queue: q ?? queue.queue, current, next, list });
+    if (q || queue.list !== list || queue.current !== current || queue.next?.id !== next?.id) {
+      queue = Object.freeze({
+        queue: Object.freeze(q ? q.map((item) => Object.freeze({ ...item })) : queue.queue),
+        current: current ?? null,
+        next: next ? Object.freeze({ ...next }) : null,
+        list: list ?? null,
+      });
       emit('queue', queue);
     }
     player = { ...rest, list };
     const now = snapshot();
     emit('state', now);
-    if (!before || before.id !== s.id || before.title !== s.title || before.artist !== s.artist) emit('track', now);
+    if (!before || before.title !== s.title || before.artist !== s.artist) emit('track', now);
     if (!before || before.paused !== s.paused) emit(s.paused ? 'pause' : 'play', now);
-    if (before && before.ad !== s.ad) emit('ad', s.ad);
+    if (before ? before.ad !== s.ad : s.ad) emit('ad', s.ad);
   },
   feed(kind, data) {
     if (kind === 'lyrics') {

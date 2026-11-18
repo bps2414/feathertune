@@ -9,6 +9,7 @@ import { Library } from '../now/library';
 import { Player } from '../now/player';
 import { QueueSheet } from '../now/queue';
 import { remote, useRemote } from '../remote/app';
+import { isFinal } from '../remote/protocol';
 import { Button, Glyph, IconButton, mix, Notice, StatusDot, type, useAlbumColors, type Colors } from '../ui';
 
 type Tab = 'player' | 'library';
@@ -56,8 +57,15 @@ export default function Now() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
-          {problem && <Notice problem={problem} colors={c} />}
-          {problem === 'removed' && <Button label={t('pairAgain')} onPress={() => router.push('/pair')} colors={c} />}
+          {problem && (
+            <Notice problem={problem} colors={c}>
+              {problem === 'removed' ? (
+                <Button label={t('pairAgain')} onPress={() => router.push('/pair')} colors={c} />
+              ) : !isFinal(problem) ? (
+                <Button kind="secondary" label={t('tryAgain')} onPress={() => void remote.connect(pc.id)} colors={c} />
+              ) : null}
+            </Notice>
+          )}
           {tab === 'player' ? (
             <Player colors={c} onOpenQueue={openQueue} />
           ) : (

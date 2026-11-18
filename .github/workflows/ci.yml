@@ -38,8 +38,8 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
-  # The example extensions: every manifest is JSON with the required fields, and the Rust SDK builds the
-  # WebAssembly example.
+  # The Rust SDK and example extensions: every manifest is JSON with the required fields, and both crates pass
+  # fmt, clippy and the WebAssembly build.
   extensions:
     runs-on: ubuntu-latest
     defaults:
@@ -49,24 +49,36 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
+          components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       - run: |
           for m in */plugin.json; do
             jq -e '(.id | test("^[a-z0-9_-]+(\\.[a-z0-9_-]+)+$")) and (.name | length > 0) and (.version | length > 0) and .api == 1' "$m" > /dev/null || { echo "invalid $m"; exit 1; }
           done
+      - run: cargo fmt --check
+        working-directory: sdk/rust
+      - run: cargo clippy -- -D warnings
+        working-directory: sdk/rust
+      - run: cargo fmt --check
+        working-directory: examples/extensions/track-counter
+      - run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
+        working-directory: examples/extensions/track-counter
       - run: cargo build --release --locked --target wasm32-unknown-unknown
         working-directory: examples/extensions/track-counter
 
-  # The phone remote (mobile/): typecheck, lint and tests (the Noise vectors among them), only when it changed.
-  mobile-changes:
+  # Detect whether mobile/ or site/ changed.
+  changes:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     outputs:
       mobile: ${{ steps.filter.outputs.mobile }}
+      site: ${{ steps.filter.outputs.site }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -74,10 +86,13 @@ jobs:
             mobile:
               - 'mobile/**'
               - '.github/workflows/ci.yml'
+            site:
+              - 'site/**'
+              - '.github/workflows/ci.yml'
 
   mobile:
-    needs: mobile-changes
-    if: needs.mobile-changes.outputs.mobile == 'true'
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -96,6 +111,26 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+
+  site:
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
 
   # Fully optimized exe and the NSIS installer (Tauri CLI, `--profile dist`), downloadable from the
   # run page. Not on pull requests. The CLI version matches the `tauri` crate in Cargo.lock. It builds
@@ -144,23 +179,21 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          tauri_version=$(jq -r .version tauri.conf.json)
+          if [ "$version" != "$tauri_version" ]; then echo "Cargo.toml ($version) and tauri.conf.json ($tauri_version) differ"; exit 1; fi
           if [ "$TAG" != "v$version" ]; then echo "tag $TAG does not match version $version"; exit 1; fi
           awk -v v="$version" '/^## /{on = ($2 == v); next} on' ../CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "no CHANGELOG.md section for $version"; exit 1; fi
           gh release create "$TAG" out/bundle/nsis/*-setup.exe --title "feathertune $version" --notes-file notes.md
 
-  # The phone remote's Android APK, attached to the release that `release` creates (only on a `v*` tag). It
-  # builds alongside `dist` and waits for the release only to upload. When mobile/ did not change since the
-  # previous tag, the previous release's APK is attached again instead of building it (the build is the
-  # longest job). arm64-v8a only (every current phone): the native code builds once instead of four times. The
-  # Gradle cache is written on tags too, since this job never runs on main. Signed with the debug key of Expo's
-  # template, the one every earlier APK used, so a new one installs over the old; the hash check stops the job
-  # if the template ever ships another key.
-  android:
+  # The phone remote's Android APK (only on a `v*` tag): built once per release or reused when mobile/ is
+  # unchanged since the previous tag, signed with Expo's template debug key (verified by SHA-256) so updates
+  # install over earlier releases.
+  android-build:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     defaults:
       run:
         working-directory: mobile
@@ -197,6 +230,11 @@ jobs:
       - if: steps.reuse.outputs.apk == ''
         run: pnpm install --frozen-lockfile
       - if: steps.reuse.outputs.apk == ''
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+      - if: steps.reuse.outputs.apk == ''
         run: pnpm exec expo prebuild --platform android --clean --no-install
       - if: steps.reuse.outputs.apk == ''
         run: echo "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58  android/app/debug.keystore" | sha256sum -c -
@@ -208,13 +246,32 @@ jobs:
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --build-cache --parallel
         working-directory: mobile/android
       - env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
           REUSED: ${{ steps.reuse.outputs.apk }}
         run: |
           version=$(node -p "require('./app.json').expo.version")
           if [ -n "$REUSED" ]; then cp "$REUSED" "feathertune-remote-$version.apk"
           else cp android/app/build/outputs/apk/release/app-release.apk "feathertune-remote-$version.apk"; fi
-          # `release` creates the release; wait for it (up to 40 minutes).
-          for i in $(seq 120); do gh release view "$TAG" > /dev/null 2>&1 && break; sleep 20; done
-          gh release upload "$TAG" "feathertune-remote-$version.apk" --clobber
+      - uses: actions/upload-artifact@v7
+        with:
+          name: feathertune-remote-${{ github.sha }}
+          path: mobile/feathertune-remote-*.apk
+          retention-days: 14
+
+  android-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release, android-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: feathertune-remote-${{ github.sha }}
+          path: apks
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" apks/feathertune-remote-*.apk --clobber

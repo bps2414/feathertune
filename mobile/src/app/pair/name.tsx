@@ -5,7 +5,7 @@ import { StyleSheet, TextInput } from 'react-native';
 import { t } from '../../i18n';
 import { remote, useRemote } from '../../remote/app';
 import { MAX_NAME, validName } from '../../remote/protocol';
-import { Body, Button, Screen, Steps, Title, useColors } from '../../ui';
+import { Body, Button, resetTo, Screen, Steps, Title, useColors } from '../../ui';
 
 /** The name the PC shows when it asks to allow this phone. */
 export default function Name() {
@@ -24,7 +24,20 @@ export default function Name() {
 
   return (
     <Screen
-      footer={<Button kind="primary" label={t('namePair')} onPress={submit} />}
+      footer={
+        <>
+          <Button kind="primary" label={t('namePair')} onPress={submit} />
+          <Button
+            kind="quiet"
+            label={t('cancel')}
+            onPress={() => {
+              remote.leavePairing();
+              if (router.canGoBack()) router.back();
+              else resetTo(remote.store.getState().pcs.length > 0 ? '/pcs' : '/pair');
+            }}
+          />
+        </>
+      }
     >
       <Steps current={3} total={4} />
       <Title>{t('nameTitle')}</Title>

@@ -12,7 +12,7 @@ If you use a coding agent (Claude Code, Copilot, Codex...), its instructions are
 - **A small, obvious change** (a typo, a clear bug, an interface text): open the PR directly.
 - **A big change or one that changes behavior** (a new plugin, a new screen, a new dependency, anything touching audio, lyrics, privacy or what the page may call): open an **issue first** and wait for my answer, so you do not spend a week on something I will not accept.
 - **Search first.** Look at the open issues and PRs and at the "Not verified yet" and "Ideas" sections of [docs/DESIGN.md](docs/DESIGN.md). A decision may already be made, or something ruled out with its reason.
-- **A bug?** Attach the **Export diagnostics** file (Settings > Advanced). It names the tracks played since the app started; read it before sending and delete what you do not want to publish.
+- **A bug?** Attach the **Export diagnostics** file (Settings > About). It names the tracks played since the app started; read it before sending and delete what you do not want to publish.
 
 ## What I accept and what I do not
 

@@ -2,7 +2,7 @@
 
 pt-BR: [REMOTE.pt-BR.md](REMOTE.pt-BR.md)
 
-A phone app that controls feathertune on a paired PC over the local network. It does not play music: it shows what the PC plays (track, artwork, position, queue) and sends play/pause, next, previous, seek, volume and "play this queue item". Later the same protocol links several feathertune PCs and phones into one small network of devices (a device picker, one PC controlling another, moving playback between PCs). Not started yet; this is the plan contributors should build from. Questions and progress go in the tracking issue.
+A phone app that controls feathertune on a paired PC over the local network. It does not play music: it shows what the PC plays (track, artwork, position, queue) and sends play/pause, next, previous, seek, volume and "play this queue item". Stage 1 (paired phone controlling one PC over LAN/VPN) is implemented in `app/src/remote.rs` and `mobile/`; later stages link several feathertune PCs and phones into one small network of devices (mDNS discovery, a device picker, moving playback between PCs). Questions and progress go in the tracking issue.
 
 ## Does this exist already?
 
@@ -19,7 +19,7 @@ So the remote is worth building for the queue, ad awareness, the look, several P
 
 - **Only paired devices control a PC, and only the PC they paired with.** A phone on the same Wi-Fi that was never paired, a stolen pairing code after it was used, a replayed message or a device the user revoked gets nothing: no state, no commands.
 - Local network only. No cloud relay, no account, no port forwarding, no UPnP. Remote use from outside the house works only through the user's own VPN (e.g. a mesh VPN), which looks like the LAN to both sides.
-- Off by default (Experimental tab), like every feature that opens something to the outside.
+- Off by default (Settings > Phone remote, marked Experimental), like every feature that opens something to the outside.
 - The rules of [AGENTS.md](../AGENTS.md) apply unchanged: nothing during an ad is skipped, shortened or muted (seek, next, previous, queue jumps and moving playback are refused while one plays, and volume does not change); no audio leaves the PC; no brand names in the app name, store listing or UI.
 - Never cast to TVs or speakers and never control the service's apps on other devices: both need the service's private pairing and casting protocols (no private APIs), and the WebView2 has cast discovery turned off anyway (docs/DESIGN.md, −12 MB). For the TV, the user casts from the service's phone app, and its queue sync carries on from the PC.
 - Never play on two devices at once (see "One stream per account" above).
@@ -70,7 +70,7 @@ Noise Protocol Framework (`25519`, `ChaChaPoly`, `SHA256`) over a WebSocket, bin
 1. The user turns on the plugin and presses "Pair a phone" in the settings window. The PC shows a QR code for 2 minutes holding: protocol version, the PC's LAN addresses and port, the PC's public key and a fresh 32-byte one-time secret. No pairing is possible while that screen is closed.
 2. The phone scans it and runs `IKpsk2`: it already knows the PC's key (so a fake PC on the network cannot answer) and proves it saw the QR (the secret is the PSK). Its first message carries its public key and a name the user typed ("Pixel 9").
 3. The PC asks the user in the settings window: "Allow <name> to control feathertune?" (shows a 6-digit code also shown on the phone, derived from the handshake hash, so the two screens must match). Only on Allow does the PC store the phone's public key and name.
-4. The one-time secret is discarded after one use, a failure or the 2 minutes, whichever comes first. Bytes that are not a first message for this PC (anyone on the network can send them) do not count as a try, so they cannot close the window.
+4. The one-time secret is discarded once a client completes the encrypted confirmation (`{"t":"pair"}`, proving it has the QR secret) or when the 2 minutes end, whichever comes first. Bytes that are not a first message or fail confirmation (anyone on the network without the QR can send them) do not burn the secret, so they cannot close an open window.
 5. The PC sends its name (the one the user set in the Remote section; by default "feathertune", never the Windows hostname, which often holds a person's name) and, from stage 2, the discovery key.
 
 A PC cannot scan a QR, so pairing one PC with another (stage 3) needs another first step: the target shows a one-time code of at least 80 bits (16 base32 characters, typed on the other PC), found by mDNS, used as the PSK, with the same 6-digit check and the same 2 minutes. To be reviewed before it is built.
@@ -79,7 +79,7 @@ A PC cannot scan a QR, so pairing one PC with another (stage 3) needs another fi
 
 **Other rules.**
 - Accept connections only from private, link-local and loopback source addresses (RFC 1918, `fc00::/7`, `fe80::/10`, CGNAT `100.64/10` for mesh VPNs); others are dropped before the handshake.
-- At most 4 paired devices connected at once; handshakes rate-limited per source address (e.g. 5 a minute), bad ones logged without data.
+- At most 4 paired devices connected at once; up to 16 concurrent pre-auth handshakes; handshakes rate-limited per address / IPv6 `/64` prefix (15 a minute, capped at 256 buckets), bad ones logged without data.
 - Message size cap (64 KB from the PC, 1 KB from a controller); every command is parsed into a fixed shape (`deny_unknown_fields`), numbers finite and in range, ids checked like `player.rs` does.
 - The settings window lists the paired devices (name, paired on, last seen) with Remove; removing one closes its connection at once. Turning the plugin off closes the port and stops the mDNS announcement.
 - The phone keeps the list of paired PCs and an optional app lock (biometrics). It never logs message contents.
@@ -111,10 +111,10 @@ The controller ignores parameters it does not know. `a` holds the address of the
 1. Phone → PC, handshake message 1 (`e, es, s, ss`). Its payload is the UTF-8 JSON `{"name":"<phone name>"}`, that key only; the name is 1 to 32 characters once trimmed, with no control characters.
 2. PC → phone, handshake message 2 (`e, ee, se, psk`), empty payload. A phone that cannot decrypt it is talking to something that does not have the secret: it stops.
 3. Both compute the **6-digit code**: the first 4 bytes of the handshake hash (`h` once message 2 is done, snow's `get_handshake_hash`) as a big-endian unsigned 32-bit number, modulo 1 000 000, padded with zeros to 6 digits. The phone shows it.
-4. Phone → PC, the first transport message: `{"t":"pair"}`. It proves the phone used the secret (the PSK only enters with message 2), so only now does the PC show "Allow <name>?" with the same code.
-5. Allow: the PC stores the phone, and the connection goes on as a session (below), starting with `hello` (no `ping` came first, so there is no `pong`); the phone stores the PC (`k`, `hello`'s name, the address it used) when that `hello` arrives. Deny: closed with `denied`. The 2 minutes ending or the settings screen closing: `expired`.
+4. Phone → PC, the first transport message (`HANDSHAKE_TIMEOUT`, 10 s): `{"t":"pair"}`. It proves the phone used the secret (the PSK only enters with message 2), so only once it decrypts does the PC consume the secret and show "Allow <name>?" with the same code.
+5. Allow: the PC stores the phone, and the connection goes on as a session (below), starting with `hello` (no `ping` came first, so there is no `pong`; the phone immediately sends one to measure the clock offset); the phone stores the PC (`k`, `hello`'s name, the address it used) when that `hello` arrives. Deny: closed with `denied`. The 2 minutes ending or the settings screen closing: `expired`.
 
-The secret is used once: the first message 1 that the PC can read (made with `k`) takes it, whatever follows (a second phone, or the same one again, gets `expired`). One it cannot read is closed with `invalid` and leaves the window open.
+The secret is used once: only a handshake whose encrypted `{"t":"pair"}` decrypts under the PSK keys consumes it, whatever follows (a second phone, or the same one again, gets `expired`). Any message before confirmation that fails to decrypt closes with `invalid` and leaves the window open.
 
 **Session, `/v1`.** `Noise_KK_25519_ChaChaPoly_SHA256`; the phone is the initiator with its own key pair and the PC's `k`, and the prologue is the 20 ASCII bytes `feathertune-remote/1`. Message 1 (`e, es, ss`) and message 2 (`e, ee, se`) have empty payloads. The PC tries message 1 against each paired key; with none it closes with `unknown`, without answering. After message 2 the phone's first transport message must be a `ping`; only then does the PC send `hello`, `state`, `queue`, `library` and the `pong`, in that order (a replayed message 1 gets message 2 and nothing more). At most 4 sessions at once (`busy`); the same phone connecting again replaces its old session, which is dropped without a close frame.
 
@@ -167,7 +167,7 @@ Several controllers at once all get every `state`; commands apply in arrival ord
 1. `player.rs`: add `volume`, `muted` and `ad` to the state the `core` injection reports (validated like the rest). Keep the last queue and its current index in `Player` and send an event when it changes: today the queue goes only to `mixes::observe`, and the `core` injection sends it only when the URL has a playlist (`list=`); the remote needs it for radio and autoplay too.
 2. `injections/controls/page.js`: add `seek(s)`, `setVolume(v)` (through `precise_volume` when loaded) and `playItem(id, i)` (clicks the queue row), each refusing during an ad, like `volume` does today.
 3. `remote.rs`: listener (only while the plugin is on), Noise handshakes, the paired list in the profile (`remote-devices.json`: names and public keys only), subscribe to `Player`, translate commands to `crate::player`. Its tests run a `snow` initiator against it in-process: pairing, `KK`, a revoked key, an unknown key, a replay, an oversized and a malformed command. That covers the PC side in CI without a phone.
-4. Settings: a Remote section in the Experimental tab (switch, PC name, Pair a phone with the QR, the confirmation, the paired list, Forget all devices, the Public network note). Texts through `t()` + `pt-BR.json`.
+4. Settings: a Phone remote page (switch, PC name, Pair a phone with the QR, the confirmation, the paired list, Forget all devices, the Public network note). Texts through `t()` + `pt-BR.json`.
 5. `plugins.rs` and docs/DESIGN.md: plugin entry, cost "not measured yet", Security paragraph. The listener costs nothing measurable when off (no socket).
 
 ## Phone work
@@ -183,7 +183,7 @@ Several controllers at once all get every `state`; commands apply in arrival ord
 
 ## Stages
 
-1. **Phone → one PC** (everything above): pair, now playing, queue (reorder and remove included), the library's playlists, several paired PCs switched by hand.
+1. **Phone → one PC** (implemented — everything above): pair, now playing, queue (reorder and remove included), the library's playlists, several paired PCs switched by hand.
 2. **Find and pick:** mDNS discovery, the device picker with each PC's status, lock-screen and notification controls, lyrics on the phone (the PC already has the lines), like/dislike and shuffle/repeat (each needs page selectors in `controls` and a reason in DESIGN.md).
 3. **PCs together:** one feathertune PC controlling another (same protocol, a `snow` client in `remote.rs`, a picker in the tray menu), moving playback between PCs, continue on the phone. Wake-on-LAN if asked for.
 

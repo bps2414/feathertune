@@ -113,10 +113,15 @@ unsafe fn attach(wv: &PlatformWebview, rules: &str, log_blocked: bool) -> window
     unsafe { core.add_WebResourceRequested(&handler, &mut token) }
 }
 
-/// The hosts the lists block: their `||host^` rules, with no option or only `$third-party` (every host
-/// that may be filtered is third-party to the player). Any other rule is ignored, and a host named by
-/// an exception (`@@||host`) is never blocked.
-fn blocked_hosts(rules: &str) -> HashSet<String> {
+/// Whole-host block and exception rules extracted from privacy lists.
+struct Hosts {
+    blocked: HashSet<String>,
+    allowed: HashSet<String>,
+}
+
+/// The hosts the lists block (`||host^`) and allow (`@@||host^`), with no option or only
+/// `$third-party`. Any other rule (paths, regexes, scoped options like `$domain=...`) is ignored.
+fn blocked_hosts(rules: &str) -> Hosts {
     let host_of = |pattern: &str| {
         let end = pattern.find(['^', '/', ':', '*', '|']).unwrap_or(pattern.len());
         let (host, rest) = pattern.split_at(end);
@@ -126,29 +131,32 @@ fn blocked_hosts(rules: &str) -> HashSet<String> {
             && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
         valid.then_some((host, rest.is_empty() || rest == "^"))
     };
+    let is_plain = |options: &str| options.split(',').all(|o| matches!(o, "" | "third-party" | "3p"));
     let (mut blocked, mut allowed) = (HashSet::new(), HashSet::new());
     for line in rules.lines().map(str::trim) {
         if let Some(rule) = line.strip_prefix("@@||") {
-            if let Some((host, _)) = host_of(rule.split('$').next().unwrap_or("")) {
+            let (pattern, options) = rule.split_once('$').unwrap_or((rule, ""));
+            if let Some((host, true)) = host_of(pattern).filter(|_| is_plain(options)) {
                 allowed.insert(host);
             }
         } else if let Some(rule) = line.strip_prefix("||") {
             let (pattern, options) = rule.split_once('$').unwrap_or((rule, ""));
-            let plain = options.split(',').all(|o| matches!(o, "" | "third-party" | "3p"));
-            if let Some((host, true)) = host_of(pattern).filter(|_| plain) {
+            if let Some((host, true)) = host_of(pattern).filter(|_| is_plain(options)) {
                 blocked.insert(host);
             }
         }
     }
-    blocked.retain(|h| !allowed.contains(h));
-    blocked
+    Hosts { blocked, allowed }
 }
 
-/// Whether `host` or a domain above it is in `hosts`.
-fn listed(hosts: &HashSet<String>, host: &str) -> bool {
+/// Whether `host` (or a domain above it) is blocked and not covered by a more specific exception.
+fn listed(hosts: &Hosts, host: &str) -> bool {
     let mut h = host;
     loop {
-        if hosts.contains(h) {
+        if hosts.allowed.contains(h) {
+            return false;
+        }
+        if hosts.blocked.contains(h) {
             return true;
         }
         match h.split_once('.') {
@@ -165,10 +173,19 @@ fn filterable_host(uri: &str) -> Option<String> {
     (!exempt(&host)).then_some(host)
 }
 
-/// Player, Google and ad-delivery hosts. Any `google` label covers `google.com`, `google.co.uk`,
-/// `adservice.google.com.br` and so on.
+/// Player, Google and ad-delivery hosts.
 fn exempt(host: &str) -> bool {
-    host.split('.').any(|label| label == "google")
+    let is_google =
+        host.strip_prefix("google.").or_else(|| host.rsplit_once(".google.").map(|(_, r)| r)).is_some_and(|tld| {
+            let parts: Vec<&str> = tld.split('.').collect();
+            parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_lowercase()))
+                && match parts.as_slice() {
+                    [one] => (2..=3).contains(&one.len()),
+                    ["com" | "co" | "ne" | "or", cc] => cc.len() == 2,
+                    _ => false,
+                }
+        });
+    is_google
         || EXEMPT_DOMAINS.iter().any(|d| host == *d || host.strip_suffix(d).is_some_and(|rest| rest.ends_with('.')))
 }
 
@@ -185,12 +202,15 @@ mod tests {
             "lh3.googleusercontent.com",
             "accounts.google.com",
             "adservice.google.com.br",
+            "www.google.co.uk",
             "securepubads.g.doubleclick.net",
             "pagead2.googlesyndication.com",
             "static.doubleclick.net",
         ] {
             assert!(exempt(host), "{host}");
         }
+        assert!(!exempt("google.evil.com"));
+        assert!(!exempt("accounts.google.xyz.io"));
     }
 
     #[test]
@@ -207,7 +227,7 @@ mod tests {
     #[test]
     fn bundled_list_blocks_trackers_but_not_the_site() {
         let hosts = blocked_hosts(BUNDLED_LIST);
-        assert_eq!(hosts.len(), 10);
+        assert_eq!(hosts.blocked.len(), 10);
         let check = |url: &str| filterable_host(url).is_some_and(|h| listed(&hosts, &h));
         assert!(check("https://www.google-analytics.com/g/collect?v=2"));
         assert!(check("https://static.hotjar.com/c/hotjar-1.js"));
@@ -217,13 +237,20 @@ mod tests {
     }
 
     #[test]
-    fn only_whole_host_rules_count() {
+    fn only_whole_host_rules_count_and_subdomain_exceptions_win() {
         let hosts = blocked_hosts(
             "! comment\n[Adblock Plus 2.0]\n||a.com^\n||B.com\n||c.com^$third-party\n||d.com^$script\n\
-             ||e.com/path\n/tracker.js\n##.banner\n||f.com^\n@@||f.com^$xhr\n||bad host^\n||nodot^",
+             ||e.com/path\n/tracker.js\n##.banner\n||f.com^\n@@||f.com^$xhr\n\
+             ||tracker.com^\n@@||sub.tracker.com^\n@@||tracker.com/collect$domain=example.org\n\
+             ||bad host^\n||nodot^",
         );
-        let mut got: Vec<_> = hosts.into_iter().collect();
+        let mut got: Vec<_> = hosts.blocked.iter().cloned().collect();
         got.sort();
-        assert_eq!(got, ["a.com", "b.com", "c.com"]);
+        assert_eq!(got, ["a.com", "b.com", "c.com", "f.com", "tracker.com"]);
+        assert!(listed(&hosts, "tracker.com"));
+        assert!(listed(&hosts, "other.tracker.com"));
+        assert!(!listed(&hosts, "sub.tracker.com"));
+        assert!(!listed(&hosts, "deep.sub.tracker.com"));
+        assert!(listed(&hosts, "f.com"));
     }
 }

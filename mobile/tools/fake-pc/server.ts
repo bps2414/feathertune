@@ -156,7 +156,7 @@ export class FakePc {
     this.storePath = options.storePath;
     this.onAsk = options.onAsk;
     this.log = options.log ?? (() => {});
-    this.perMinute = options.perMinute ?? 5;
+    this.perMinute = options.perMinute ?? 15;
     this.tickMs = options.tickMs ?? 250;
     this.version = options.version ?? { v: VERSION, min: MIN_VERSION };
     this.clock = options.clock ?? Date.now;
@@ -373,11 +373,8 @@ export class FakePc {
       random,
     });
     // Bytes that do not read as a first message for this PC (anyone on the network can send them) leave the
-    // window open; one that reads was made with the PC's key, from the QR.
+    // window open; the secret stays valid until the peer's encrypted `{"t":"pair"}` proves it has the PSK.
     const payload = attempt(() => hs.readMessage(first));
-    // One try per secret: it is gone from here on, whatever happens next.
-    if (this.pairing !== pairing || !pairing.secret) throw new Refuse('expired');
-    pairing.secret = null;
     const hello = parseJson(payload);
     const name = hello && Object.keys(hello).length === 1 ? validName(hello.name) : null;
     if (!name) throw new Refuse('invalid');
@@ -386,11 +383,12 @@ export class FakePc {
     const code = pairingCode(hs.handshakeHash());
     const transport = hs.split();
     // The PSK is only mixed in by the PC's reply: the phone's first transport message is what proves it had
-    // the secret, so only then is the user asked. Like the real PC, it waits for the proof until the window ends.
-    const frame = await inbox.read(Math.max(0, pairing.until - Date.now()));
+    // the secret, so only once it decrypts do we consume the secret and ask the user.
+    const frame = await inbox.read(HANDSHAKE_TIMEOUT_MS);
     const proof = parseJson(attempt(() => transport.receive.decrypt(frame)));
     if (!proof || Object.keys(proof).length !== 1 || proof.t !== 'pair') throw new Refuse('invalid');
-    if (this.pairing !== pairing) throw new Refuse('expired');
+    if (this.pairing !== pairing || pairing.until <= Date.now() || pairing.secret !== secret) throw new Refuse('expired');
+    pairing.secret = null;
     const answer = await new Promise<'allow' | 'deny' | 'expired'>((settle) => {
       pairing.asking = { name, code, settle };
       this.onAsk?.({ name, code });

@@ -180,25 +180,29 @@ export class Remote {
 
   /** Reads the phone key (made on first run) and the paired PCs, then connects to the chosen one. */
   async load(): Promise<void> {
-    const { storage } = this.deps;
-    const stored = parseKeys(await storage.get(KEY.phone));
-    this.keys = stored ?? generateKeyPair(this.deps.random);
-    if (!stored) await storage.set(KEY.phone, serializeKeys(this.keys));
-    const ids = parseIds(await storage.get(KEY.pcs));
-    const pcs: PcRecord[] = [];
-    for (const id of ids) {
-      const pc = parsePc(await storage.get(KEY.pc(id)));
-      if (pc) pcs.push(pc);
+    try {
+      const { storage } = this.deps;
+      const stored = parseKeys(await storage.get(KEY.phone));
+      this.keys = stored ?? generateKeyPair(this.deps.random);
+      if (!stored) await storage.set(KEY.phone, serializeKeys(this.keys));
+      const ids = parseIds(await storage.get(KEY.pcs));
+      const pcs: PcRecord[] = [];
+      for (const id of ids) {
+        const pc = parsePc(await storage.get(KEY.pc(id)));
+        if (pc) pcs.push(pc);
+      }
+      const active = await storage.get(KEY.active);
+      this.set({
+        ready: true,
+        pcs,
+        activeId: pcs.some((pc) => pc.id === active) ? active : (pcs[0]?.id ?? null),
+        phoneName: (await storage.get(KEY.phoneName)) ?? '',
+        networkExplained: (await storage.get(KEY.networkExplained)) === '1',
+      });
+      void this.attempt();
+    } finally {
+      if (!this.state.ready) this.set({ ready: true });
     }
-    const active = await storage.get(KEY.active);
-    this.set({
-      ready: true,
-      pcs,
-      activeId: pcs.some((pc) => pc.id === active) ? active : (pcs[0]?.id ?? null),
-      phoneName: (await storage.get(KEY.phoneName)) ?? '',
-      networkExplained: (await storage.get(KEY.networkExplained)) === '1',
-    });
-    void this.attempt();
   }
 
   /** Chooses a PC and connects to it (again), from the first try. */
@@ -232,6 +236,8 @@ export class Remote {
       this.clearRetry();
       this.backgroundTimer = setTimeout(() => {
         this.backgroundTimer = null;
+        const { status } = this.state.pairing;
+        if (status === 'connecting' || status === 'code') return;
         this.stop();
         if (this.state.status !== 'failed') this.set({ status: 'idle' });
       }, this.timing.backgroundMs);
@@ -272,7 +278,11 @@ export class Remote {
     this.stop();
     const generation = this.generation;
     this.set({ phoneName, pairing: { ...IDLE_PAIRING, status: 'connecting', qr } });
-    await this.deps.storage.set(KEY.phoneName, phoneName);
+    try {
+      await this.deps.storage.set(KEY.phoneName, phoneName);
+    } catch {
+      // keep pairing even if persistence fails
+    }
     let blocked = false;
     for (const address of qr.addresses) {
       try {
@@ -399,8 +409,11 @@ export class Remote {
   private adopt(session: Session, pc: PcRecord, address: string, first?: PcMessage): void {
     const generation = this.generation;
     this.session = session;
-    if (pc.lastAddress !== address) void this.savePc({ ...pc, lastAddress: address });
-    if (first) this.onMessage(first);
+    if (pc.lastAddress !== address) void this.savePc({ ...pc, lastAddress: address }, false);
+    if (first) {
+      this.onMessage(first);
+      session.send({ t: 'ping', n: this.ping() });
+    }
     if (generation !== this.generation) return;
     session.listen(
       (message) => generation === this.generation && this.onMessage(message),
@@ -427,7 +440,7 @@ export class Remote {
         this.failures = 0;
         this.set({ status: 'connected', problem: null, hello });
         const pc = this.active();
-        if (pc && pc.name !== hello.name) void this.savePc({ ...pc, name: hello.name });
+        if (pc && pc.name !== hello.name) void this.savePc({ ...pc, name: hello.name }, false);
         break;
       }
       case 'state': {
@@ -483,6 +496,10 @@ export class Remote {
       // already closed
     }
     this.socket = null;
+    const pairing = this.state.pairing;
+    if (pairing.status === 'connecting' || pairing.status === 'code') {
+      this.set({ pairing: { ...pairing, status: 'failed', problem: 'lost' } });
+    }
   }
 
   private clearRetry(): void {
@@ -490,8 +507,10 @@ export class Remote {
     this.retryTimer = null;
   }
 
-  private async savePc(pc: PcRecord): Promise<void> {
-    const pcs = [...this.state.pcs.filter((p) => p.id !== pc.id), pc];
+  private async savePc(pc: PcRecord, allowInsert = true): Promise<void> {
+    const exists = this.state.pcs.some((p) => p.id === pc.id);
+    if (!exists && !allowInsert) return;
+    const pcs = exists ? this.state.pcs.map((p) => (p.id === pc.id ? pc : p)) : [...this.state.pcs, pc];
     this.set({ pcs });
     await this.deps.storage.set(KEY.pc(pc.id), JSON.stringify(pc));
     await this.deps.storage.set(KEY.pcs, JSON.stringify(pcs.map((p) => p.id)));
@@ -499,7 +518,7 @@ export class Remote {
 }
 
 function disconnected(): Partial<RemoteState> {
-  return { status: 'idle', problem: null, hello: null, player: null, queue: null, library: null, refusal: null };
+  return { status: 'idle', problem: null, hello: null, player: null, queue: null, library: null, refusal: null, clockOffset: 0 };
 }
 
 /**

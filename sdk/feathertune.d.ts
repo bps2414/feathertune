@@ -5,7 +5,7 @@ declare namespace Feathertune {
   type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
   interface PlayerState {
-    id: string;
+    id: string | null;
     title: string;
     artist: string;
     album: string;
@@ -31,8 +31,8 @@ declare namespace Feathertune {
 
   interface Queue {
     queue: QueueItem[];
-    current: unknown;
-    next: unknown;
+    current: number | null;
+    next: QueueItem | null;
     list: string | null;
   }
 
@@ -60,7 +60,7 @@ declare namespace Feathertune {
     state(): Readonly<PlayerState> | null;
     queue(): Queue;
     video(): HTMLVideoElement | null;
-    clock: { time(video: HTMLVideoElement): number };
+    clock: { time(video: HTMLVideoElement): number; duration(video: HTMLVideoElement): number };
     // With the `player.control` permission; false when refused (during an ad, or with no player).
     play?(): boolean;
     pause?(): boolean;

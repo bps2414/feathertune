@@ -376,13 +376,17 @@ export function Slider(props: {
     latest.current = props;
   });
   const track = useRef<React.ElementRef<typeof View>>(null);
-  const frame = useRef({ x: 0, width: 1 });
+  const frame = useRef({ x: 0, width: 0 });
+  const measured = useRef(false);
+  const active = useRef(false);
   const lastTick = useRef(-1);
   const [drag, setDrag] = useState<number | null>(null);
 
   const responder = useMemo(() => {
-    const fraction = (pageX: number) => Math.min(1, Math.max(0, (pageX - frame.current.x) / frame.current.width));
+    const fraction = (pageX: number) =>
+      Math.min(1, Math.max(0, (pageX - frame.current.x) / Math.max(1, frame.current.width)));
     const move = (pageX: number) => {
+      if (!active.current || !measured.current) return;
       const f = fraction(pageX);
       const tick = Math.floor(f * (latest.current.ticks ?? 20));
       if (tick !== lastTick.current) {
@@ -393,7 +397,10 @@ export function Slider(props: {
       latest.current.onChange?.(f);
     };
     const end = (pageX: number | null) => {
-      if (pageX !== null) latest.current.onCommit(fraction(pageX));
+      const wasMeasured = measured.current;
+      active.current = false;
+      measured.current = false;
+      if (pageX !== null && wasMeasured) latest.current.onCommit(fraction(pageX));
       setDrag(null);
       latest.current.onGrab?.(false);
     };
@@ -404,10 +411,15 @@ export function Slider(props: {
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (event) => {
         const pageX = event.nativeEvent.pageX;
+        active.current = true;
+        measured.current = false;
         latest.current.onGrab?.(true);
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         track.current?.measureInWindow((x: number, _y: number, width: number) => {
-          frame.current = { x, width: Math.max(1, width) };
+          const w = width > 0 ? width : frame.current.width;
+          if (!active.current || w <= 0) return;
+          frame.current = { x, width: w };
+          measured.current = true;
           lastTick.current = Math.floor(fraction(pageX) * (latest.current.ticks ?? 20));
           move(pageX);
         });
@@ -433,7 +445,14 @@ export function Slider(props: {
       onAccessibilityAction={(event) => !disabled && props.onStep(event.nativeEvent.actionName === 'increment' ? 1 : -1)}
       style={[styles.sliderHit, disabled && { opacity: 0.35 }]}
     >
-      <View ref={track} style={[styles.sliderTrack, { height, borderRadius: height / 2, backgroundColor: c.line }]}>
+      <View
+        ref={track}
+        onLayout={(event) => {
+          const w = event.nativeEvent.layout.width;
+          if (w > 0) frame.current.width = w;
+        }}
+        style={[styles.sliderTrack, { height, borderRadius: height / 2, backgroundColor: c.line }]}
+      >
         <View style={{ width: `${shown * 100}%`, height, borderRadius: height / 2, backgroundColor: c.accent }} />
       </View>
       {!thick && (

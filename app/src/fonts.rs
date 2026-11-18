@@ -54,9 +54,14 @@ fn dir(app: &AppHandle) -> PathBuf {
 /// A font's name as a file stem: letters, digits, spaces, `-` and `_`, 1 to 64 characters.
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 64
+        && name.chars().count() <= 64
         && name.trim() == name
+        && !crate::player::windows_reserved(name)
         && name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+}
+
+fn same_name(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 /// The installed fonts: (name, file), by name.
@@ -73,7 +78,7 @@ fn installed(dir: &Path) -> Vec<(String, PathBuf)> {
         })
         .collect();
     out.sort_by_key(|a| a.0.to_lowercase());
-    out.dedup_by(|a, b| a.0 == b.0);
+    out.dedup_by(|a, b| same_name(&a.0, &b.0));
     out
 }
 
@@ -82,7 +87,9 @@ pub fn view(app: &AppHandle) -> Value {
     let names: Vec<String> = installed(&dir(app)).into_iter().map(|(n, _)| n).collect();
     let library: Vec<Value> = LIBRARY
         .iter()
-        .map(|(id, name, kind, _)| json!({ "id": id, "name": name, "kind": kind, "installed": names.iter().any(|n| n == name) }))
+        .map(|(id, name, kind, _)| {
+            json!({ "id": id, "name": name, "kind": kind, "installed": names.iter().any(|n| same_name(n, name)) })
+        })
         .collect();
     json!({ "installed": names, "library": library })
 }
@@ -100,20 +107,20 @@ fn sniff(bytes: &[u8]) -> Option<&'static str> {
 
 fn save(app: &AppHandle, name: &str, bytes: &[u8]) -> Result<(), String> {
     if !valid_name(name) {
-        return Err("invalid font name".into());
+        return Err(crate::i18n::t("invalid font name").into());
     }
     if bytes.len() as u64 > MAX_FONT_BYTES {
-        return Err("the font is over 10 MB".into());
+        return Err(crate::i18n::t("The font is over 10 MB.").into());
     }
-    let ext = sniff(bytes).ok_or("not a font file (TTF, OTF, WOFF or WOFF2)")?;
+    let ext = sniff(bytes).ok_or_else(|| crate::i18n::t("not a font file (TTF, OTF, WOFF or WOFF2)"))?;
     let dir = dir(app);
     let fonts = installed(&dir);
-    if fonts.len() >= MAX_FONTS && !fonts.iter().any(|(n, _)| n == name) {
-        return Err(format!("at most {MAX_FONTS} fonts"));
+    if fonts.len() >= MAX_FONTS && !fonts.iter().any(|(n, _)| same_name(n, name)) {
+        return Err(crate::i18n::tf("at most {} fonts", &[&MAX_FONTS.to_string()]));
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     for (n, path) in fonts {
-        if n == name {
+        if same_name(&n, name) {
             let _ = std::fs::remove_file(path);
         }
     }
@@ -136,7 +143,7 @@ pub fn import(app: &AppHandle, file_name: &str, bytes: &[u8]) -> Result<String, 
 
 /// Downloads a font of the library.
 pub fn download(app: &AppHandle, id: &str) -> Result<String, String> {
-    let (id, name, _, weight) = LIBRARY.iter().find(|f| f.0 == id).ok_or("unknown font")?;
+    let (id, name, _, weight) = LIBRARY.iter().find(|f| f.0 == id).ok_or_else(|| crate::i18n::t("unknown font"))?;
     let url = format!("https://cdn.jsdelivr.net/fontsource/fonts/{id}@latest/latin-{weight}-normal.woff2");
     let mut response = agent().get(&url).call().map_err(|e| e.to_string())?;
     if response.status() != 200 {
@@ -150,7 +157,7 @@ pub fn download(app: &AppHandle, id: &str) -> Result<String, String> {
 /// Removes an installed font.
 pub fn remove(app: &AppHandle, name: &str) -> Result<(), String> {
     for (n, path) in installed(&dir(app)) {
-        if n == name {
+        if same_name(&n, name) {
             std::fs::remove_file(path).map_err(|e| e.to_string())?;
         }
     }
@@ -161,7 +168,7 @@ pub fn remove(app: &AppHandle, name: &str) -> Result<(), String> {
 pub fn push(app: &AppHandle) {
     let name = app.state::<Live>().get().lyrics.font.clone();
     let font = (!name.is_empty())
-        .then(|| installed(&dir(app)).into_iter().find(|(n, _)| *n == name))
+        .then(|| installed(&dir(app)).into_iter().find(|(n, _)| same_name(n, &name)))
         .flatten()
         .and_then(|(n, path)| Some((n, std::fs::read(path).ok()?)));
     let data = font.map_or(

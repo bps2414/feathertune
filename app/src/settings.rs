@@ -433,12 +433,14 @@ impl Live {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(format!("could not read config.toml: {e}")),
+            Err(e) => return Err(crate::i18n::tf("could not read config.toml: {}", &[&e.to_string()])),
         };
         let text = edit(&text, table, key, value, remove)?;
-        let mut settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
+        let mut settings = Settings::parse(&text)
+            .map_err(|e| crate::i18n::tf("the new config.toml would not parse: {}", &[&e.to_string()]))?;
         settings.forced_off = current.forced_off.clone();
-        write_atomic(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
+        write_atomic(&path, &text)
+            .map_err(|e| crate::i18n::tf("could not write config.toml: {}", &[&e.to_string()]))?;
         *current = settings;
         if restart {
             self.restart.store(true, Ordering::Relaxed);
@@ -453,7 +455,7 @@ impl Live {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(format!("could not read config.toml: {e}")),
+            Err(e) => return Err(crate::i18n::tf("could not read config.toml: {}", &[&e.to_string()])),
         };
         let mut doc: toml_edit::DocumentMut =
             text.parse().map_err(|_| crate::i18n::t("config.toml has an error; fix it by hand first."))?;
@@ -469,9 +471,11 @@ impl Live {
             return Ok(());
         }
         let text = doc.to_string();
-        let mut settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
+        let mut settings = Settings::parse(&text)
+            .map_err(|e| crate::i18n::tf("the new config.toml would not parse: {}", &[&e.to_string()]))?;
         settings.forced_off = current.forced_off.clone();
-        write_atomic(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
+        write_atomic(&path, &text)
+            .map_err(|e| crate::i18n::tf("could not write config.toml: {}", &[&e.to_string()]))?;
         *current = settings;
         Ok(())
     }
@@ -484,8 +488,9 @@ fn edit(
     value: toml_edit::Item,
     remove: Option<(&str, &str)>,
 ) -> Result<String, String> {
-    let mut doc: toml_edit::DocumentMut =
-        text.parse().map_err(|e| format!("config.toml has an error; fix it by hand first: {e}"))?;
+    let mut doc = text
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| crate::i18n::tf("config.toml has an error; fix it by hand first: {}", &[&e.to_string()]))?;
     if let Some((t, k)) = remove
         && let Some(old) = doc.get_mut(t).and_then(|i| i.as_table_like_mut())
     {
@@ -493,7 +498,7 @@ fn edit(
     }
     let section = doc.entry(table).or_insert_with(toml_edit::table);
     let Some(section) = section.as_table_like_mut() else {
-        return Err(format!("config.toml: `{table}` is not a table"));
+        return Err(crate::i18n::tf("config.toml: `{}` is not a table", &[table]));
     };
     match section.get_mut(key) {
         // Keeps the comment that follows the old value on the same line.

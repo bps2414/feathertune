@@ -55,11 +55,15 @@ pub fn t(en: &'static str) -> &'static str {
 
 /// `en` in the current language, with each `{}` replaced by the next of `args`.
 pub fn tf(en: &'static str, args: &[&str]) -> String {
-    let mut out = t(en).to_owned();
-    for arg in args {
-        if let Some(i) = out.find("{}") {
-            out.replace_range(i..i + 2, arg);
-        }
+    let template = t(en);
+    let mut parts = template.split("{}");
+    let mut out = String::with_capacity(template.len());
+    if let Some(first) = parts.next() {
+        out.push_str(first);
+    }
+    for (i, part) in parts.enumerate() {
+        out.push_str(args.get(i).copied().unwrap_or("{}"));
+        out.push_str(part);
     }
     out
 }
@@ -85,4 +89,22 @@ pub fn windows_language() -> Option<String> {
     let name = String::from_utf16_lossy(&buf[..(size as usize / 2).min(buf.len())]);
     let lang = name.trim_end_matches('\0').split(['-', '_']).next()?.to_ascii_lowercase();
     ((2..=3).contains(&lang.len()) && lang.bytes().all(|b| b.is_ascii_lowercase())).then_some(lang)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_pass_tf_preserves_braces_in_args() {
+        assert_eq!(tf("{} and {}", &["a {} b", "c"]), "a {} b and c");
+        assert_eq!(tf("{} -> {}", &["only_one"]), "only_one -> {}");
+    }
+
+    #[test]
+    fn pt_br_locale_is_valid_json_without_empty_translations() {
+        let table: HashMap<String, String> = serde_json::from_str(PT_BR).expect("valid pt-BR.json");
+        assert!(!table.is_empty());
+        assert!(table.values().all(|v| !v.trim().is_empty()));
+    }
 }

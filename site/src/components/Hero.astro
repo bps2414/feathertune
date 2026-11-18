@@ -136,6 +136,13 @@ const nextAt = (at + 0.2).toFixed(2);
     color: transparent;
   }
 
+  @media (forced-colors: active) {
+    .w {
+      background: none;
+      color: CanvasText;
+    }
+  }
+
   .next {
     max-width: 30ch;
     margin-top: clamp(1.25rem, 0.8rem + 1.5vw, 2rem);

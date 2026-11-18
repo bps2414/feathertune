@@ -12,7 +12,7 @@ Se você usa um agente de código (Claude Code, Copilot, Codex...), as instruç�
 - **Mudança pequena e óbvia** (typo, bug claro, texto de interface): pode abrir o PR direto.
 - **Mudança grande ou que muda o comportamento** (plugin novo, tela nova, dependência nova, mexer em áudio, letras, privacidade ou no que a página pode chamar): abra uma **issue antes** e espere eu responder. Assim você não gasta uma semana numa coisa que eu não vou aceitar.
 - **Procure antes.** Veja as issues e PRs abertos e a seção "Ainda não conferido" e "Ideias" do [docs/DESIGN.pt-BR.md](docs/DESIGN.pt-BR.md). Pode já existir decisão tomada ou uma coisa descartada com o motivo.
-- **Bug?** Anexe o arquivo de **Exportar diagnóstico** (Configurações > Advanced). Ele cita as faixas tocadas desde que o app abriu; leia antes de enviar e apague o que não quiser publicar.
+- **Bug?** Anexe o arquivo de **Exportar diagnóstico** (Configurações > Sobre). Ele cita as faixas tocadas desde que o app abriu; leia antes de enviar e apague o que não quiser publicar.
 
 ## O que eu aceito e o que eu não aceito
 

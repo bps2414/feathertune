@@ -4,7 +4,7 @@
 # plus the min-max range, ready to paste into the tables in docs/DESIGN.md.
 param([Parameter(Mandatory)][string]$Prefix)
 $ErrorActionPreference = 'Stop'
-$runs = @(Get-ChildItem (Join-Path $PSScriptRoot 'results') -Filter "$Prefix*.json" | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
+$runs = @(Get-ChildItem (Join-Path $PSScriptRoot 'results') -Filter "$Prefix*.json" | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $null -ne $_.processes })
 if ($runs.Count -eq 0) { throw "no results\$Prefix*.json" }
 
 function Median($values) {

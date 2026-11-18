@@ -4,7 +4,7 @@ import { Linking, PermissionsAndroid, Platform } from 'react-native';
 
 import { t } from '../../i18n';
 import { remote } from '../../remote/app';
-import { Body, Button, Screen, Steps, Title } from '../../ui';
+import { Body, Button, resetTo, Screen, Steps, Title } from '../../ui';
 
 /** Android 17 (API 37) asks for local network access at run time; iOS asks by itself on the first connection. */
 async function askLocalNetwork(): Promise<boolean> {
@@ -31,6 +31,15 @@ export default function Network() {
             }}
           />
           {denied && <Button kind="secondary" label={t('openSettings')} onPress={() => void Linking.openSettings()} />}
+          <Button
+            kind="quiet"
+            label={t('cancel')}
+            onPress={() => {
+              remote.leavePairing();
+              if (router.canGoBack()) router.back();
+              else resetTo(remote.store.getState().pcs.length > 0 ? '/pcs' : '/pair');
+            }}
+          />
         </>
       }
     >

@@ -13,13 +13,24 @@ const s = strings[Astro.props.locale].switches;
     <h2 id="switches-title">{s.title}</h2>
     <p class="lede">{s.lede}</p>
   </div>
-  <ul class="list">
+  <ul class="list" role="list">
     {
       s.items.map((item) => (
         <li class:list={{ off: !item.on }}>
           <span class="toggle" aria-hidden="true" />
           <span class="name">{item.title}</span>
-          {item.on ? <span class="sr-only">{s.on}</span> : <span class="tag">{s.experimental}</span>}
+          {
+            item.on ? (
+              <span class="sr-only">{` (${s.on})`}</span>
+            ) : (
+              <>
+                <span class="tag" aria-hidden="true">
+                  {s.experimental}
+                </span>
+                <span class="sr-only">{` (${s.off})`}</span>
+              </>
+            )
+          }
         </li>
       ))
     }

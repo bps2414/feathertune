@@ -24,6 +24,11 @@
     let px = -99;
     let py = -99;
     let boost = 0;
+    let focused = document.hasFocus();
+    let sinC1 = new Float64Array(0);
+    let sinC2 = new Float64Array(0);
+    let cosC2 = new Float64Array(0);
+    let dxSq = new Float64Array(0);
 
     const readColor = () => {
       color = getComputedStyle(root).getPropertyValue('--feather').trim() || color;
@@ -40,6 +45,12 @@
       ch = Math.round(FONT * 1.27);
       cols = Math.ceil(innerWidth / cw);
       rows = Math.ceil(innerHeight / ch);
+      if (sinC1.length < cols) {
+        sinC1 = new Float64Array(cols);
+        sinC2 = new Float64Array(cols);
+        cosC2 = new Float64Array(cols);
+        dxSq = new Float64Array(cols);
+      }
     };
 
     const draw = (t: number) => {
@@ -48,14 +59,28 @@
       const shift = scrollY / ch / 3;
       const cx = cols * 0.7;
       const cy = rows * 0.35;
+      for (let c = 0; c < cols; c++) {
+        sinC1[c] = Math.sin(c * 0.085 + t * 0.9);
+        const a = c * 0.045 + t * 0.55;
+        sinC2[c] = Math.sin(a);
+        cosC2[c] = Math.cos(a);
+        const dx = c - cx;
+        dxSq[c] = dx * dx;
+      }
       for (let r = 0; r < rows; r++) {
         const y = r + shift;
+        const sinY1 = Math.sin(y * 0.17 - t * 0.7);
+        const b = y * 0.09;
+        const sinY2 = Math.sin(b);
+        const cosY2 = Math.cos(b);
+        const dy2 = (y - cy) * 2;
+        const dy2Sq = dy2 * dy2;
         for (let c = 0; c < cols; c++) {
           let v =
-            Math.sin(c * 0.085 + t * 0.9) +
-            Math.sin(y * 0.17 - t * 0.7) +
-            Math.sin((c * 0.5 + y) * 0.09 + t * 0.55) +
-            Math.sin(Math.hypot(c - cx, (y - cy) * 2) * 0.11 - t * 1.2);
+            sinC1[c] +
+            sinY1 +
+            (sinC2[c] * cosY2 + cosC2[c] * sinY2) +
+            Math.sin(Math.sqrt(dxSq[c] + dy2Sq) * 0.11 - t * 1.2);
           if (boost > 0.02) {
             const d = Math.hypot(c - px, (r - py) * 2);
             v += boost * 2.4 * Math.exp((-d * d) / 160) * Math.sin(d * 0.7 - t * 7);
@@ -79,7 +104,7 @@
     };
 
     const start = () => {
-      if (!raf && !still.matches && !document.hidden) raf = requestAnimationFrame(frame);
+      if (!raf && !still.matches && !document.hidden && focused) raf = requestAnimationFrame(frame);
     };
     const stop = () => {
       cancelAnimationFrame(raf);
@@ -105,6 +130,14 @@
       },
       { passive: true },
     );
+    addEventListener('blur', () => {
+      focused = false;
+      stop();
+    });
+    addEventListener('focus', () => {
+      focused = true;
+      start();
+    });
     document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
     still.addEventListener('change', () => {
       stop();

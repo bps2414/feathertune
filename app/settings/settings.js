@@ -15,12 +15,20 @@ const el = (tag, className, text) => {
 // `t` translates one text, `tf` fills its `{}` in order; the HTML's own text is translated once.
 let strings = {};
 const t = (s) => strings[s] ?? s;
-const tf = (s, ...args) => args.reduce((out, a) => out.replace('{}', a), t(s));
+const tf = (s, ...args) => {
+  const parts = t(s).split('{}');
+  return parts.reduce((out, part, i) => out + (i - 1 < args.length ? args[i - 1] : '{}') + part);
+};
 const translatePage = () => {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const text = n.nodeValue.trim();
-    if (text && strings[text]) n.nodeValue = n.nodeValue.replace(text, strings[text]);
+    const raw = n.nodeValue;
+    const text = raw.trim();
+    if (text && strings[text]) {
+      const lead = raw.match(/^\s*/)[0];
+      const tail = raw.match(/\s*$/)[0];
+      n.nodeValue = lead + strings[text] + tail;
+    }
   }
   for (const e of document.querySelectorAll('[placeholder], [aria-label], [title]')) {
     for (const name of ['placeholder', 'aria-label', 'title']) {
@@ -1072,7 +1080,7 @@ const fontOp = async (button, op, arg) => {
     const v = await fontCall(op, arg);
     showError('');
     if (v.added && (await set('lyrics.font', v.added))) lyricsFont = v.added;
-    if (op === 'remove' && arg?.name === lyricsFont) lyricsFont = '';
+    if (op === 'remove' && arg?.name?.toLowerCase() === lyricsFont.toLowerCase()) lyricsFont = '';
     renderFonts(v);
   } catch (e) {
     showError(String(e));
@@ -1099,6 +1107,10 @@ $('font-file').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    showError(t('The font is over 10 MB.'));
+    return;
+  }
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -1333,6 +1345,11 @@ const loadExtensions = async () => {
 
 // A .zip's files as [[path, ArrayBuffer]]: stored or deflate entries only (DecompressionStream), at most 32 MB.
 const MAX_PACKAGE = 32 * 1024 * 1024;
+const EXT_FILES = new Set(['plugin.json', 'page.js', 'style.css', 'plugin.wasm', 'icon.png']);
+const isPackagePath = (path) => {
+  const parts = path.replaceAll('\\', '/').replace(/^\.\//, '').split('/');
+  return (parts.length === 1 || parts.length === 2) && EXT_FILES.has(parts[parts.length - 1]);
+};
 const unzip = async (buffer) => {
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
@@ -1356,19 +1373,47 @@ const unzip = async (buffer) => {
     const size = view.getUint32(p + 20, true);
     const full = view.getUint32(p + 24, true);
     const nameLength = view.getUint16(p + 28, true);
+    const extraLength = view.getUint16(p + 30, true);
+    const commentLength = view.getUint16(p + 32, true);
     const local = view.getUint32(p + 42, true);
+    if (p + 46 + nameLength + extraLength + commentLength > buffer.byteLength) throw new Error(t('The zip file is damaged.'));
     const name = decoder.decode(bytes.subarray(p + 46, p + 46 + nameLength));
-    p += 46 + nameLength + view.getUint16(p + 30, true) + view.getUint16(p + 32, true);
+    p += 46 + nameLength + extraLength + commentLength;
     if (name.endsWith('/') || name.startsWith('__MACOSX/') || name.endsWith('.DS_Store')) continue;
     if (flags & 1) throw new Error(t('Encrypted zip files are not supported.'));
-    total += full;
-    if (size === 0xffffffff || total > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+    if (!isPackagePath(name)) continue;
+    if (size === 0xffffffff || full === 0xffffffff || total + full > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+    if (local + 30 > buffer.byteLength || view.getUint32(local, true) !== 0x04034b50) throw new Error(t('The zip file is damaged.'));
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    if (start + size > buffer.byteLength) throw new Error(t('The zip file is damaged.'));
     const data = bytes.subarray(start, start + size);
-    if (method === 0) out.push([name, data.slice().buffer]);
-    else if (method === 8) {
+    if (method === 0) {
+      total += data.byteLength;
+      if (total > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+      out.push([name, data.slice().buffer]);
+    } else if (method === 8) {
       const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-      out.push([name, await new Response(stream).arrayBuffer()]);
+      const reader = stream.getReader();
+      const chunks = [];
+      let len = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        len += value.byteLength;
+        if (total > MAX_PACKAGE) {
+          await reader.cancel().catch(() => {});
+          throw new Error(t('The package is over 32 MB.'));
+        }
+        chunks.push(value);
+      }
+      const joined = new Uint8Array(len);
+      let at = 0;
+      for (const c of chunks) {
+        joined.set(c, at);
+        at += c.byteLength;
+      }
+      out.push([name, joined.buffer]);
     } else throw new Error(t('This zip file uses a compression that is not supported.'));
   }
   return out;
@@ -1388,15 +1433,21 @@ const importFiles = async (entries) => {
     showError('');
     await loadExtensions();
     const x = extensions?.list.find((e) => e.id === r.id);
-    if (r.previous) {
+    if (r.previous && !r.escalated) {
       extStatus(tf('{} updated from {} to {}.', r.name, r.previous, r.version));
       if (x?.on) $('restart').hidden = false;
     } else {
-      extStatus(tf('{} {} imported.', r.name, r.version));
+      extStatus(
+        r.previous
+          ? tf('{} updated from {} to {} (turned off: new permissions).', r.name, r.previous, r.version)
+          : tf('{} {} imported.', r.name, r.version),
+      );
       if (x && confirmEnable(x)) {
         await extCall('toggle', { id: x.id, on: true });
         $('restart').hidden = false;
         await loadExtensions();
+      } else if (x?.running) {
+        $('restart').hidden = false;
       }
     }
   } catch (e) {
@@ -1404,6 +1455,10 @@ const importFiles = async (entries) => {
   }
 };
 const importPicked = async (file) => {
+  if (file.size > MAX_PACKAGE) {
+    showError(t('The package is over 32 MB.'));
+    return;
+  }
   const buffer = await file.arrayBuffer();
   if (!/\.zip$/i.test(file.name)) return importFiles([[file.name, buffer]]);
   try {
@@ -1421,31 +1476,61 @@ $('ext-file').addEventListener('change', async (e) => {
   if (file) importPicked(file);
 });
 $('ext-folder').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
+  const picked = [...e.target.files].filter((f) => isPackagePath(f.webkitRelativePath || f.name));
   e.target.value = '';
-  if (files.length) importFiles(await Promise.all(files.map(async (f) => [f.webkitRelativePath || f.name, await f.arrayBuffer()])));
+  if (!picked.length) return;
+  try {
+    let total = 0;
+    const entries = await Promise.all(
+      picked.map(async (f) => {
+        total += f.size;
+        if (total > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+        return [f.webkitRelativePath || f.name, await f.arrayBuffer()];
+      }),
+    );
+    importFiles(entries);
+  } catch (err) {
+    showError(String(err?.message || err));
+  }
 });
 // A dropped folder is walked here (FileSystemEntry); a dropped file is read like a picked one.
-const readEntry = (entry, prefix, out) =>
+const readEntry = (entry, prefix, out, depth = 0) =>
   new Promise((resolve, reject) => {
     if (entry.isFile) {
-      entry.file(async (f) => {
-        out.push([prefix + f.name, await f.arrayBuffer()]);
+      if (!EXT_FILES.has(entry.name) || entry.size > MAX_PACKAGE) {
         resolve();
+        return;
+      }
+      entry.file(async (f) => {
+        try {
+          if (f.size > MAX_PACKAGE) throw new Error(t('The package is over 32 MB.'));
+          out.push([prefix + f.name, await f.arrayBuffer()]);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
       }, reject);
+      return;
+    }
+    if (depth > 0) {
+      resolve();
       return;
     }
     const reader = entry.createReader();
     const children = [];
     const next = () =>
       reader.readEntries(async (batch) => {
-        if (batch.length) {
-          children.push(...batch);
-          next();
-          return;
+        try {
+          if (batch.length) {
+            children.push(...batch);
+            next();
+            return;
+          }
+          for (const child of children) await readEntry(child, `${prefix}${entry.name}/`, out, depth + 1);
+          resolve();
+        } catch (err) {
+          reject(err);
         }
-        for (const child of children) await readEntry(child, `${prefix}${entry.name}/`, out);
-        resolve();
       }, reject);
     next();
   });
@@ -1454,7 +1539,9 @@ panel.addEventListener('dragover', (e) => {
   e.preventDefault();
   panel.classList.add('dropping');
 });
-panel.addEventListener('dragleave', () => panel.classList.remove('dropping'));
+panel.addEventListener('dragleave', (e) => {
+  if (!panel.contains(e.relatedTarget)) panel.classList.remove('dropping');
+});
 panel.addEventListener('drop', async (e) => {
   e.preventDefault();
   panel.classList.remove('dropping');

@@ -31,7 +31,7 @@ body:
     attributes:
       label: Diagnostics
       description: |
-        Settings > Advanced > Export diagnostics, then paste the file here. It names the tracks played since the app
+        Settings > About > Export diagnostics, then paste the file here. It names the tracks played since the app
         started and has no tokens, keys, account names or paths; read it and delete what you do not want to publish.
       render: text
   - type: input

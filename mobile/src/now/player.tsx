@@ -27,11 +27,16 @@ export function Player({ colors: c, onOpenQueue }: { colors: Colors; onOpenQueue
   const volume = useLiveVolume(player?.volume ?? null);
 
   // Position ticker: only while playing in the foreground and not dragging.
+  const ticking = foreground && Boolean(player && !player.paused) && dragFraction === null;
   useEffect(() => {
-    if (!foreground || !player || player.paused || dragFraction !== null) return;
+    if (!ticking) return;
+    const immediate = setTimeout(() => setNowMs(Date.now()), 0);
     const interval = setInterval(() => setNowMs(Date.now()), 250);
-    return () => clearInterval(interval);
-  }, [foreground, player, dragFraction]);
+    return () => {
+      clearTimeout(immediate);
+      clearInterval(interval);
+    };
+  }, [ticking]);
 
   if (!player) {
     return (

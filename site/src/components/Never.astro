@@ -14,7 +14,7 @@ const s = strings[Astro.props.locale].never;
       <h2 id="never-title">{s.title}</h2>
       <p class="lede">{s.lede}</p>
     </div>
-    <ul class="list">
+    <ul class="list" role="list">
       {
         s.items.map((item) => (
           <li>

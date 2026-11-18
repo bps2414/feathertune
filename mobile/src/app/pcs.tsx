@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { t } from '../i18n';
 import { remote, useRemote } from '../remote/app';
+import { isFinal } from '../remote/protocol';
 import type { PcRecord } from '../remote/remote';
 import { Body, Button, Notice, resetTo, Screen, StatusDot, statusText, Title, useColors } from '../ui';
 
@@ -79,7 +80,7 @@ function PcCard({ pc }: { pc: PcRecord }) {
               onPress={() => router.push('/pair')}
               colors={c}
             />
-          ) : problem === 'unreachable' || problem === 'blocked' || problem === 'other_network' ? (
+          ) : !isFinal(problem) ? (
             <Button
               kind="secondary"
               label={t('tryAgain')}

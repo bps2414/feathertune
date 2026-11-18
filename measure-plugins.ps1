@@ -1,4 +1,4 @@
-# Measures what every plugin costs, with measure.ps1: the same fixed track, the window in front, 3 runs per
+﻿# Measures what every plugin costs, with measure.ps1: the same fixed track, the window in front, 3 runs per
 # scenario, in a shuffled order per round so the drift of the site and of WebView2 does not fall on one side.
 # Scenarios: base (defaults), alloff, off-<id> for every id in app\src\plugins.rs, tray, mini, lyrics (the
 # Lyrics tab open) and lyrics-off (the same with synced_lyrics off), desktop-lyrics and share-lyrics open.
@@ -51,6 +51,7 @@ $scenarios = @(
     @{ Name = 'share-lyrics'; Args = @('--open=share-lyrics') }
 )
 $active = @($scenarios | Where-Object { -not $Only -or $_.Name -match $Only })
+if (-not $SummaryOnly -and $active.Count -eq 0) { throw "no scenarios matched -Only '$Only'" }
 
 # ---- checking a run ---------------------------------------------------------------------------------------
 

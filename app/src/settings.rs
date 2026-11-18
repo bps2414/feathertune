@@ -63,7 +63,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Deserialize;
@@ -287,7 +287,7 @@ pub fn valid_feature(name: &str) -> bool {
 
 impl Settings {
     /// Missing file: writes one with every plugin at its default and uses the defaults. A file that
-    /// does not parse is reported, left untouched, and the defaults are used.
+    /// does not read or parse is reported, left untouched, and the defaults are used.
     pub fn load(profile: &Path) -> Settings {
         let path = profile.join("config.toml");
         match std::fs::read_to_string(&path) {
@@ -295,9 +295,12 @@ impl Settings {
                 eprintln!("config.toml is invalid, using defaults: {e}");
                 Settings::default()
             }),
-            Err(_) => {
-                let _ = std::fs::create_dir_all(profile);
-                let _ = std::fs::write(&path, default_file());
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let _ = write_atomic(&path, default_file());
+                Settings::default()
+            }
+            Err(e) => {
+                eprintln!("could not read config.toml, using defaults: {e}");
                 Settings::default()
             }
         }
@@ -366,6 +369,26 @@ fn default_file() -> String {
     text
 }
 
+/// Writes `data` to a sibling temporary file first and renames it into `path` so a crash or power
+/// loss never leaves a truncated file.
+pub fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> std::io::Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(".{name}.{}.{seq}.tmp", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, data.as_ref()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// The settings shared by the running app and the settings window.
 pub struct Live {
     pub profile: PathBuf,
@@ -405,6 +428,7 @@ impl Live {
         remove: Option<(&str, &str)>,
         restart: bool,
     ) -> Result<(), String> {
+        let mut current = self.current.lock().unwrap();
         let path = self.profile.join("config.toml");
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
@@ -413,12 +437,42 @@ impl Live {
         };
         let text = edit(&text, table, key, value, remove)?;
         let mut settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
-        settings.forced_off = self.get().forced_off.clone();
-        std::fs::write(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
-        *self.get() = settings;
+        settings.forced_off = current.forced_off.clone();
+        write_atomic(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
+        *current = settings;
         if restart {
             self.restart.store(true, Ordering::Relaxed);
         }
+        Ok(())
+    }
+
+    /// Removes `id` from `[extensions]` and `[extension_settings]` in `config.toml` when uninstalled.
+    pub fn clear_extension(&self, id: &str) -> Result<(), String> {
+        let mut current = self.current.lock().unwrap();
+        let path = self.profile.join("config.toml");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("could not read config.toml: {e}")),
+        };
+        let mut doc: toml_edit::DocumentMut =
+            text.parse().map_err(|_| crate::i18n::t("config.toml has an error; fix it by hand first."))?;
+        let mut touched = false;
+        for table in ["extensions", "extension_settings"] {
+            if let Some(t) = doc.get_mut(table).and_then(|i| i.as_table_like_mut())
+                && t.remove(id).is_some()
+            {
+                touched = true;
+            }
+        }
+        if !touched {
+            return Ok(());
+        }
+        let text = doc.to_string();
+        let mut settings = Settings::parse(&text).map_err(|e| format!("the new config.toml would not parse: {e}"))?;
+        settings.forced_off = current.forced_off.clone();
+        write_atomic(&path, &text).map_err(|e| format!("could not write config.toml: {e}"))?;
+        *current = settings;
         Ok(())
     }
 }
@@ -497,5 +551,18 @@ mod tests {
         for p in PLUGINS {
             assert_eq!(s.plugin(p.id), p.default_on, "{}", p.id);
         }
+    }
+
+    #[test]
+    fn load_leaves_unreadable_config_untouched() {
+        let dir = std::env::temp_dir().join(format!("feathertune-settings-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let invalid_utf8 = b"# \xff\xfe\n[plugins]\ncontrols = false\n";
+        std::fs::write(&path, invalid_utf8).unwrap();
+        let _ = Settings::load(&dir);
+        assert_eq!(std::fs::read(&path).unwrap(), invalid_utf8);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

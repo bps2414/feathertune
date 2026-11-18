@@ -7,7 +7,7 @@
 //! Failures are silent: if Discord is not running the connection is simply tried again at the next
 //! player event (a track change, a pause or the page's 15 s position refresh), so there is no timer.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
@@ -18,6 +18,7 @@ use crate::player::{Player, State};
 
 /// The position refresh arrives every 15 s; only a drift beyond this (a seek) is worth a new update.
 const MAX_DRIFT_MS: i64 = 2_000;
+const CONNECT_COOLDOWN: Duration = Duration::from_secs(15);
 const NAME: &str = "YouTube Music";
 const SITE: &str = "https://music.youtube.com";
 const ICON: &str = "https://music.youtube.com/img/favicon_144.png";
@@ -36,7 +37,8 @@ pub fn start(app: &AppHandle, client_id: &str) {
         return;
     }
     let mut rx = app.state::<Player>().subscribe();
-    let mut presence = Presence { client: DiscordIpcClient::new(client_id), connected: false, sent: None };
+    let mut presence =
+        Presence { client: DiscordIpcClient::new(client_id), connected: false, last_try: None, sent: None };
     std::thread::spawn(move || {
         loop {
             match rx.blocking_recv() {
@@ -52,18 +54,27 @@ pub fn start(app: &AppHandle, client_id: &str) {
 struct Presence {
     client: DiscordIpcClient,
     connected: bool,
+    last_try: Option<Instant>,
     /// The track and start time of the activity Discord is showing.
     sent: Option<(String, i64)>,
 }
 
 impl Presence {
     fn update(&mut self, state: &State) {
-        if state.paused {
+        if state.paused || state.ad {
             self.clear();
             return;
         }
         let t = &state.track;
-        let key = format!("{}\u{0}{}\u{0}{}", t.title, t.artist, t.duration);
+        let key = format!(
+            "{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
+            t.title,
+            t.artist,
+            t.duration,
+            t.album,
+            t.artwork.as_deref().unwrap_or(""),
+            t.id.as_deref().unwrap_or(""),
+        );
         let start = now_ms() - (state.position_now() * 1000.0) as i64;
         if self.sent.as_ref().is_some_and(|(k, s)| *k == key && (s - start).abs() < MAX_DRIFT_MS) {
             return;
@@ -129,6 +140,10 @@ impl Presence {
 
     fn connect(&mut self) -> bool {
         if !self.connected {
+            if self.last_try.is_some_and(|t| t.elapsed() < CONNECT_COOLDOWN) {
+                return false;
+            }
+            self.last_try = Some(Instant::now());
             self.connected = self.client.connect().is_ok();
         }
         self.connected

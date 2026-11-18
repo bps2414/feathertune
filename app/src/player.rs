@@ -36,7 +36,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::Deserialize;
-use tauri::Url;
+use tauri::{Url, Webview};
 use tokio::sync::broadcast;
 
 /// Raw payload limit, before parsing (a queue of 200 tracks fits).
@@ -233,8 +233,12 @@ impl Player {
             {
                 return;
             }
-            // The album and duration arrive a moment after the title; that is the same track.
-            Some(old) if old.track.title == new.track.title && old.track.artist == new.track.artist => {
+            // The album and duration arrive a moment after the title; that is the same track unless distinct ids differ.
+            Some(old)
+                if old.track.title == new.track.title
+                    && old.track.artist == new.track.artist
+                    && !matches!((&old.track.id, &new.track.id), (Some(a), Some(b)) if a != b) =>
+            {
                 if old.paused != new.paused { Event::Playback(new.clone()) } else { Event::Progress(new.clone()) }
             }
             _ => Event::Track(new.clone()),
@@ -248,14 +252,17 @@ impl Player {
 /// The one command the page may call (see `capabilities/`). It only stores data: invalid payloads
 /// are dropped and nothing here triggers an action.
 #[tauri::command]
-pub fn player_state(state: String, player: tauri::State<'_, Player>, app: tauri::AppHandle) {
+pub fn player_state(webview: Webview, state: String, player: tauri::State<'_, Player>, app: tauri::AppHandle) {
+    if webview.label() != "site" {
+        return;
+    }
     if let Some(library) = parse_library(&state) {
         return player.update_library(library);
     }
     match parse(&state) {
         Some((s, context, current)) => {
-            player.update(s);
             player.update_queue(context.queue.clone(), current);
+            player.update(s);
             crate::mixes::observe(&app, context);
         }
         None => eprintln!("player_state: invalid payload dropped ({} bytes)", state.len()),
@@ -269,6 +276,10 @@ struct LibraryPayload {
     library: Vec<Playlist>,
 }
 
+fn unsafe_text_char(c: char) -> bool {
+    c.is_control() || ('\u{202a}'..='\u{202e}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c)
+}
+
 /// The library, if that is what the payload is; titles are capped like queue items and ids checked.
 fn parse_library(json: &str) -> Option<Vec<Playlist>> {
     if json.len() > MAX_PAYLOAD {
@@ -278,17 +289,19 @@ fn parse_library(json: &str) -> Option<Vec<Playlist>> {
     if p.library.len() > MAX_LIBRARY {
         return None;
     }
-    p.library
-        .into_iter()
-        .map(|p| {
-            let title = p.title.trim().to_owned();
-            let ok = valid_list(&p.list)
-                && !title.is_empty()
-                && title.chars().count() <= MAX_ITEM_TEXT
-                && !title.chars().any(char::is_control);
-            ok.then_some(Playlist { list: p.list, title })
-        })
-        .collect()
+    Some(
+        p.library
+            .into_iter()
+            .filter_map(|p| {
+                let title = p.title.trim().to_owned();
+                let ok = valid_list(&p.list)
+                    && !title.is_empty()
+                    && title.chars().count() <= MAX_ITEM_TEXT
+                    && !title.chars().any(unsafe_text_char);
+                ok.then_some(Playlist { list: p.list, title })
+            })
+            .collect(),
+    )
 }
 
 #[derive(Deserialize)]
@@ -323,7 +336,7 @@ fn parse(json: &str) -> Option<(State, Context, Option<usize>)> {
     }
     let p: Payload = serde_json::from_str(json).ok()?;
     let text =
-        |s: String| (s.chars().count() <= MAX_TEXT && !s.chars().any(char::is_control)).then(|| s.trim().to_owned());
+        |s: String| (s.chars().count() <= MAX_TEXT && !s.chars().any(unsafe_text_char)).then(|| s.trim().to_owned());
     let seconds = |x: f64| (x.is_finite() && (0.0..=MAX_SECONDS).contains(&x)).then_some(x);
     let id = match p.id {
         Some(id) if valid_id(&id) => Some(id),
@@ -331,13 +344,10 @@ fn parse(json: &str) -> Option<(State, Context, Option<usize>)> {
         None => None,
     };
     let title = text(p.title).filter(|t| !t.is_empty())?;
-    let artwork = match p.artwork {
-        Some(a) => Some(artwork(&a)?),
-        None => None,
-    };
+    let artwork = p.artwork.as_deref().and_then(artwork);
     let item = |i: QueueItem| {
         let short = |s: String| {
-            (s.chars().count() <= MAX_ITEM_TEXT && !s.chars().any(char::is_control)).then(|| s.trim().to_owned())
+            (s.chars().count() <= MAX_ITEM_TEXT && !s.chars().any(unsafe_text_char)).then(|| s.trim().to_owned())
         };
         Some(QueueItem { title: short(i.title)?, artist: short(i.artist)?, id: valid_id(&i.id).then_some(i.id)? })
     };
@@ -387,9 +397,25 @@ pub fn valid_id(id: &str) -> bool {
     crate::audio_facts::valid_id(id)
 }
 
+/// Whether `name` (or its stem before `.`) is a Windows reserved DOS device name.
+pub fn windows_reserved(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim();
+    let upper = stem.to_ascii_uppercase();
+    if matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+        return true;
+    }
+    let rest = upper.strip_prefix("COM").or_else(|| upper.strip_prefix("LPT"));
+    rest.is_some_and(|suffix| {
+        let mut chars = suffix.chars();
+        matches!(chars.next(), Some('1'..='9' | '¹' | '²' | '³')) && chars.next().is_none()
+    })
+}
+
 /// A playlist id: the `list=` of a URL.
 pub fn valid_list(list: &str) -> bool {
-    (1..=64).contains(&list.len()) && list.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    (1..=64).contains(&list.len())
+        && list.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && !windows_reserved(list)
 }
 
 /// The URL if it is an https URL on one of the image hosts (the mini player checks downloads with it too).
@@ -550,14 +576,19 @@ mod tests {
         assert!(parse(json).is_none());
         let many = format!(r#"{{"library":[{}]}}"#, vec![r#"{"list":"LM","title":"x"}"#; MAX_LIBRARY + 1].join(","));
         for bad in [
-            r#"{"library":[{"list":"../x","title":"x"}]}"#.to_owned(),
-            r#"{"library":[{"list":"LM","title":""}]}"#.to_owned(),
-            r#"{"library":[{"list":"LM","title":"a\u0007"}]}"#.to_owned(),
             r#"{"library":[{"list":"LM","title":"x","extra":1}]}"#.to_owned(),
             r#"{"library":[],"extra":1}"#.to_owned(),
             many,
         ] {
             assert!(parse_library(&bad).is_none(), "{bad}");
+        }
+        // Invalid single sidebar entries are dropped without discarding the valid ones.
+        let mixed =
+            r#"{"library":[{"list":"../x","title":"x"},{"list":"CON","title":"bad"},{"list":"LM","title":"Good"}]}"#;
+        assert_eq!(parse_library(mixed).unwrap(), vec![Playlist { list: "LM".into(), title: "Good".into() }]);
+
+        for reserved in ["CON", "con", "nul", "AUX", "PRN", "com1", "LPT9"] {
+            assert!(!valid_list(reserved), "{reserved}");
         }
 
         let player = Player::new();

@@ -206,6 +206,24 @@ pub fn step_done(app: &AppHandle, step: u8) {
     }
 }
 
+/// Whether the installer is currently running (the app is about to exit and restart).
+pub fn is_installing() -> bool {
+    INSTALLING.load(Ordering::Relaxed)
+}
+
+/// Dismisses the start screen without showing the main window (used when `show_main` runs early).
+pub fn dismiss(app: &AppHandle) {
+    if !ACTIVE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let _ = app.run_on_main_thread(|| {
+        let hwnd = WINDOW.load(Ordering::Relaxed);
+        if hwnd != 0 {
+            let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
+        }
+    });
+}
+
 fn finish(app: &AppHandle) {
     if !ACTIVE.swap(false, Ordering::Relaxed) {
         return;
@@ -216,7 +234,9 @@ fn finish(app: &AppHandle) {
         if hwnd != 0 {
             let _ = unsafe { DestroyWindow(HWND(hwnd as _)) };
         }
-        crate::show_main(&handle);
+        if !crate::miniplayer::is_open() {
+            crate::show_main(&handle);
+        }
     });
 }
 

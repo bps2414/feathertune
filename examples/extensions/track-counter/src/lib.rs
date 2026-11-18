@@ -20,6 +20,9 @@ fn on_event(event: Event) {
             count()
         )),
         Some("track") => {
+            if event["state"]["ad"].as_bool().unwrap_or(false) {
+                return;
+            }
             let n = count() + 1;
             if let Err(e) = storage::set("count", json!(n)) {
                 feathertune_ext::error(&e);

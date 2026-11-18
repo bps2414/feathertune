@@ -191,6 +191,7 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle().clone();
             let launcher = launcher && splash::show(&handle, profile.clone());
+            wasm::start(app.handle());
             let window = WindowBuilder::new(app, "main")
                 .title("feathertune")
                 .inner_size(1280.0, 800.0)
@@ -276,7 +277,6 @@ fn main() {
             if live.plugin("listening_stats") {
                 stats::start(app.handle(), &profile);
             }
-            wasm::start(app.handle());
             // Managed even when off: the settings window lists the paired phones. No socket until it is on.
             app.manage(remote::Remote::new(app.handle(), &profile));
             let handle = app.handle().clone();
@@ -344,8 +344,12 @@ fn allowed(url: &Url) -> bool {
     // Sign-in domain and its country variants (.com.br, .co.uk).
     host.strip_prefix("google.").is_some_and(|tld| {
         let parts: Vec<&str> = tld.split('.').collect();
-        parts.len() <= 2
-            && parts.iter().all(|p| (2..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_lowercase()))
+        parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_lowercase()))
+            && match parts.as_slice() {
+                [one] => (2..=3).contains(&one.len()),
+                ["com" | "co" | "ne" | "or", cc] => cc.len() == 2,
+                _ => false,
+            }
     })
 }
 
@@ -534,11 +538,21 @@ pub(crate) fn sync_autostart_item(app: &AppHandle) {
 }
 
 fn toggle(app: &AppHandle) {
+    if splash::is_installing() {
+        return;
+    }
     let visible = app.get_window("main").is_some_and(|w| w.is_visible().unwrap_or(false));
+    if !visible {
+        splash::dismiss(app);
+    }
     set_hidden(app, visible);
 }
 
 pub(crate) fn show_main(app: &AppHandle) {
+    if splash::is_installing() {
+        return;
+    }
+    splash::dismiss(app);
     set_hidden(app, false);
     settings_window::show_whats_new(app);
 }
@@ -618,6 +632,11 @@ pub(crate) fn set_hidden(app: &AppHandle, hidden: bool) {
     if hidden {
         // The stage ends with the window shown (stage.rs); first, so the window leaves fullscreen visible.
         stage::close(app);
+        // Leave site fullscreen synchronously before hide(), else WebView2's async exit fires later
+        // and tao::set_fullscreen(false) pops the hidden window back up.
+        if titlebar::is_fullscreen() {
+            titlebar::set_fullscreen(&window, false);
+        }
         // A page left in fullscreen would keep the window fullscreen (titlebar.rs) once it is back.
         let _ = site.eval("document.fullscreenElement && document.exitFullscreen()");
         let _ = window.hide();
@@ -817,6 +836,29 @@ mod tests {
         assert_eq!(open_playlist_call("PLx_1-2").as_deref(), Some(r#"openPlaylist("PLx_1-2")"#));
         for bad in ["", "a\"b", "../x", "a b", &"a".repeat(65)] {
             assert_eq!(open_playlist_call(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn allowed_navigation_restricts_google_tlds() {
+        for ok in [
+            "https://music.youtube.com/",
+            "https://accounts.google.com/ServiceLogin",
+            "https://accounts.google.com.br/",
+            "https://www.google.co.uk/",
+            "https://consent.google.de/",
+        ] {
+            assert!(allowed(&ok.parse().unwrap()), "{ok}");
+        }
+        for bad in [
+            "http://music.youtube.com/",
+            "http://accounts.google.com/",
+            "https://google.abc.com/",
+            "https://accounts.google.xyz.io/",
+            "https://notgoogle.com/",
+            "https://google.com.abcd/",
+        ] {
+            assert!(!allowed(&bad.parse().unwrap()), "{bad}");
         }
     }
 }

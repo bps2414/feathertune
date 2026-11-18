@@ -442,6 +442,10 @@ pub fn install(app: &AppHandle, window: &Window, site: &Webview) -> tauri::Resul
 /// WM_NCCALCSIZE and WM_SIZE that change brings already see it; the window's own state decides whether it
 /// changes (a flag left behind by an earlier path must not skip it), and the site is laid out again
 /// either way.
+pub(crate) fn is_fullscreen() -> bool {
+    FULLSCREEN.load(Ordering::Relaxed)
+}
+
 pub(crate) fn set_fullscreen(window: &Window, on: bool) {
     FULLSCREEN.store(on, Ordering::Relaxed);
     if window.is_fullscreen().ok() != Some(on) {

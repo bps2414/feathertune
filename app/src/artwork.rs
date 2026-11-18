@@ -24,6 +24,8 @@ use windows::core::{Error, Result};
 
 /// Decoded artwork side in pixels: the 80 DIP square of the mini player at up to 200% scale.
 const ART_PIXELS: u32 = 160;
+const MAX_SOURCE_SIDE: u32 = 8192;
+const MAX_SCALED_SIDE: f32 = 1024.0;
 const MAX_ART_BYTES: u64 = 4 * 1024 * 1024;
 
 pub struct Art {
@@ -36,12 +38,11 @@ pub struct Art {
 
 static LAST: Mutex<Option<Arc<Art>>> = Mutex::new(None);
 
-/// The decoded cover of `url`. Concurrent callers for different covers wait for each other.
+/// The decoded cover of `url`.
 pub fn load(url: &str) -> std::result::Result<Arc<Art>, String> {
     // Same check as the page payload: https on one of the site's image hosts, nothing else.
     let url = crate::player::artwork(url).ok_or("not an artwork URL")?;
-    let mut last = LAST.lock().unwrap();
-    if let Some(art) = last.as_ref().filter(|a| a.url == url) {
+    if let Some(art) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|a| a.url == url) {
         return Ok(art.clone());
     }
     let mut response = agent().get(&url).call().map_err(|e| e.to_string())?;
@@ -51,7 +52,7 @@ pub fn load(url: &str) -> std::result::Result<Arc<Art>, String> {
     let bytes = response.body_mut().with_config().limit(MAX_ART_BYTES).read_to_vec().map_err(|e| e.to_string())?;
     let (width, height, pixels) = decode(&bytes).map_err(|e| e.to_string())?;
     let art = Arc::new(Art { url, width, height, pixels });
-    *last = Some(art.clone());
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(art.clone());
     Ok(art)
 }
 
@@ -90,10 +91,10 @@ fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
         let frame = decoder.GetFrame(0)?;
         let (mut w, mut h) = (0, 0);
         frame.GetSize(&mut w, &mut h)?;
-        if w == 0 || h == 0 {
+        if w == 0 || h == 0 || w > MAX_SOURCE_SIDE || h > MAX_SOURCE_SIDE {
             return Err(Error::from_hresult(E_FAIL));
         }
-        let fit = (ART_PIXELS as f32 / w.min(h) as f32).min(1.0);
+        let fit = (ART_PIXELS as f32 / w.min(h) as f32).min(MAX_SCALED_SIDE / w.max(h) as f32).min(1.0);
         let (w, h) = (((w as f32 * fit).round() as u32).max(1), ((h as f32 * fit).round() as u32).max(1));
         let scaler = wic.CreateBitmapScaler()?;
         scaler.Initialize(&frame, w, h, WICBitmapInterpolationModeFant)?;
@@ -106,7 +107,11 @@ fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
             0.0,
             WICBitmapPaletteTypeCustom,
         )?;
-        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        let len = (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+        let mut pixels = vec![0u8; len];
         converter.CopyPixels(std::ptr::null(), w * 4, &mut pixels)?;
         Ok((w, h, pixels))
     }
@@ -236,6 +241,7 @@ fn halo_pixels(src: &[u8], n: usize, sigma: f32, saturation: f32, brightness: f3
 /// Encodes top-down BGRA pixels (straight alpha) as PNG.
 pub fn png(pixels: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let stream = SHCreateMemStream(None).ok_or_else(|| Error::from_hresult(E_FAIL))?;
         let encoder = wic.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
@@ -284,5 +290,21 @@ mod tests {
         // Brightness scales the color only.
         let dark = halo_pixels(&src, n, 1.5, 1.0, 0.5, 0.45);
         assert_eq!(&dark[(n / 2 * n + n / 2) * 4..][..4], [20, 40, 100, 255]);
+    }
+
+    #[test]
+    fn png_round_trips_and_decode_rejects_oversized_frames() {
+        let src = [40u8, 80, 200, 255].repeat(4 * 4);
+        let bytes = png(&src, 4, 4).unwrap();
+        let (w, h, out) = decode(&bytes).unwrap();
+        assert_eq!((w, h, out.len()), (4, 4, 64));
+
+        // Craft a 10000x10000 PNG IHDR and confirm decode rejects before WIC allocates gigabytes.
+        let mut big = bytes.clone();
+        if big.len() > 24 {
+            big[16..20].copy_from_slice(&10_000u32.to_be_bytes());
+            big[20..24].copy_from_slice(&10_000u32.to_be_bytes());
+            assert!(decode(&big).is_err());
+        }
     }
 }

@@ -12,7 +12,7 @@
 //!   days and hours are local, from the offset the settings page passes.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -28,6 +28,7 @@ const MIN_RECORD: Duration = Duration::from_secs(10);
 const PLAY_SECONDS: f64 = 30.0;
 const TOP: usize = 10;
 const DAY: i64 = 86_400;
+const MIN_UNIX: i64 = 1_577_836_800; // 2020-01-01
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Record {
@@ -93,10 +94,15 @@ impl Listen {
 pub struct Stats {
     path: PathBuf,
     current: Mutex<Option<Listen>>,
+    file: Mutex<()>,
 }
 
 pub fn start(app: &AppHandle, profile: &std::path::Path) {
-    app.manage(Stats { path: profile.join("stats").join("plays.jsonl"), current: Mutex::new(None) });
+    app.manage(Stats {
+        path: profile.join("stats").join("plays.jsonl"),
+        current: Mutex::new(None),
+        file: Mutex::new(()),
+    });
     let mut rx = app.state::<Player>().subscribe();
     let app = app.clone();
     std::thread::spawn(move || {
@@ -124,6 +130,14 @@ impl Stats {
     fn handle(&self, event: &Event) {
         let state = event.state();
         let mut current = self.current.lock().unwrap();
+        if state.ad {
+            if let Some(l) = current.as_mut()
+                && let Some(since) = l.since.take()
+            {
+                l.played += since.elapsed();
+            }
+            return;
+        }
         let restart = match (event, current.as_ref()) {
             (Event::Track(_), _) | (_, None) => true,
             // Same track, back near the start after a real listen: it plays again (repeat one).
@@ -159,13 +173,15 @@ impl Stats {
     }
 
     fn append(&self, record: &Record) {
-        let Ok(line) = serde_json::to_string(record) else { return };
+        let Ok(mut line) = serde_json::to_string(record) else { return };
+        line.push('\n');
+        let _guard = self.file.lock().unwrap();
         let write = || -> std::io::Result<()> {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
             let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
-            writeln!(file, "{line}")
+            file.write_all(line.as_bytes())
         };
         if let Err(e) = write() {
             eprintln!("stats: listen not written: {e}");
@@ -174,8 +190,18 @@ impl Stats {
 
     /// Every record, the listen in progress last. Lines that do not parse are skipped.
     fn records(&self) -> Vec<Record> {
-        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
-        let mut records: Vec<Record> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let _guard = self.file.lock().unwrap();
+        let mut records: Vec<Record> = std::fs::File::open(&self.path)
+            .ok()
+            .map(|f| {
+                std::io::BufReader::new(f)
+                    .lines()
+                    .map_while(Result::ok)
+                    .filter_map(|l| serde_json::from_str(&l).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        drop(_guard);
         if let Some(r) = self.current.lock().unwrap().as_ref().and_then(Listen::finished) {
             records.push(r);
         }
@@ -184,6 +210,7 @@ impl Stats {
 
     /// Removes the history and forgets the listen in progress.
     pub fn clear(&self) -> Result<(), String> {
+        let _guard = self.file.lock().unwrap();
         *self.current.lock().unwrap() = None;
         match std::fs::remove_file(&self.path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove the history: {e}")),
@@ -193,7 +220,14 @@ impl Stats {
 
     /// Writes the history as CSV to `path`.
     pub fn export(&self, path: &std::path::Path) -> Result<(), String> {
-        let csv = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let csv = |s: &str| {
+            let safe = if matches!(s.as_bytes().first(), Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r')) {
+                format!("'{s}")
+            } else {
+                s.to_owned()
+            };
+            format!("\"{}\"", safe.replace('"', "\"\""))
+        };
         let mut out = String::from("started_utc,title,artist,album,length_s,played_s\n");
         for r in self.records() {
             out.push_str(&format!(
@@ -213,15 +247,23 @@ impl Stats {
     /// (`week`, `month`, `year` or `all`). `offset` is the page's `Date.getTimezoneOffset()` (minutes).
     pub fn summary(&self, range: &str, offset: i64) -> Value {
         let records = self.records();
-        let local = |at: i64| at - offset * 60;
-        let today = local(unix_secs()).div_euclid(DAY);
+        let now = unix_secs().max(MIN_UNIX);
+        let max_unix = now.saturating_add(DAY);
+        let local = |at: i64| at.clamp(MIN_UNIX, max_unix).saturating_sub(offset.saturating_mul(60));
+        let today = local(now).div_euclid(DAY);
         let first_day = match range {
             "week" => today - 6,
             "month" => today - 29,
             "year" => today - 364,
-            _ => records.iter().map(|r| local(r.at).div_euclid(DAY)).min().unwrap_or(today),
+            _ => records.iter().map(|r| local(r.at).div_euclid(DAY)).min().unwrap_or(today).min(today),
         };
-        let in_range: Vec<&Record> = records.iter().filter(|r| local(r.at).div_euclid(DAY) >= first_day).collect();
+        let in_range: Vec<&Record> = records
+            .iter()
+            .filter(|r| {
+                let d = local(r.at).div_euclid(DAY);
+                d >= first_day && d <= today
+            })
+            .collect();
 
         let mut seconds = 0u64;
         let mut plays = 0u32;
@@ -273,6 +315,7 @@ impl Stats {
             }
         };
         let (from, to) = (bucket(first_day), bucket(today));
+        let to = to.max(from);
         let mut series: Vec<(i64, u64)> = (from..=to).map(|k| (k, 0)).collect();
         for r in &in_range {
             if let Some(e) = series.get_mut((bucket(local(r.at).div_euclid(DAY)) - from) as usize) {
@@ -324,7 +367,7 @@ impl Stats {
             "new_artist_names": new_artists.iter().take(5).map(|(n, _)| *n).collect::<Vec<_>>(),
             "streak": current,
             "longest_streak": longest,
-            "since": records.iter().map(|r| r.at).min(),
+            "since": records.iter().map(|r| r.at.clamp(MIN_UNIX, max_unix)).min(),
             "series": series,
             "heat": heat,
             "top_artists": top_artists,
@@ -357,4 +400,62 @@ fn civil(days: i64) -> (i64, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
     (year, month as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::player::Track;
+
+    fn test_state(ad: bool) -> State {
+        State {
+            track: Track {
+                id: None,
+                title: "=SUM(1,1)".into(),
+                artist: "Artist".into(),
+                album: String::new(),
+                artwork: None,
+                duration: 120.0,
+            },
+            position: 0.0,
+            paused: false,
+            volume: 100,
+            muted: false,
+            ad,
+            at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn ads_do_not_start_or_count_in_stats_and_csv_escapes_formulas() {
+        let dir = std::env::temp_dir().join(format!("feathertune-stats-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("plays.jsonl");
+        let stats = Stats { path: path.clone(), current: Mutex::new(None), file: Mutex::new(()) };
+
+        stats.handle(&Event::Track(test_state(true)));
+        assert!(stats.current.lock().unwrap().is_none());
+
+        stats.handle(&Event::Track(test_state(false)));
+        assert!(stats.current.lock().unwrap().as_ref().unwrap().since.is_some());
+        stats.handle(&Event::Progress(test_state(true)));
+        assert!(stats.current.lock().unwrap().as_ref().unwrap().since.is_none());
+
+        // Extreme negative timestamp in plays.jsonl must not cause unbounded bucket allocation.
+        stats.append(&Record {
+            at: -999_999_999_999_999,
+            title: "=cmd|'/c calc'!A0".into(),
+            artist: "A".into(),
+            album: String::new(),
+            duration: 100,
+            played: 50,
+        });
+        let summary = stats.summary("all", 0);
+        assert_eq!(summary["plays"], 1);
+        let csv_path = dir.join("export.csv");
+        stats.export(&csv_path).unwrap();
+        let csv = std::fs::read_to_string(&csv_path).unwrap();
+        assert!(csv.contains("\"'=cmd|'/c calc'!A0\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

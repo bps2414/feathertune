@@ -42,6 +42,8 @@ const RETRY: Duration = Duration::from_secs(300);
 const MAX_AGE_SECS: u64 = 14 * 24 * 3600;
 /// Kept below 10 so the `artist[n]` parameter names sort the same as numbers.
 const BATCH: usize = 10;
+const MAX_QUEUE: usize = 1000;
+const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 const AUTH_POLL: Duration = Duration::from_secs(5);
 const AUTH_POLLS: u32 = 60;
 const BUILT_IN_KEY: Option<&str> = option_env!("FEATHERTUNE_LASTFM_API_KEY");
@@ -107,6 +109,7 @@ pub fn start(app: &AppHandle, settings: &Settings, profile: &Path) -> Option<Las
                 TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build(),
             )
             .user_agent(concat!("feathertune/", env!("CARGO_PKG_VERSION")))
+            .max_redirects(0)
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(15)))
             .build(),
@@ -159,16 +162,22 @@ impl LastFm {
     }
 
     fn set_session(&self, key: Option<String>) {
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-            let result = match &key {
-                Some(k) => entry.set_password(k),
-                None => entry.delete_credential(),
-            };
-            if let Err(e) = result
-                && !matches!(e, keyring::Error::NoEntry)
-            {
-                eprintln!("lastfm: credential store failed: {e}");
+        let entry = match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
+            Ok(e) => e,
+            Err(e) => {
+                crate::diag::log("lastfm", format_args!("credential store unavailable: {e}"));
+                return;
             }
+        };
+        let result = match &key {
+            Some(k) => entry.set_password(k),
+            None => entry
+                .delete_credential()
+                .or_else(|e| if matches!(e, keyring::Error::NoEntry) { Ok(()) } else { Err(e) }),
+        };
+        if let Err(e) = result {
+            crate::diag::log("lastfm", format_args!("credential store failed: {e}"));
+            return;
         }
         let changed = {
             let mut session = self.0.session.lock().unwrap();
@@ -238,7 +247,12 @@ impl LastFm {
             .send_form(params.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .map_err(|e| Error::Network(e.to_string()))?;
         let status = response.status().as_u16();
-        let body = response.body_mut().read_to_string().map_err(|e| Error::Network(e.to_string()))?;
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_RESPONSE_BYTES)
+            .read_to_string()
+            .map_err(|e| Error::Network(e.to_string()))?;
         let json: Value = serde_json::from_str(&body).map_err(|_| Error::Network(format!("HTTP {status}")))?;
         match json["error"].as_i64() {
             Some(code) => Err(Error::Api(code, json["message"].as_str().unwrap_or_default().to_owned())),
@@ -262,7 +276,7 @@ impl LastFm {
 
     /// A rejected session key means the user must sign in again.
     fn report(&self, e: &Error) {
-        eprintln!("lastfm: {e}");
+        crate::diag::log("lastfm", e);
         if matches!(e, Error::Api(9, _)) {
             self.set_session(None);
         }
@@ -309,6 +323,12 @@ impl LastFm {
 
     fn handle(&self, event: &Event, tracking: &mut Option<Tracking>) {
         let state = event.state();
+        if state.ad {
+            if let Some(t) = tracking.as_mut() {
+                t.pause();
+            }
+            return;
+        }
         let restart = match (event, tracking.as_ref()) {
             (Event::Track(_), _) | (_, None) => true,
             // Same track, but the position went back after the scrobble: it is playing again
@@ -323,7 +343,7 @@ impl LastFm {
             return;
         }
         let Some(t) = tracking.as_mut() else { return };
-        if matches!(event, Event::Playback(_)) {
+        if matches!(event, Event::Playback(_)) || (!state.paused && t.since.is_none()) {
             t.last = state.clone();
             if state.paused {
                 t.pause();
@@ -337,6 +357,9 @@ impl LastFm {
     }
 
     fn begin(&self, state: &State, tracking: &mut Option<Tracking>) {
+        if state.ad {
+            return;
+        }
         let t = Tracking::new(state);
         if !state.paused {
             self.update_now_playing(&t);
@@ -369,7 +392,7 @@ impl LastFm {
                     break;
                 }
                 Err(e) => {
-                    eprintln!("lastfm: dropping {n} scrobbles: {e}");
+                    crate::diag::log("lastfm", format_args!("dropping {n} scrobbles: {e}"));
                     queue.remove(n);
                 }
             }
@@ -471,6 +494,10 @@ impl Queue {
     }
 
     fn push(&mut self, s: Scrobble) {
+        if self.items.len() >= MAX_QUEUE {
+            let drop = self.items.len() + 1 - MAX_QUEUE;
+            self.items.drain(..drop);
+        }
         self.items.push(s);
         self.save();
     }
@@ -496,10 +523,10 @@ impl Queue {
         } else {
             serde_json::to_vec(&self.items)
                 .map_err(std::io::Error::other)
-                .and_then(|data| std::fs::write(&self.path, data))
+                .and_then(|data| crate::settings::write_atomic(&self.path, data))
         };
         if let Err(e) = result {
-            eprintln!("lastfm: could not save the queue: {e}");
+            crate::diag::log("lastfm", format_args!("could not save the queue: {e}"));
         }
     }
 }
@@ -583,5 +610,29 @@ mod tests {
         queue.prune();
         assert_eq!(queue.items.len(), 1);
         let _ = std::fs::remove_file(&queue.path);
+    }
+
+    #[test]
+    fn ads_never_start_or_advance_scrobble_tracking() {
+        let lastfm = LastFm(Arc::new(Inner {
+            api_key: String::new(),
+            secret: String::new(),
+            agent: ureq::Agent::new_with_defaults(),
+            session: Mutex::new(None),
+            authenticating: AtomicBool::new(false),
+            on_change: Mutex::new(None),
+        }));
+        let mut tracking = None;
+        let mut ad = state(120.0, false);
+        ad.ad = true;
+        lastfm.handle(&Event::Track(ad.clone()), &mut tracking);
+        assert!(tracking.is_none());
+
+        lastfm.handle(&Event::Track(state(120.0, false)), &mut tracking);
+        assert!(tracking.as_ref().unwrap().since.is_some());
+        lastfm.handle(&Event::Progress(ad), &mut tracking);
+        assert!(tracking.as_ref().unwrap().since.is_none());
+        lastfm.handle(&Event::Progress(state(120.0, false)), &mut tracking);
+        assert!(tracking.as_ref().unwrap().since.is_some());
     }
 }

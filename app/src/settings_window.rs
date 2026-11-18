@@ -602,13 +602,17 @@ pub fn settings_action(webview: Webview, app: AppHandle, action: String) -> Resu
 
 /// The Stats tab: see `Stats::summary`. `offset` is the page's time zone offset in minutes.
 #[tauri::command]
-pub fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i64) -> Result<Value, String> {
+pub async fn settings_stats(webview: Webview, app: AppHandle, range: String, offset: i64) -> Result<Value, String> {
     guard(&webview)?;
     if !matches!(range.as_str(), "week" | "month" | "year" | "all") || !(-1440..=1440).contains(&offset) {
         return Err("invalid range".into());
     }
-    let stats = app.try_state::<Stats>().ok_or(t("Listening stats are not running; turn them on and restart"))?;
-    Ok(stats.summary(&range, offset))
+    tauri::async_runtime::spawn_blocking(move || {
+        let stats = app.try_state::<Stats>().ok_or(t("Listening stats are not running; turn them on and restart"))?;
+        Ok(stats.summary(&range, offset))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 const NOT_LISTENING: &str = "The phone remote is not listening, so no phone can connect. The port may be in use: \
@@ -759,6 +763,9 @@ pub fn settings_extensions(webview: Webview, app: AppHandle, op: String, arg: Va
         "remove" => {
             let id = id()?;
             extensions.remove(id)?;
+            if let Err(e) = live.clear_extension(id) {
+                crate::diag::log("extensions", format_args!("could not clear {id} from config: {e}"));
+            }
             Ok(Value::Null)
         }
         "open_folder" => {

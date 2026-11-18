@@ -28,13 +28,14 @@ const offsetOf = (video) => {
     if (Number.isFinite(t) && Number.isFinite(video.currentTime)) {
       const o = Math.max(0, video.currentTime - t);
       if (Math.abs(o - trackOffset) > 1) trackOffset = o < 1 ? 0 : o;
+      else if (!video.paused && t > 2 && Math.abs(o - trackOffset) > 0.02) trackOffset = o;
     }
   } catch {}
   return trackOffset;
 };
 feathertune.clock = Object.freeze({
   // The track's time (s) at the video's time now.
-  time: (video) => video.currentTime - offsetOf(video),
+  time: (video) => Math.max(0, video.currentTime - offsetOf(video)),
   // The track's length (s): the player's checked against the queue's, else the queue's, else the
   // video's (no queue appended after it).
   duration: (video) => {
@@ -80,9 +81,20 @@ let lastWhere = '';
 let lastAd = false;
 let video = null;
 
+const cleanText = (s, max) =>
+  String(s || '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '')
+    .trim()
+    .slice(0, max);
+
 const adShowing = () => {
   const p = document.querySelector(SELECTORS.player);
-  return !!p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
+  if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) return true;
+  try {
+    return document.querySelector(SELECTORS.playerBar)?.getState?.()?.player?.adPlaying === true;
+  } catch {
+    return false;
+  }
 };
 
 // The player's own volume (0-100) and mute, through its public API; the video's when that is missing.
@@ -103,7 +115,9 @@ const videoId = () => {
   try {
     id = document.querySelector(SELECTORS.player)?.getVideoData?.()?.video_id;
   } catch {}
-  return typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : new URLSearchParams(location.search).get('v');
+  if (typeof id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(id)) return id;
+  const fromUrl = new URLSearchParams(location.search).get('v');
+  return typeof fromUrl === 'string' && /^[A-Za-z0-9_-]{11}$/.test(fromUrl) ? fromUrl : null;
 };
 
 // The track's length: the player's. While the player has none (between tracks) it is 0 (unknown) and not
@@ -133,20 +147,22 @@ const lengthSeconds = (r) => {
 // While an ad plays the <video> is the ad's, so its duration is not the track's: it goes as 0 (unknown).
 const read = (video) => {
   const m = navigator.mediaSession?.metadata;
-  if (!m || !m.title) return null;
+  const title = cleanText(m?.title, 512);
+  if (!title) return null;
   const art = m.artwork?.length ? m.artwork[m.artwork.length - 1].src : null;
   const id = videoId();
+  const ad = adShowing();
   const num = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : 0);
   return {
     ...volumeOf(video),
-    ad: adShowing(),
+    ad,
     id,
-    title: m.title,
-    artist: m.artist || '',
-    album: m.album || '',
+    title,
+    artist: cleanText(m.artist, 512),
+    album: cleanText(m.album, 512),
     artwork: art,
-    duration: adShowing() ? 0 : num(trusted(lengthOf(video), id)),
-    position: num(feathertune.clock.time(video)),
+    duration: ad ? 0 : num(trusted(lengthOf(video), id)),
+    position: Math.max(0, num(feathertune.clock.time(video))),
     paused: video.paused,
   };
 };
@@ -155,7 +171,7 @@ const read = (video) => {
 const item = (entry) => {
   const r =
     entry?.playlistPanelVideoRenderer || entry?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
-  const text = (t) => (t?.runs || []).map((x) => x.text).join('').slice(0, 200);
+  const text = (t) => cleanText((t?.runs || []).map((x) => x.text).join(''), 200);
   if (!r?.videoId || !/^[A-Za-z0-9_-]{11}$/.test(r.videoId)) return null;
   return { id: r.videoId, title: text(r.title), artist: text(r.shortBylineText || r.longBylineText).split(' • ')[0] };
 };
@@ -258,9 +274,10 @@ const playlist = (entry) => {
     list = new URLSearchParams(href.split('?')[1] || '').get('list') || (href.match(/browse\/VL([A-Za-z0-9_-]+)/) || [])[1];
   }
   const runs = entry.data?.formattedTitle?.runs;
-  const title = (Array.isArray(runs) ? runs.map((r) => r.text).join('') : entry.querySelector('.title')?.textContent || '')
-    .trim()
-    .slice(0, 200);
+  const title = cleanText(
+    Array.isArray(runs) ? runs.map((r) => r.text).join('') : entry.querySelector('.title')?.textContent || '',
+    200,
+  );
   return list && /^[A-Za-z0-9_-]{1,64}$/.test(list) && title ? { list, title } : null;
 };
 let lastLibrary = '';

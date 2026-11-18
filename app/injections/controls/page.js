@@ -32,7 +32,14 @@ const paused = () => document.querySelector(SELECTORS.video)?.paused ?? true;
 
 const adShowing = () => {
   const player = document.querySelector(SELECTORS.player);
-  return !!player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
+  if (!player) return true;
+  if (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')) return true;
+  if (feathertune.ad?.showing?.()) return true;
+  try {
+    return document.querySelector('ytmusic-player-bar')?.getState?.()?.player?.adPlaying === true;
+  } catch {
+    return false;
+  }
 };
 
 // The global volume keys. precise_volume does it when it is loaded (2% and the percentage on screen).
@@ -191,6 +198,9 @@ window.addEventListener('beforeunload', (e) => leaving && e.stopImmediatePropaga
 const openPlaylist = (list) => {
   if (typeof list !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(list) || adShowing()) return false;
   leaving = true;
+  setTimeout(() => {
+    leaving = false;
+  }, 1000);
   location.assign(`/watch?list=${list}`);
   return true;
 };
@@ -199,8 +209,8 @@ feathertune.controls = Object.freeze({
   playPause: () => click('playPause'),
   play: () => paused() && click('playPause'),
   pause: () => !paused() && click('playPause'),
-  next: () => click('next'),
-  previous: () => click('previous'),
+  next: () => !adShowing() && click('next'),
+  previous: () => !adShowing() && click('previous'),
   volumeUp: () => volume(1),
   volumeDown: () => volume(-1),
   seek,

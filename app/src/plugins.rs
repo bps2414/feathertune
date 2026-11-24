@@ -159,7 +159,8 @@ pub const PLUGINS: &[Plugin] = &[
                       from the title bar or the tray; Esc leaves. It steps aside at once while an ad plays.",
         cost: "Not measured yet. Closed, only the lyrics lookup it shares with Synced lyrics; open, one animation \
                timer while the track plays.",
-        default_on: true,
+        // Experimental: off until it is reliable; its title bar button shows after a restart with it on.
+        default_on: false,
         live: false,
         legacy: None,
     },

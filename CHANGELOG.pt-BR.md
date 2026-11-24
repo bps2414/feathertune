@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.2.1 — 2026-11-23
+
+- **O Palco agora é Experimental:** vem desligado e o botão dele some da barra de título até você ligá-lo nas configurações e reiniciar o app. Se você usava, ligue de novo nas configurações.
+
 ## 1.2.0 — 2026-11-17
 
 - **Palco: a letra em tela cheia dirigida** (Letras): abra o Palco pela aba Letras ou pela barra de título para ver a letra em tela cheia com palavras nascendo junto com a voz, cenas variadas, lados de dueto, cortes instrumentais, linhas em eco e um tema claro de papel além do escuro.

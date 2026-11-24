@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.2.1 — 2026-11-23
+
+- **Stage is now Experimental:** it starts off and its title bar button is gone until you turn it on in the settings and restart the app. If you used it, turn it back on in the settings.
+
 ## 1.2.0 — 2026-11-17
 
 - **Stage: a full-screen lyrics show** (Lyrics): open Stage from the Lyrics tab or the title bar for a directed full-screen view with words born with the voice, varied scene layouts, duet sides, instrumental cuts, echo lines and a light paper look alongside the dark one.

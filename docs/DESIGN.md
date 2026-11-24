@@ -82,7 +82,7 @@ Cost = the plugin on against off (`measure-plugins.ps1`, window open, 3 runs eac
 | `themed_tray_menu` | on | inside the noise while closed (−2.2 points, −4 MB private) |
 | `desktop_lyrics` | on (opened from the tray) | closed: inside the noise (+3.4 points, +1 MB). Open: 5.6% CPU, 519 MB private, 764 MB WS (see below) |
 | `share_lyrics` | on (opened from the title bar, the tray or settings) | closed: inside the noise (−0.2 points, +1 MB). Open: 5.2% CPU, 535 MB private, 770 MB WS |
-| `stage` | on (opened from the title bar or the tray) | not measured yet; closed, only the lyrics lookup it shares with `synced_lyrics`; open, one animation frame loop while the track plays |
+| `stage` | off (Experimental; opened from the title bar or the tray, the button shows after a restart with it on) | not measured yet; closed, only the lyrics lookup it shares with `synced_lyrics`; open, one animation frame loop while the track plays |
 | `listening_stats` | on | inside the noise (0.0 points, −2 MB) |
 | `navigation` | on (live) | inside the noise (+0.3 points, −4 MB) |
 | `song_mode` | on | inside the noise on this track (+1.6 points, +1 MB) |

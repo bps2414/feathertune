@@ -55,7 +55,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Lyrics translation: a line-by-line translation under each lyric line (into Windows' language by default), the source's own when it has one, else a machine translation made for lyrics; also on the floating lyrics and the mini player.
 - Floating lyrics: the current line over the desktop, click-through, word by word when the lyrics have word times.
 - Share lyrics as a picture card, from a title bar button: pick any lines (skip the ones you don't want), choose a look, copy or save it.
-- Stage: the synced lyrics as a full-screen show, from a title bar button or the tray: an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, each word born as it is sung, pieces from lyric edits and duets with a side per singer, cut on the beat when the track was analyzed and colored by the cover; it steps aside at once for ads. Esc leaves.
+- Stage (experimental): the synced lyrics as a full-screen show, from a title bar button or the tray once it is on (after a restart): an opening, close-ups, editorial type, the chorus, instrumental breaks and credits, each word born as it is sung, pieces from lyric edits and duets with a side per singer, cut on the beat when the track was analyzed and colored by the cover; it steps aside at once for ads. Esc leaves.
 - The mini player can show the lyrics too: the current line, word by word, and the next one.
 
 **Sound**
@@ -74,7 +74,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - Game mode: a title bar button that turns off at once the features measured as the costliest (synced lyrics in the page, ambient mode, floating and share lyrics windows), and brings them back with a second click.
 - A privacy filter for third-party analytics (never ads).
 - Export diagnostics (Settings > About): a text file to send when something goes wrong.
-- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, phone remote), which start off and are marked Experimental on the page of their subject. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
+- Every feature is on out of the box and is a plugin you can switch off in the settings window, except the experimental ones (crossfade and mixes, skip silence, track analysis, lyric colors, lyrics on the beat, stage, phone remote), which start off and are marked Experimental on the page of their subject. After an update the settings open on what changed. Animations follow those switches, not Windows' animation effects, and pause while the window is hidden, minimized or in the background.
 
 **Beyond the PC**
 - Phone remote (highly experimental preview): an Android app, paired once with a QR code confirmed on the PC, shows what plays, the artwork and the queue, and controls play/pause, next/previous, seek, live volume, tap-to-play, queue editing (play next, remove) and playing a playlist of your library. Local network only, end-to-end encrypted (Noise Protocol), never during an ad except pause. The APK is attached to each release; the app is in [mobile/](mobile/README.md), the protocol in [docs/REMOTE.md](docs/REMOTE.md).
@@ -129,7 +129,7 @@ taskbar_controls = true       # buttons on the taskbar thumbnail, progress on th
 themed_tray_menu = true       # tray menu in the app's look; false: the Windows menu
 desktop_lyrics = true         # floating lyrics over the desktop (open it from the tray)
 share_lyrics = true           # lyrics picture cards (open it from the tray)
-stage = true                  # a full-screen show over the lyrics (title bar or tray; Esc leaves)
+stage = false                 # experimental; a full-screen show over the lyrics (title bar or tray after a restart; Esc leaves)
 listening_stats = true        # history in stats/plays.jsonl in the profile, shown on the Stats page of the settings
 navigation = true             # back and forward buttons on the title bar
 song_mode = true              # picks the song version of a track that also has a video

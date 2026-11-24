@@ -82,7 +82,7 @@ Custo = o plugin ligado contra desligado (`measure-plugins.ps1`, janela aberta, 
 | `themed_tray_menu` | ligado | dentro do ruído enquanto fechado (−2,2 pontos, −4 MB privados) |
 | `desktop_lyrics` | ligado (aberta pela bandeja) | fechada: dentro do ruído (+3,4 pontos, +1 MB). Aberta: 5,6% de CPU, 519 MB privados, 764 MB de WS (veja abaixo) |
 | `share_lyrics` | ligado (aberto pela barra de título, bandeja ou configurações) | fechado: dentro do ruído (−0,2 pontos, +1 MB). Aberto: 5,2% de CPU, 535 MB privados, 770 MB de WS |
-| `stage` | ligado (aberto pela barra de título ou pela bandeja) | ainda não medido; fechado, só a busca de letra que divide com o `synced_lyrics`; aberto, um loop de quadros de animação enquanto a faixa toca |
+| `stage` | desligado (Experimental; aberto pela barra de título ou pela bandeja, o botão aparece depois de reiniciar com ele ligado) | ainda não medido; fechado, só a busca de letra que divide com o `synced_lyrics`; aberto, um loop de quadros de animação enquanto a faixa toca |
 | `listening_stats` | ligado | dentro do ruído (0,0 pontos, −2 MB) |
 | `navigation` | ligado (ao vivo) | dentro do ruído (+0,3 pontos, −4 MB) |
 | `song_mode` | ligado | dentro do ruído nesta faixa (+1,6 pontos, +1 MB) |

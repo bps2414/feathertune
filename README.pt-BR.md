@@ -55,7 +55,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Tradução da letra: uma tradução linha a linha embaixo de cada linha (no idioma do Windows por padrão), a da própria fonte quando ela tem, senão uma tradução automática feita para letras; também na letra flutuante e no mini player.
 - Letra flutuante: a linha atual sobre a área de trabalho, deixando o clique passar, palavra por palavra quando a letra tem tempo por palavra.
 - Compartilhar letra como cartão, por um botão na barra de título: escolha quaisquer linhas (pule as que não quiser), escolha um visual, copie ou salve.
-- Palco: a letra sincronizada como um show em tela cheia, por um botão na barra de título ou pela bandeja: abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, cada palavra nascendo quando é cantada, peças de edits de letra e duetos com um lado por cantor, com cortes na batida quando a faixa foi analisada e as cores da capa; sai da frente na hora para os anúncios. Esc sai.
+- Palco (experimental): a letra sincronizada como um show em tela cheia, por um botão na barra de título ou pela bandeja depois de ligado (e reiniciado o app): abertura, closes, tipografia editorial, refrão, pausas instrumentais e créditos, cada palavra nascendo quando é cantada, peças de edits de letra e duetos com um lado por cantor, com cortes na batida quando a faixa foi analisada e as cores da capa; sai da frente na hora para os anúncios. Esc sai.
 - O mini player também mostra a letra: a linha atual, palavra por palavra, e a próxima.
 
 **Som**
@@ -74,7 +74,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Modo jogo: um botão na barra de título que desliga na hora os recursos medidos como os mais caros (letra sincronizada na página, modo ambiente, janelas de letra flutuante e de compartilhar), e os traz de volta num segundo clique.
 - Um filtro de privacidade para analytics de terceiros (nunca anúncios).
 - Exportar diagnóstico (Configurações > Sobre): um arquivo de texto para mandar quando algo der errado.
-- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
+- Todo recurso vem ligado e é um plugin que você desliga na janela de configurações, menos os experimentais (crossfade e mixes, pular silêncio, análise de faixa, cores na letra, letra na batida, palco, controle remoto), que vêm desligados e marcados como Experimental na página do seu assunto. Depois de uma atualização as configurações abrem no que mudou. As animações seguem esses interruptores, não os efeitos de animação do Windows, e pausam com a janela escondida, minimizada ou em segundo plano.
 
 **Além do PC**
 - Controle remoto pelo celular (prévia altamente experimental): um app Android, pareado uma vez por um QR code confirmado no PC, mostra o que toca, a capa e a fila, e controla play/pause, anterior/próxima, busca, volume ao vivo, tocar ao toque, edição da fila (tocar a seguir, remover) e tocar uma playlist da sua biblioteca. Só na rede local, criptografado de ponta a ponta (Noise Protocol), nunca durante um anúncio, exceto pausar. O APK vai anexado a cada release; o app está em [mobile/](mobile/README.pt-BR.md), o protocolo em [docs/REMOTE.pt-BR.md](docs/REMOTE.pt-BR.md).
@@ -129,7 +129,7 @@ taskbar_controls = true       # botões na miniatura da barra de tarefas, progre
 themed_tray_menu = true       # menu da bandeja no visual do app; false: o menu do Windows
 desktop_lyrics = true         # letra flutuante sobre a área de trabalho (abra pela bandeja)
 share_lyrics = true           # cartões de letra em imagem (abra pela bandeja)
-stage = true                  # um show em tela cheia sobre a letra (barra de título ou bandeja; Esc sai)
+stage = false                 # experimental; um show em tela cheia sobre a letra (barra de título ou bandeja depois de reiniciar; Esc sai)
 listening_stats = true        # histórico em stats/plays.jsonl no perfil, mostrado na página Estatísticas das configurações
 navigation = true             # botões de voltar e avançar na barra de título
 song_mode = true              # escolhe a versão só áudio de uma faixa que também tem vídeo

@@ -1,5 +1,6 @@
 //! Taskbar (plugin `taskbar_controls`): previous / play-pause / next buttons on the main window's
-//! thumbnail, and the track's progress on its taskbar button (yellow while paused).
+//! thumbnail, and optionally (`[taskbar] progress`, on by default) the track's progress on its
+//! taskbar button (yellow while paused).
 //!
 //! - `ITaskbarList3`, on the main thread, from a subclass of the main window. The buttons can only be
 //!   added once the taskbar button exists, which Windows announces with the registered
@@ -7,12 +8,13 @@
 //!   from the tray, Explorer restarted), and the buttons are added again then.
 //! - The icons are the mini player's glyphs, drawn white with Direct2D (`gfx::Offscreen`) at the small
 //!   icon size of the window's DPI, once.
-//! - A worker thread forwards the player events and, while a track plays and the window is shown,
-//!   wakes once per 1% of the track (between 1 and 5 s) to move the progress. Nothing runs while
-//!   paused, stopped or in the tray.
+//! - A worker thread forwards the player events and, while a track plays, the window is shown and
+//!   `[taskbar] progress` is on, wakes once per 1% of the track (between 1 and 5 s) to move the
+//!   progress. Nothing ticks while paused, stopped, in the tray or with progress off.
 //! - A click runs the same `controls` command as the tray.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, Window};
@@ -35,6 +37,10 @@ use windows::core::{Result, w};
 
 use crate::gfx::{self, ICON_FONT, rect, rgb};
 use crate::player::{Event, Player};
+use crate::settings::Live;
+
+/// The subclassed main window, 0 when the plugin is off or the window is gone.
+static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 
 const SUBCLASS_ID: usize = 0xfeab;
 /// Posted by the worker: the player changed, or the progress moved. The main window is also subclassed by
@@ -58,6 +64,8 @@ struct Taskbar {
     icons: Option<[HICON; 4]>,
     /// Whether the middle button shows pause (something plays).
     shows_pause: bool,
+    /// Whether the taskbar button currently shows a progress bar.
+    showing_progress: bool,
 }
 
 type Cell = RefCell<Taskbar>;
@@ -83,6 +91,7 @@ pub fn install(app: &AppHandle, window: &Window) {
         added: false,
         icons: None,
         shows_pause: false,
+        showing_progress: false,
     }));
     unsafe {
         // When the app runs elevated, Explorer's messages would otherwise be filtered out.
@@ -95,6 +104,7 @@ pub fn install(app: &AppHandle, window: &Window) {
             drop(Box::from_raw(ptr as *mut Cell));
             return;
         }
+        MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
         // Already on the taskbar: the message came before the subclass.
         if IsWindowVisible(hwnd).as_bool() {
             with_taskbar(ptr, |t| t.button_created(hwnd));
@@ -105,13 +115,24 @@ pub fn install(app: &AppHandle, window: &Window) {
     std::thread::spawn(move || worker(&app, hwnd, rx));
 }
 
+/// Applies a `[taskbar]` setting change at once (no-op when the plugin was off at startup).
+pub fn refresh() {
+    let hwnd = MAIN_HWND.load(Ordering::Relaxed);
+    if hwnd != 0 {
+        unsafe {
+            let _ = PostMessageW(Some(HWND(hwnd as _)), WM_UPDATE, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
 fn worker(app: &AppHandle, hwnd: isize, mut rx: Receiver<Event>) {
     let post = || unsafe {
         let _ = PostMessageW(Some(HWND(hwnd as _)), WM_UPDATE, WPARAM(0), LPARAM(0));
     };
     loop {
         let shown = unsafe { IsWindowVisible(HWND(hwnd as _)).as_bool() };
-        let tick = app.state::<Player>().current().filter(|s| shown && !s.paused).map(|s| {
+        let show_progress = app.state::<Live>().get().taskbar.progress;
+        let tick = app.state::<Player>().current().filter(|s| shown && show_progress && !s.paused).map(|s| {
             Duration::from_secs_f64(s.track.duration / 100.0).clamp(Duration::from_secs(1), Duration::from_secs(5))
         });
         // The timeout is made inside the async block: its timer needs the runtime (see lastfm.rs).
@@ -155,6 +176,7 @@ impl Taskbar {
         let buttons: Vec<THUMBBUTTON> =
             buttons.iter().enumerate().map(|(i, (icon, tip))| button(i, *icon, tip)).collect();
         self.added = unsafe { list.ThumbBarAddButtons(hwnd, &buttons) }.is_ok();
+        self.showing_progress = false;
         self.update(hwnd);
     }
 
@@ -172,16 +194,20 @@ impl Taskbar {
                 self.shows_pause = playing;
             }
         }
+        let show_progress = self.app.state::<Live>().get().taskbar.progress;
         unsafe {
-            match state.filter(|s| s.track.duration > 0.0) {
+            match state.filter(|s| show_progress && s.track.duration > 0.0) {
                 Some(s) => {
                     let _ = list.SetProgressState(hwnd, if s.paused { TBPF_PAUSED } else { TBPF_NORMAL });
                     let total = (s.track.duration * 1000.0) as u64;
                     let _ = list.SetProgressValue(hwnd, ((s.position_now() * 1000.0) as u64).min(total), total);
+                    self.showing_progress = true;
                 }
-                None => {
+                None if self.showing_progress => {
                     let _ = list.SetProgressState(hwnd, TBPF_NOPROGRESS);
+                    self.showing_progress = false;
                 }
+                None => {}
             }
         }
     }
@@ -277,6 +303,7 @@ unsafe extern "system" fn subclass(
             return LRESULT(0);
         }
         WM_NCDESTROY => unsafe {
+            MAIN_HWND.store(0, Ordering::Relaxed);
             let _ = RemoveWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID);
             let taskbar = Box::from_raw(data as *mut Cell).into_inner();
             for icon in taskbar.icons.into_iter().flatten() {

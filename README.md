@@ -45,7 +45,7 @@ A lightweight Windows desktop shell for a web music player, written in Rust with
 - A start screen that checks for updates (and installs a newer release) while the player loads, so the window never opens on a blank page.
 - Native title bar in the album's colors, with the current track; a mini player that stays on top.
 - Tray icon, close to the tray with memory trimmed, media keys and the Windows media flyout, global shortcuts, track toasts while hidden.
-- Previous / play-pause / next on the taskbar thumbnail and the track's progress on the taskbar button.
+- Previous / play-pause / next on the taskbar thumbnail and optional track progress on the taskbar button.
 - A tray menu in the app's look, with the track and its controls, and a sleep timer (pause after 15 to 60 minutes or at the end of the track).
 - Back and forward buttons on the title bar.
 - Precise volume: the mouse wheel over the player changes the volume by 2% (10% with Shift), with optional global volume keys.
@@ -176,6 +176,9 @@ glow = "normal"              # off (lightest), normal, strong
 
 [stage]                      # the full-screen show over the lyrics (Lyrics page)
 translation = true           # the translation under each line, when the lyrics have one
+
+[taskbar]                    # the taskbar button (General page, under Taskbar controls)
+progress = true              # show the track's progress on the taskbar button (yellow while paused)
 
 [audio]                      # the Audio page; mixes are in mixes/<playlist>.json in the profile (Mixes page)
 eq_preset = "flat"           # flat (out of the sound path), bass, vocal, treble, loudness, custom

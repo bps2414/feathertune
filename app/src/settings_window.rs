@@ -293,6 +293,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
             "font": s.lyrics.font,
         },
         "stage": { "translation": s.stage.translation },
+        "taskbar": { "progress": s.taskbar.progress },
         "audio": {
             "eq_preset": s.audio.eq_preset,
             // What the sliders show: the preset's gains, or the custom ones.
@@ -321,7 +322,7 @@ pub fn settings_get(webview: Webview, app: AppHandle) -> Result<Value, String> {
 /// Changes one setting. `key` is `plugins.<id>`, `shortcuts.<name>`, `discord.client_id`,
 /// `lastfm.api_key`, `lastfm.api_secret`, `browser.disable_features`, `lyrics.providers`,
 /// `lyrics.estimate_words`, `lyrics.offset_ms`, `lyrics.translate_to`, `lyrics.romanize`, `lyrics.size`,
-/// `lyrics.align`, `lyrics.glow`, `lyrics.duets`, `stage.translation`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
+/// `lyrics.align`, `lyrics.glow`, `lyrics.duets`, `stage.translation`, `taskbar.progress`, `remote.name`, `audio.eq_preset`, `audio.eq_bands`,
 /// `audio.compressor`, `audio.effect`, `audio.crossfade_ms`, `audio.curve`, `audio.fade_in_ms`, `audio.echo_out`,
 /// `audio.visualizer`, `ui.language`, `ui.effects` or `autostart`. Returns whether a restart is needed for it to apply.
 #[tauri::command]
@@ -471,6 +472,12 @@ pub fn settings_set(webview: Webview, app: AppHandle, key: String, value: Value)
             let on = value.as_bool().ok_or("expected true or false")?;
             live.write("stage", name, toml_edit::value(on), None, false)?;
             crate::stage::refresh();
+            Ok(false)
+        }
+        ("taskbar", "progress") => {
+            let on = value.as_bool().ok_or("expected true or false")?;
+            live.write("taskbar", name, toml_edit::value(on), None, false)?;
+            crate::taskbar::refresh();
             Ok(false)
         }
         ("lyrics", "offset_ms") => {

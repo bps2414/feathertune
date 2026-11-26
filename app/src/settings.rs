@@ -36,6 +36,9 @@
 //! [stage]                          # the full-screen show over the lyrics (plugin `stage`)
 //! translation = true               # the translation under each line, when the lyrics have one
 //!
+//! [taskbar]                        # the taskbar button (plugin `taskbar_controls`)
+//! progress = true                  # show the track's progress on the taskbar button (yellow while paused)
+//!
 //! [audio]                          # the audio plugins (Audio tab); every effect is bypassed during ads
 //! eq_preset = "flat"               # flat (out of the sound path), bass, vocal, treble, loudness, custom
 //! eq_bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # custom: dB from -12 to 12, 31 Hz ... 16 kHz
@@ -80,6 +83,7 @@ pub struct Settings {
     pub browser: Browser,
     pub lyrics: LyricsSettings,
     pub stage: StageSettings,
+    pub taskbar: TaskbarSettings,
     pub audio: AudioSettings,
     pub remote: RemoteSettings,
     /// The whole file, for the plugin switches (`plugin`).
@@ -204,6 +208,19 @@ pub struct StageSettings {
 impl Default for StageSettings {
     fn default() -> Self {
         StageSettings { translation: true }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct TaskbarSettings {
+    /// Show the track's progress on the taskbar button (yellow while paused).
+    pub progress: bool,
+}
+
+impl Default for TaskbarSettings {
+    fn default() -> Self {
+        TaskbarSettings { progress: true }
     }
 }
 
@@ -556,6 +573,14 @@ mod tests {
         for p in PLUGINS {
             assert_eq!(s.plugin(p.id), p.default_on, "{}", p.id);
         }
+    }
+
+    #[test]
+    fn taskbar_progress_defaults_on_and_can_be_disabled() {
+        let s = Settings::parse("").unwrap();
+        assert!(s.taskbar.progress);
+        let s = Settings::parse("[taskbar]\nprogress = false\n").unwrap();
+        assert!(!s.taskbar.progress);
     }
 
     #[test]

@@ -2,6 +2,10 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.2.2 — 2026-11-26
+
+- **Progresso na barra de tarefas agora é configurável:** desligue **Progresso na barra de tarefas** em Geral > Janela e bandeja > Controles na barra de tarefas (`[taskbar] progress = false`) para remover na hora a barra de progresso (e o estado amarelo ao pausar) do ícone na barra de tarefas, mantendo os botões na miniatura.
+
 ## 1.2.1 — 2026-11-23
 
 - **O Palco agora é Experimental:** vem desligado e o botão dele some da barra de título até você ligá-lo nas configurações e reiniciar o app. Se você usava, ligue de novo nas configurações.

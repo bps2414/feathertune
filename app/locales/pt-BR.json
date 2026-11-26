@@ -562,5 +562,7 @@
   "no plugin.json at the top of the package, or more than one": "falta plugin.json no topo do pacote, ou há mais de um",
   "no plugin.json": "falta plugin.json",
   "too long or invalid": "muito longo ou inválido",
-  "unknown language": "idioma desconhecido"
+  "unknown language": "idioma desconhecido",
+  "Taskbar progress": "Progresso na barra de tarefas",
+  "Show the track's progress on the taskbar button (yellow while paused).": "Mostra o progresso da faixa no botão da barra de tarefas (amarelo enquanto pausado)."
 }

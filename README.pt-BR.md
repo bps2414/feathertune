@@ -45,7 +45,7 @@ Uma casca desktop leve para Windows de um player de música na web, escrita em R
 - Uma tela de abertura que procura atualizações (e instala uma versão nova) enquanto o player carrega, então a janela nunca abre numa página em branco.
 - Barra de título nativa nas cores do álbum, com a faixa atual; um mini player que fica no topo.
 - Ícone na bandeja, fechar para a bandeja com memória reduzida, teclas de mídia e o flyout de mídia do Windows, atalhos globais, aviso de faixa enquanto escondido.
-- Anterior / play-pause / próxima na miniatura da barra de tarefas e o progresso da faixa no botão da barra.
+- Anterior / play-pause / próxima na miniatura da barra de tarefas e progresso opcional da faixa no botão da barra.
 - Um menu da bandeja no visual do app, com a faixa e os controles, e um timer para dormir (pausa depois de 15 a 60 minutos ou no fim da faixa).
 - Botões de voltar e avançar na barra de título.
 - Volume preciso: a roda do mouse sobre o player muda o volume em 2% (10% com Shift), com teclas globais de volume opcionais.
@@ -176,6 +176,9 @@ glow = "normal"              # off (mais leve), normal, strong
 
 [stage]                      # o show em tela cheia sobre a letra (página Letras)
 translation = true           # a tradução embaixo de cada linha, quando a letra tem uma
+
+[taskbar]                    # o botão da barra de tarefas (página Geral, em Controles na barra de tarefas)
+progress = true              # mostra o progresso da faixa no botão da barra de tarefas (amarelo enquanto pausado)
 
 [audio]                      # a página Áudio; os mixes ficam em mixes/<playlist>.json no perfil (página Mixagens)
 eq_preset = "flat"           # flat (fora do caminho do som), bass, vocal, treble, loudness, custom

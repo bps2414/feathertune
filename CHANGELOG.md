@@ -2,6 +2,10 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.2.2 — 2026-11-26
+
+- **Taskbar progress is now configurable:** turn off **Taskbar progress** under General > Window and tray > Taskbar controls (`[taskbar] progress = false`) to remove the progress bar (and its yellow paused state) from the taskbar icon immediately, without losing the thumbnail playback buttons.
+
 ## 1.2.1 — 2026-11-23
 
 - **Stage is now Experimental:** it starts off and its title bar button is gone until you turn it on in the settings and restart the app. If you used it, turn it back on in the settings.

@@ -2,6 +2,14 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.3.0 — 2026-11-27
+
+- **Stage rebuilt for a cinematic look:** replaced the blocky 8×8 background, harsh spotlights and sudden light-paper cuts with a smooth Gaussian-blurred cover canvas (`128×128`), A/B crossfades between tracks, subtle drifting aurora washes and consistent dark filmic grading (even on bright white covers).
+- **Varied typography without stretching or neon repetition:** Stage now pairs Instrument Serif (regular and italic), Plus Jakarta Sans, Syne and Anybody across four art-direction moods (`cinema`, `editorial`, `poster`, `nocturne`) with distinct section roles between verses and choruses, dropping the per-word width stretching and duplicate neon glow layers.
+- **Fluid animations and clean transitions:** replaced dry 0 ms pops, 1 ms letter blinks, stepped fades, white flashes and clipart stars with smooth filmic entrances (including soft-focus line illumination), graceful exits and composed framing across eight refined layouts.
+- **Fixed album covers and duplicate opening art:** removed the detached flying cover overlay and updated live scenes in-place when late lyrics or backdrops arrive for the same track, eliminating duplicate covers; covers now sit in explicit square frames with high-resolution URLs, 4:3 video letterbox cropping, smooth load fade-in and error fallbacks, and Credits no longer overlap "Up next".
+- Not verified yet in the running app: Stage visual flow across different tracks and cover types, cover loading on 4:3/16:9 thumbnails, and CPU/GPU cost while open.
+
 ## 1.2.2 — 2026-11-26
 
 - **Taskbar progress is now configurable:** turn off **Taskbar progress** under General > Window and tray > Taskbar controls (`[taskbar] progress = false`) to remove the progress bar (and its yellow paused state) from the taskbar icon immediately, without losing the thumbnail playback buttons.

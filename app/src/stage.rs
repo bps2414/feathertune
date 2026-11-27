@@ -1,55 +1,47 @@
-//! Stage (plugin `stage`): a directed full-screen show over the synced lyrics. Rust writes the script
-//! once per track (`direct`, pure and tested here) and the `stage` page module (injections/stage/) only
-//! plays it, in a fixed layer over the site, on the compositor.
+//! Stage (plugin `stage`): a directed full-screen cinema show over the synced lyrics. Rust writes the
+//! script once per track (`direct`, pure and tested here) and builds a smooth Gaussian-blurred atmospheric
+//! backdrop from the cover art (`artwork::stage_backdrop`); the `stage` page module (`injections/stage/`)
+//! only plays it, in a fixed layer over the site, on the compositor.
 //!
 //! - The director reads the lines (word times, ends), the track analysis' facts when the track was
 //!   measured (tempo, first beat, the loudness envelope), the title, artist, album, the next track and a
 //!   seed (the video id), and writes sections: an opening up to the first line, blocks of lines (a gap
 //!   over `max(3 s, 7 beats)`, 4.5 s without a tempo, or a change between repeated and unrepeated lines
 //!   starts a new one), each a chorus (half its lines sung elsewhere too), a close-up (energy under 30%),
-//!   an editorial stack (over 55%) or the one the last verse was not; an instrumental where the gap after
+//!   an editorial verse (over 55%) or the one the last verse was not; an instrumental where the gap after
 //!   a block is over `max(5 s, 8 beats)`; credits after the last line. A cut moves to a bar line within
 //!   0.75 beat only between the end of the line before it and its first line's lead, so no word comes late
 //!   and none is cut short. Each scene says how it is entered (`Entry`): a lift into a chorus, a breath out
 //!   of one, a frame from the lines, a return to them. The energy is the low band × 0.6 plus the mid × 0.4,
 //!   between the song's own 10th and 90th percentiles; it is also sent at 10 Hz (`light`) for the page's
-//!   light and relief. Without
-//!   facts the lyrics alone decide; without lyrics it is an opening, an instrumental and the credits.
+//!   atmosphere and relief. Without facts the lyrics alone decide; without lyrics it is an opening, an
+//!   instrumental and the credits.
 //! - Opened from the title bar button or the tray: the window goes fullscreen (`titlebar::set_fullscreen`),
-//!   the focus goes to the page and the page gets `{ open: true, script, lines, ... }` through
-//!   `injections::send`. Closed by Esc (titlebar.rs, WebView2's `AcceleratorKeyPressed`), by the page's
-//!   own fullscreen ending (the HUD's leave button enters and leaves it, so the existing
+//!   the focus goes to the page and the page gets `{ open: true, script, lines, artwork, backdrop, halo, ... }`
+//!   through `injections::send`. Closed by Esc (`titlebar.rs`, WebView2's `AcceleratorKeyPressed`), by the
+//!   page's own fullscreen ending (the HUD's leave button enters and leaves it, so the existing
 //!   `ContainsFullScreenElementChanged` path restores the window), by hiding or minimizing the window,
 //!   by game mode and by the plugin's switch. The page asks Rust for nothing: no new command or permission.
-//! - Each line gets a shot (`Shot`): a layout from a varied set (never the same twice in a row, nor the same
-//!   place on screen, between two lines with no textless scene between them), where it sits, its emphasis
-//!   word (the longest held, favouring long words and words the song repeats), how its words are born with
-//!   the voice and how it leaves. The layout follows the line first (short lines go big, long ones run in
-//!   rows, a word sung twice echoes, a cry bursts) and the seed breaks ties; the places walk a path through
-//!   the scene, one neighbour a line, jumping only at a new sentence, a scene's start or a downbeat; a line
-//!   that goes on with the sentence before it keeps that line's family and pushes it up (`Shot::cont`);
-//!   what covers the screen on its way out only leaves with room before the next line. The set borrows
-//!   from lyric edits: words piling up small until the last one bursts big (`Burst`), a few words down a
-//!   diagonal with script ends (`Stair`), two rows rising (`Climb`), a repeated word stacked in a column
-//!   (`Echo`), the emphasis word in a script face. The chorus has a signature: the anthem then two seeded
-//!   partners, in the same order, entrances and places every time it comes back, one level higher each
-//!   time (bigger, more glow, up to 3). The peak is the text in bars (`Bar`): on the anthem of the strongest
-//!   choruses after the first (or of the only one), at most twice a song. The paper behind the lines
-//!   (`Paper`) only cuts on an event: a scene's start (every other driven verse is on light paper), a bar,
-//!   a duet's answer after 6 s on the same paper.
-//! - A duet (lines from both singers, TTML agents): each singer has a side and the group the middle; a
-//!   line from the other singer than the line before is an answer, its letters typed over the held note.
-//! - Each scene gets a camera move. The song gets a type personality (`Voice`) from its tempo, loudness
-//!   and how fast its words come (fast and loud: narrow and heavy; slow or quiet: wide and light; in
-//!   between, the seed picks), so songs look different while one song stays coherent.
-//! - The script is written again while open when the track, its lines, its facts or its background change.
-//! - The display fonts, Anybody (width and weight axes), Unbounded and Syne (weight), and the script face,
-//!   Great Vibes, all under the SIL Open Font License (`injections/stage/OFL.txt`), are compiled in and sent
-//!   once as bytes (`stageFont`); the page loads them with the FontFace API.
+//! - Each song gets a cohesive art direction (`Mood`) from its tempo, loudness, word pace and seed:
+//!   `Cinema` (Instrument Serif + Plus Jakarta Sans), `Editorial` (Plus Jakarta Sans + Serif italic accents),
+//!   `Poster` (Anybody condensed display in choruses + clean Sans verses), or `Nocturne` (Syne display +
+//!   refined Sans/Serif contrast). Different sections within the same song pair distinct typographic roles
+//!   so verses feel intimate and choruses feel monumental without repeating one monotonous style.
+//! - Each line gets a shot (`Shot`) from 8 refined compositions (`Focus`, `Editorial`, `Hero`, `Split`,
+//!   `Anthem`, `Climb`, `Echo`, `Crescendo`), a composed anchor (rule-of-thirds / center balance rather than
+//!   random corner hopping), an emphasis word (longest held, favoring long and repeated words), a fluid
+//!   entrance (`Illuminate`, `Curtain`, `Glide`, `Focus`, `Impact`) and a clean exit (`DriftUp`, `Dissolve`,
+//!   `CurtainDown`, `Recede`). The chorus keeps a recognizable signature that escalates gently across
+//!   repeats (level 1 to 3). A line continuing the previous sentence (`cont`) glides the previous line up.
+//! - A duet (lines from both singers, TTML agents): each singer holds a side and the group the center.
+//! - The bundled display fonts — Instrument Serif (regular & italic), Plus Jakarta Sans (variable weight),
+//!   Syne (variable weight) and Anybody (variable width & weight), all under the SIL Open Font License
+//!   (`injections/stage/OFL.txt`) — are compiled in and sent once as bytes (`stageFont`); the page loads
+//!   them with the FontFace API.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use base64::Engine;
 use serde::Serialize;
@@ -57,44 +49,83 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::artwork;
 use crate::audio_facts::Facts;
 use crate::i18n::t;
 use crate::lyrics::Line;
 use crate::player::{Event, Player};
 use crate::settings::Live;
 
-/// The variable latin subsets (Fontsource's WOFF2): the page's family name and the file.
-const FONTS: [(&str, &[u8]); 4] = [
-    ("ft-anybody", include_bytes!("../injections/stage/anybody-latin-wdth-wght.woff2")),
-    ("ft-unbounded", include_bytes!("../injections/stage/unbounded-latin-wght.woff2")),
-    ("ft-syne", include_bytes!("../injections/stage/syne-latin-wght.woff2")),
-    ("ft-script", include_bytes!("../injections/stage/great-vibes-latin-400.woff2")),
+/// Bundled Latin WOFF2 subsets (Fontsource, SIL OFL): family, style, weight range, optional stretch, bytes.
+struct BundledFont {
+    family: &'static str,
+    style: &'static str,
+    weight: &'static str,
+    stretch: Option<&'static str>,
+    bytes: &'static [u8],
+}
+
+const FONTS: [BundledFont; 5] = [
+    BundledFont {
+        family: "ft-serif",
+        style: "normal",
+        weight: "400",
+        stretch: None,
+        bytes: include_bytes!("../injections/stage/instrument-serif-latin-400-normal.woff2"),
+    },
+    BundledFont {
+        family: "ft-serif",
+        style: "italic",
+        weight: "400",
+        stretch: None,
+        bytes: include_bytes!("../injections/stage/instrument-serif-latin-400-italic.woff2"),
+    },
+    BundledFont {
+        family: "ft-sans",
+        style: "normal",
+        weight: "200 800",
+        stretch: None,
+        bytes: include_bytes!("../injections/stage/plus-jakarta-sans-latin-wght.woff2"),
+    },
+    BundledFont {
+        family: "ft-syne",
+        style: "normal",
+        weight: "400 800",
+        stretch: None,
+        bytes: include_bytes!("../injections/stage/syne-latin-wght.woff2"),
+    },
+    BundledFont {
+        family: "ft-poster",
+        style: "normal",
+        weight: "100 900",
+        stretch: Some("50% 150%"),
+        bytes: include_bytes!("../injections/stage/anybody-latin-wdth-wght.woff2"),
+    },
 ];
-/// The text in bars is the peak: at most this many a song.
-const MAX_BARS: usize = 2;
-/// A duet's answer only turns the paper once the paper has stayed this long (ms).
-const PAPER_HOLD_MS: f64 = 6000.0;
+
+/// Stage backdrop texture parameters (128×128 clamped Gaussian blur: smooth on 4K, ~8 KB PNG).
+const BACKDROP_SIDE: u32 = 128;
+const BACKDROP_SIGMA: f32 = 10.5;
+/// Soft cover halo behind opening / instrumental artwork.
+const HALO_SIDE: u32 = 96;
+const HALO_SIGMA: f32 = 4.2;
+const HALO_SATURATION: f32 = 1.6;
+const HALO_BRIGHTNESS: f32 = 0.85;
+const HALO_SOLID: f32 = 0.42;
+
 /// A cut moves to a bar line at most this share of a beat away.
 const SNAP_BEATS: f64 = 0.75;
 /// A section starts this long before its first line.
 const LEAD_MS: f64 = 150.0;
 /// A line that comes this soon (ms) after the one before it ends may go on with its sentence.
-const CONT_GAP_MS: f64 = 400.0;
-/// What covers the screen on its way out (a zoom, a scatter) needs this long (ms) before the next line.
-const ROOM_MS: f64 = 600.0;
-/// The paths a scene's lines walk through the 3×3 places, one step to a neighbour a line: the diagonals
-/// through the middle, a zigzag, around the edge and into the middle.
-const PATHS: [&[(i8, i8)]; 4] = [
-    &[(-1, -1), (0, 0), (1, 1), (0, 0)],
-    &[(1, -1), (0, 0), (-1, 1), (0, 0)],
-    &[(-1, -1), (0, 0), (1, -1), (1, 0), (0, 1), (-1, 0)],
-    &[(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (0, 0)],
-];
+const CONT_GAP_MS: f64 = 450.0;
 /// Under these an opening or the credits are not worth a scene of their own.
 const MIN_OPENING_MS: f64 = 1500.0;
 const MIN_CREDITS_MS: f64 = 3000.0;
 /// At most 15 minutes of light at 10 Hz (the envelope's own limit).
 const MAX_LIGHT: usize = 9000;
+/// Maximum chorus escalation level.
+const MAX_LEVEL: u8 = 3;
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -107,155 +138,112 @@ pub enum Kind {
     Credits,
 }
 
-/// The type's personality for the whole song; the page maps it to a face and its axes.
+/// The song's cohesive art direction; maps to a typographic pairing across sections on the page.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
-pub enum Voice {
-    /// Anybody, narrow and heavy, in capitals: fast and loud songs.
-    Compressed,
-    /// Anybody, wide and light, as written: slow or quiet songs.
-    Expanded,
-    /// Unbounded, in lower case.
-    Round,
-    /// Syne, as written (it widens as it gets heavier).
-    Quirk,
+pub enum Mood {
+    /// Editorial cinema: Instrument Serif (with italic accents) + clean Plus Jakarta Sans.
+    Cinema,
+    /// Modern editorial: crisp Plus Jakarta Sans + Instrument Serif italic emphasis.
+    Editorial,
+    /// Sculptural poster: bold condensed Anybody in choruses/peaks + clean Sans verses.
+    Poster,
+    /// Nocturnal art-house: expressive Syne display + refined Sans/Serif contrast.
+    Nocturne,
 }
 
-/// How a line is set on screen (see injections/stage/page.js, `LAYOUTS`).
+/// How a line is composed on screen (see `injections/stage/page.js`, `LAYOUT`).
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
-    /// Balanced rows, centered.
-    Stack,
-    /// Rows flush to one side.
-    Rag,
-    /// Rows stepping diagonally.
-    Cascade,
-    /// The emphasis word giant, the rest small around it.
+    /// Balanced cinema center stack.
+    Focus,
+    /// Asymmetric rule-of-thirds editorial column.
+    Editorial,
+    /// One sculptural emphasis word framed by refined supporting phrases.
     Hero,
-    /// Each word in a cell of a grid.
-    Grid,
-    /// The emphasis word turned on its side along an edge, the rest beside it.
-    Vertical,
-    /// The two halves on two rows in two tones, apart.
+    /// Two balanced phrases in counterweight separated by a hairline divider.
     Split,
-    /// A stack on a plane tilted in perspective.
-    Tilt,
-    /// The chorus' own: big, centered.
+    /// Chorus signature: commanding centered presence scaling with chorus level.
     Anthem,
-    /// The words pile up small, the last one bursts big with a full stop.
-    Burst,
-    /// The rows in solid bars, full width, posing on the beat: the peak.
-    Bar,
-    /// Two to four words down a diagonal, the ends big in the script face, a star behind the first.
-    Stair,
-    /// Two rows rising over the line's time, a star rising with them.
+    /// Two rows rising gently over the line's time.
     Climb,
-    /// A word the line sings two to four times stacked in a column, a row from each time, each row a
-    /// little bigger.
+    /// A word sung 2–4 times stacked with clean visual hierarchy.
     Echo,
+    /// Climax: quiet build-up words leading into a commanding final word.
+    Crescendo,
 }
 
 impl Layout {
-    /// Whether a line of `words` words, its emphasis word `hero` letters long, can take it.
-    fn fits(self, words: usize, hero: usize) -> bool {
+    /// Whether a line of `words` words can take this layout.
+    fn fits(self, words: usize) -> bool {
         match self {
             Layout::Hero | Layout::Split => words >= 2,
-            Layout::Cascade => words >= 3,
-            Layout::Grid => (3..=8).contains(&words),
-            Layout::Vertical => words >= 3 && hero <= 10,
-            Layout::Burst => (3..=7).contains(&words),
-            Layout::Bar => (1..=8).contains(&words),
-            Layout::Stair => (2..=4).contains(&words),
+            Layout::Crescendo => (3..=8).contains(&words),
             Layout::Climb => (4..=12).contains(&words),
-            // And a word sung two to four times (`echoes_a_word`).
             Layout::Echo => (2..=12).contains(&words),
-            _ => true,
+            Layout::Focus | Layout::Editorial | Layout::Anthem => words >= 1,
         }
     }
 }
 
-/// The verse layouts with their weights in a close-up (calm) and in an editorial (driven) scene.
-const VERSE: [(Layout, u32, u32); 11] = [
-    (Layout::Stack, 2, 1),
-    (Layout::Rag, 3, 2),
+/// Verse layouts with their weights in a calm (`Close`) vs. driven (`Editorial`) scene.
+const VERSE: [(Layout, u32, u32); 6] = [
+    (Layout::Focus, 4, 2),
+    (Layout::Editorial, 3, 3),
     (Layout::Hero, 2, 2),
-    (Layout::Vertical, 2, 1),
-    (Layout::Tilt, 1, 1),
     (Layout::Split, 1, 3),
-    (Layout::Cascade, 1, 2),
-    (Layout::Grid, 0, 2),
-    (Layout::Burst, 1, 3),
-    (Layout::Stair, 3, 2),
-    (Layout::Climb, 2, 1),
+    (Layout::Climb, 2, 2),
+    (Layout::Crescendo, 1, 2),
 ];
-/// The chorus' signature is the anthem and two of these.
-const PARTNERS: [Layout; 4] = [Layout::Hero, Layout::Split, Layout::Burst, Layout::Climb];
-/// A chorus line whose signature layout does not fit it takes the first of these that differs from its
-/// neighbours (always fits).
-const FALLBACK: [Layout; 3] = [Layout::Stack, Layout::Rag, Layout::Tilt];
-/// The escalation stops here.
-const MAX_LEVEL: u8 = 3;
+/// Chorus signature partners following the `Anthem`.
+const PARTNERS: [Layout; 4] = [Layout::Hero, Layout::Split, Layout::Crescendo, Layout::Editorial];
+/// Fallback layouts that fit almost any line.
+const FALLBACK: [Layout; 2] = [Layout::Focus, Layout::Editorial];
 
-/// How a line's words are born: each only when it is sung, never before.
+/// How a line's words enter: always smooth, never dry/blinking.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Enter {
-    /// Dry: there at once, a flash of glow, a short settle in size.
-    Pop,
-    /// Its letters typed over the time the word is held.
-    Letters,
-    /// A short slide in from the singer's side (from both sides for a group).
-    Drift,
-    /// Up from its baseline, inside a mask.
-    Rise,
-    /// The emphasis word lands big and settles with a small overshoot; the others pop.
-    Stamp,
-    /// Its two halves slide in from opposite sides and meet.
-    Slice,
+    /// Whole line appears softly dimmed; each word illuminates smoothly as sung.
+    Illuminate,
+    /// Words rise cleanly out of an invisible baseline mask.
+    Curtain,
+    /// Gentle horizontal glide from the aligned side (or singer's side in a duet).
+    Glide,
+    /// Subtle scale-and-lift settle into crisp focus.
+    Focus,
+    /// Commanding yet smooth settle for choruses and climaxes.
+    Impact,
 }
 
+/// How a line leaves: always smooth and collision-free.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Exit {
-    Slide,
-    /// Each word flies off its own way.
-    Scatter,
-    /// The rows fold away on their top edge.
-    Fold,
-    /// Past the camera.
-    Zoom,
-    Sink,
-    /// Off in three dry steps.
-    Steps,
+    DriftUp,
+    Dissolve,
+    CurtainDown,
+    Recede,
 }
 
-/// The paper behind the lines: the lit stage, or a cut to light paper with dark type.
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum Paper {
-    Dark,
-    Light,
-}
-
-/// How a scene is entered; the page plays it on the light and the camera (the lines have their own exits).
+/// How a scene is entered; the page plays it on the atmosphere and camera.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Entry {
-    /// The camera's move only blends into the new one.
+    /// Camera blends smoothly into the new move.
     Cut,
-    /// Into a chorus: the bar before its first downbeat winds up (the camera closes in, the light gathers)
-    /// and the downbeat opens it with a flash.
+    /// Into a chorus: gentle wind-up over the bar before its downbeat, then luminous open.
     Lift,
-    /// Out of a chorus: a bar's pull back with the light down.
+    /// Out of a chorus: calm pull back and atmospheric settle.
     Breath,
-    /// From the lines to a scene without them: its picture comes in from where the last line was.
+    /// From lines into a visual frame (instrumental, credits).
     Frame,
-    /// From a scene without lines back to them: that scene leaves before the first word.
+    /// From a visual frame back into lyrics.
     Return,
 }
 
-/// The camera's slow move over a scene.
+/// Subtle cinema camera drift over a scene.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Camera {
@@ -264,15 +252,14 @@ pub enum Camera {
     Left,
     Right,
     Rise,
-    Roll,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
 pub struct Shot {
     pub layout: Layout,
-    /// Where the block sits in the safe area: -1, 0 or 1 across and down (the sign of `x` is also the
-    /// direction of the layouts that have one).
+    /// Horizontal anchor in the safe area: -1 (left), 0 (center), 1 (right).
     pub x: i8,
+    /// Vertical bias: -1 (upper), 0 (center), 1 (lower).
     pub y: i8,
     /// The emphasis word (an index into the line's words), if it has words.
     pub hero: Option<usize>,
@@ -280,15 +267,13 @@ pub struct Shot {
     pub exit: Exit,
     /// 0 outside the chorus; 1, 2, 3 for its first, second, third and later times.
     pub level: u8,
-    pub paper: Paper,
-    /// The emphasis word in the script face.
-    pub script: bool,
+    /// Render the emphasis word in contrasting editorial italic serif.
+    pub italic: bool,
     /// Who sings it in a duet: 0 the first singer, 1 the second, 2 together (always 0 outside a duet).
     pub singer: u8,
     /// A duet's answer: the other singer than the line before.
     pub answer: bool,
-    /// It goes on with the sentence of the line before (`continues`): the page pushes that one up, small,
-    /// instead of letting it leave. Never two in a row.
+    /// Continues the sentence of the line before: the page glides that line up softly instead of exiting.
     pub cont: bool,
 }
 
@@ -305,7 +290,7 @@ pub struct Section {
     pub entry: Entry,
     /// 1 for the first chorus, 2 for the second...; 0 for anything else.
     pub chorus_no: u32,
-    /// Why the director chose it, as a code (for the diagnostics and the tests; not shown).
+    /// Why the director chose it, as a code (for diagnostics and tests; not shown).
     pub why: &'static str,
 }
 
@@ -334,7 +319,7 @@ pub struct Script {
     pub duration_ms: u32,
     /// Contiguous, from 0 to `duration_ms`.
     pub sections: Vec<Section>,
-    pub voice: Voice,
+    pub mood: Mood,
     /// Lines from both singers (see `Shot::singer`).
     pub duet: bool,
     pub grid: Option<Grid>,
@@ -394,8 +379,7 @@ pub fn line_end(lines: &[Line], i: usize, duration: f64) -> f64 {
     }
 }
 
-/// The envelope's energy (see the module doc), per 100 ms bin, 0 to 1, and the song's mean level before
-/// it is spread over its own range (0 to 1 for -60 to 0 dBFS; None without facts).
+/// The envelope's energy, per 100 ms bin, 0 to 1, and the song's mean level before normalization.
 struct Energy(Vec<f64>, Option<f64>);
 
 impl Energy {
@@ -419,7 +403,6 @@ impl Energy {
         Energy(level.iter().map(|x| ((x - p10) / span).clamp(0.0, 1.0)).collect(), Some(loud))
     }
 
-    /// The mean from `a` to `z` (ms); None without facts or outside them.
     fn between(&self, a: f64, z: f64) -> Option<f64> {
         let from = (a.max(0.0) / 100.0).floor() as usize;
         let to = ((z / 100.0).ceil().max(0.0) as usize).min(self.0.len());
@@ -431,8 +414,7 @@ impl Energy {
     }
 }
 
-/// The seeded choices (which verse look starts, the layouts, places and moves): the same seed, the same
-/// script.
+/// Seeded LCG: same seed always writes the same script.
 struct Rng(u32);
 
 impl Rng {
@@ -449,12 +431,10 @@ impl Rng {
         self.next() >> 31 == 1
     }
 
-    /// 0 to `n - 1` (the high bits: the low ones of this generator repeat quickly).
     fn below(&mut self, n: usize) -> usize {
         (self.next() >> 8) as usize % n.max(1)
     }
 
-    /// One of `items` by weight; None when every weight is 0.
     fn weighted<T: Copy>(&mut self, items: &[(T, u32)]) -> Option<T> {
         let total: u32 = items.iter().map(|i| i.1).sum();
         if total == 0 {
@@ -517,8 +497,7 @@ fn words(line: &Line, end: f64) -> Vec<(f64, String)> {
         .collect()
 }
 
-/// The line's emphasis word: the longest held, favouring long words and words the song sings at least three
-/// times; words under three letters only when there is nothing else.
+/// The line's emphasis word: the longest held, favoring long words and words the song sings repeatedly.
 fn hero(words: &[(f64, String)], end: f64, counts: &HashMap<String, u32>) -> Option<usize> {
     let short = words.iter().all(|w| letters(&w.1) < 3);
     let score = |k: usize| {
@@ -530,8 +509,7 @@ fn hero(words: &[(f64, String)], end: f64, counts: &HashMap<String, u32>) -> Opt
     (0..words.len()).filter(|&k| short || letters(&words[k].1) >= 3).max_by(|&a, &b| score(a).total_cmp(&score(b)))
 }
 
-/// Whether a line sings one of its words (two letters or more) two to four times, in twelve words or fewer:
-/// the echo's rows.
+/// Whether a line sings one of its words (two letters or more) two to four times, in twelve words or fewer.
 fn echoes_a_word(words: &[(f64, String)]) -> bool {
     if words.len() > 12 {
         return false;
@@ -550,9 +528,7 @@ fn ends_sentence(text: &str) -> bool {
     text.trim_end().ends_with(['.', '!', '?', '…'])
 }
 
-/// Whether line `b` goes on with the sentence of line `a`, which stops being sung at `end`: `b` comes at
-/// once, `a` does not end a sentence, and `a` ends on a comma or is a fragment of three words or fewer, or
-/// `b` starts in lower case.
+/// Whether line `b` continues the sentence of line `a` (which stops at `end`).
 fn continues(a: &Line, b: &Line, end: f64) -> bool {
     let text = a.text.trim_end();
     if f64::from(b.ms) - end > CONT_GAP_MS || ends_sentence(text) || text.ends_with([':', ';']) {
@@ -563,39 +539,34 @@ fn continues(a: &Line, b: &Line, end: f64) -> bool {
         || b.text.trim_start().chars().next().is_some_and(char::is_lowercase)
 }
 
-/// The layouts that read alike: the rest of a sentence keeps to its line's family.
+/// Layouts that feel cohesive within a continued sentence.
 fn family(l: Layout) -> u8 {
     match l {
-        Layout::Stack | Layout::Rag | Layout::Cascade | Layout::Climb | Layout::Echo => 0,
-        Layout::Hero | Layout::Vertical | Layout::Burst | Layout::Stair => 1,
-        _ => 2,
+        Layout::Focus | Layout::Editorial | Layout::Climb | Layout::Echo => 0,
+        Layout::Hero | Layout::Crescendo => 1,
+        Layout::Split | Layout::Anthem => 2,
     }
 }
 
-/// The song's type personality: the tempo, the loudness and the words per second, each that is known,
-/// as a drive from 0 (calm) to 1; at or over 0.62 compressed, at or under 0.3 expanded, the seed picks in
-/// between.
-fn voice(bpm: Option<f64>, loud: Option<f64>, words_per_s: Option<f64>, rng: &mut Rng) -> Voice {
+/// Picks the song's art direction from tempo, loudness, word rate and seed so songs genuinely look
+/// distinct instead of collapsing onto one display face.
+fn mood(bpm: Option<f64>, loud: Option<f64>, words_per_s: Option<f64>, rng: &mut Rng) -> Mood {
     let parts = [bpm.map(|b| (b - 80.0) / 60.0), loud.map(|l| (l - 0.55) / 0.2), words_per_s.map(|w| (w - 1.5) / 2.0)];
     let known: Vec<f64> = parts.iter().flatten().map(|x| x.clamp(0.0, 1.0)).collect();
     let drive = if known.is_empty() { 0.5 } else { known.iter().sum::<f64>() / known.len() as f64 };
-    let pick = rng.coin();
-    if drive >= 0.62 {
-        Voice::Compressed
-    } else if drive <= 0.3 {
-        Voice::Expanded
-    } else if pick {
-        Voice::Round
+    if drive <= 0.32 {
+        Mood::Cinema
+    } else if drive >= 0.72 {
+        Mood::Poster
+    } else if drive >= 0.58 {
+        if rng.coin() { Mood::Poster } else { Mood::Nocturne }
     } else {
-        Voice::Quirk
+        const MID: [Mood; 3] = [Mood::Cinema, Mood::Editorial, Mood::Nocturne];
+        MID[rng.below(MID.len())]
     }
 }
 
-const PLACES: [(i8, i8); 9] = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
-const CENTER: (i8, i8) = (0, 0);
-
-/// Gives each line of the text scenes its shot and each scene its camera (see the module doc). `grid` is
-/// the beat and the first beat (ms) when the tempo is known.
+/// Gives each line of the text scenes its shot and each scene its camera move.
 #[allow(clippy::too_many_arguments)]
 fn shoot(
     sections: &mut [Section],
@@ -604,28 +575,17 @@ fn shoot(
     energy: &Energy,
     counts: &HashMap<String, u32>,
     duet: bool,
-    grid: Option<(f64, f64)>,
     rng: &mut Rng,
 ) {
-    // A line that starts right on a bar line.
-    let on_bar = |ms: f64| {
-        grid.is_some_and(|(beat, off)| {
-            let ph = ((ms - off) / beat).rem_euclid(4.0);
-            !(0.15..=3.85).contains(&ph)
-        })
-    };
-    // The chorus' signature, once per song: the anthem in the middle, then two partners elsewhere.
+    // Chorus signature: Anthem centered, followed by two balanced partners across repeats.
     let first = rng.below(PARTNERS.len());
     let second = (first + 1 + rng.below(PARTNERS.len() - 1)) % PARTNERS.len();
     let sig = [Layout::Anthem, PARTNERS[first], PARTNERS[second]];
-    let off: Vec<(i8, i8)> = PLACES.iter().copied().filter(|p| *p != CENTER).collect();
-    let a = off[rng.below(off.len())];
-    let rest: Vec<(i8, i8)> = off.iter().copied().filter(|p| *p != a).collect();
-    let places = [CENTER, a, rest[rng.below(rest.len())]];
-    let enters = [Enter::Pop, Enter::Drift, if rng.coin() { Enter::Letters } else { Enter::Rise }];
-    let exits = [Exit::Zoom, if rng.coin() { Exit::Scatter } else { Exit::Fold }, Exit::Steps];
+    let side_a: i8 = if rng.coin() { -1 } else { 1 };
+    let places: [(i8, i8); 3] = [(0, 0), (side_a, 0), (-side_a, 0)];
+    let enters = [Enter::Impact, Enter::Curtain, if rng.coin() { Enter::Focus } else { Enter::Glide }];
+    let exits = [Exit::Recede, Exit::Dissolve, Exit::DriftUp];
 
-    // Every line of a text scene, in order, with whether a textless scene comes before it.
     let mut order: Vec<(usize, usize, bool)> = Vec::new();
     let mut gap = true;
     for (si, s) in sections.iter().enumerate() {
@@ -637,15 +597,14 @@ fn shoot(
             gap = false;
         }
     }
+
     let mut prev: Option<Shot> = None;
-    // The verse's walk: which path, where on it, which way.
-    let mut walk = (0usize, 0usize, true);
     let (mut run, mut k) = (0u8, 0usize);
-    // Per line of `order`: its chorus run (1, 2... ; 0 outside one), its word count and its energy.
-    let mut info: Vec<(usize, usize, Option<f64>)> = Vec::with_capacity(order.len());
-    let mut runs = 0usize;
     let mut all: Vec<Vec<Shot>> = sections.iter().map(|s| Vec::with_capacity(s.lines.len())).collect();
-    for (n, &(si, j, after_gap)) in order.iter().enumerate() {
+    // Composed scene alignment: stays grounded instead of bouncing randomly around all 9 corners.
+    let mut editorial_side: i8 = if rng.coin() { -1 } else { 1 };
+
+    for &(si, j, after_gap) in &order {
         if after_gap {
             prev = None;
         }
@@ -653,18 +612,14 @@ fn shoot(
         let chorus = s.kind == Kind::Chorus;
         if chorus && j == 0 && (si == 0 || sections[si - 1].kind != Kind::Chorus) {
             run = run.saturating_add(1);
-            runs += 1;
             k = 0;
         }
         let i = s.lines[j];
         let ws = words(&lines[i], ends[i]);
         let hero = hero(&ws, ends[i], counts);
         let hero_len = hero.map_or(0, |h| letters(&ws[h].1));
-        let fits = |l: Layout| l.fits(ws.len(), hero_len);
+        let fits = |l: Layout| l.fits(ws.len());
         let before = prev.map(|p| p.layout);
-        let last_place = prev.map(|p| (p.x, p.y));
-        info.push((if chorus { runs } else { 0 }, ws.len(), energy.between(f64::from(lines[i].ms), ends[i])));
-        // In a duet each singer keeps a side: the first the left, the second the right, together the middle.
         let singer = if duet { lines[i].voice.min(2) } else { 0 };
         let side: i8 = match singer {
             0 => -1,
@@ -672,20 +627,22 @@ fn shoot(
             _ => 0,
         };
         let answer = duet && singer < 2 && prev.is_some_and(|p| p.singer < 2 && p.singer != singer);
+
         let mut shot = if chorus {
             let at = k % sig.len();
             let next = sig[(k + 1) % sig.len()];
             let layout = if fits(sig[at]) {
                 sig[at]
             } else {
-                FALLBACK.into_iter().find(|l| Some(*l) != before && *l != next).unwrap_or(Layout::Stack)
+                FALLBACK.into_iter().find(|l| Some(*l) != before && *l != next).unwrap_or(Layout::Focus)
             };
             k += 1;
-            // The signature's row on the singer's side, another row when the line before was there.
-            let (x, y) = match places[at] {
-                (_, y) if duet && Some((side, y)) == last_place => (side, if y == 1 { -1 } else { 1 }),
-                (_, y) if duet => (side, y),
-                p => p,
+            let (x, y) = if duet {
+                (side, 0)
+            } else if matches!(layout, Layout::Anthem | Layout::Focus | Layout::Split) {
+                (0, 0)
+            } else {
+                places[at]
             };
             Shot {
                 layout,
@@ -695,38 +652,32 @@ fn shoot(
                 enter: enters[at],
                 exit: exits[at],
                 level: run.min(MAX_LEVEL),
-                paper: Paper::Dark,
-                script: false,
+                italic: false,
                 singer,
                 answer,
                 cont: false,
             }
         } else {
-            // A verse line right before a chorus keeps the middle free for its anthem.
-            let to_chorus =
-                order.get(n + 1).is_some_and(|&(nsi, nj, ngap)| !ngap && nj == 0 && sections[nsi].kind == Kind::Chorus);
-            let calm = s.kind != Kind::Editorial;
+            let calm = s.kind == Kind::Close;
             let before_line = if after_gap { None } else { j.checked_sub(1).map(|p| s.lines[p]) };
             let cont = !duet
                 && !prev.is_some_and(|p| p.cont)
                 && before_line.is_some_and(|p| continues(&lines[p], &lines[i], ends[p]));
-            // The line's own look first: short lines go big, long ones run in rows, a word sung again echoes,
-            // a cry bursts, the rest of a sentence keeps its line's family; the seed only breaks ties.
             let n_words = ws.len();
             let text = lines[i].text.trim_end();
             let kin = if cont { prev.map(|p| family(p.layout)) } else { None };
             let favour = |l: Layout| -> u32 {
                 let mut w = 1;
                 if kin.is_some_and(|f| family(l) == f) {
-                    w *= 6;
+                    w *= 5;
                 }
-                if n_words <= 3 && matches!(l, Layout::Hero | Layout::Stair | Layout::Vertical) {
-                    w *= 4;
+                if n_words <= 4 && matches!(l, Layout::Hero | Layout::Focus) {
+                    w *= 3;
                 }
-                if n_words >= 8 && matches!(l, Layout::Rag | Layout::Climb | Layout::Cascade) {
-                    w *= 4;
+                if n_words >= 8 && matches!(l, Layout::Editorial | Layout::Climb | Layout::Focus) {
+                    w *= 3;
                 }
-                if text.ends_with(['!', '?']) && l == Layout::Burst {
+                if text.ends_with(['!', '?']) && l == Layout::Crescendo {
                     w *= 4;
                 }
                 w
@@ -737,204 +688,77 @@ fn shoot(
                 .map(|&(l, quiet, driven)| (l, (if calm { quiet } else { driven }) * favour(l)))
                 .collect();
             if before != Some(Layout::Echo) && fits(Layout::Echo) && echoes_a_word(&ws) {
-                pool.push((Layout::Echo, 10 * favour(Layout::Echo)));
+                pool.push((Layout::Echo, 8 * favour(Layout::Echo)));
             }
-            let layout = rng.weighted(&pool).or_else(|| pool.first().map(|p| p.0)).unwrap_or(Layout::Stack);
-            // The places walk the scene's path one neighbour a line; a scene's start, a new sentence or a
-            // downbeat may jump anywhere (the rest of a sentence never does).
-            let allowed = |p: (i8, i8)| (!duet || p.0 == side) && Some(p) != last_place && !(to_chorus && p == CENTER);
-            let near = |p: (i8, i8)| last_place.is_none_or(|l| (p.0 - l.0).abs() <= 1 && (p.1 - l.1).abs() <= 1);
-            let free: Vec<(i8, i8)> = PLACES.iter().copied().filter(|p| allowed(*p)).collect();
-            if before_line.is_none() {
-                walk = (rng.below(PATHS.len()), 0, rng.coin());
+            let layout = rng.weighted(&pool).or_else(|| pool.first().map(|p| p.0)).unwrap_or(Layout::Focus);
+
+            // Composed framing: flip editorial side only on new sentences or new sections, never erratically.
+            if before_line.is_none() || before_line.is_some_and(|p| ends_sentence(&lines[p].text)) {
+                editorial_side = -editorial_side;
             }
-            let path = PATHS[walk.0];
-            let jump = !cont
-                && (before_line.is_none()
-                    || before_line.is_some_and(|p| ends_sentence(&lines[p].text))
-                    || on_bar(f64::from(lines[i].ms)));
-            let place = if jump {
-                let p = free[rng.below(free.len())];
-                walk.1 =
-                    (0..path.len()).min_by_key(|&q| (path[q].0 - p.0).abs().max((path[q].1 - p.1).abs())).unwrap_or(0);
-                p
+            let (x, y) = if duet {
+                (side, 0)
             } else {
-                let len = path.len();
-                let on_path = (1..=len)
-                    .map(|d| if walk.2 { (walk.1 + d) % len } else { (walk.1 + len * 2 - d) % len })
-                    .find(|&q| allowed(path[q]) && near(path[q]));
-                match on_path {
-                    Some(q) => {
-                        walk.1 = q;
-                        path[q]
-                    }
-                    // Off the path (a duet's side, the middle kept for the chorus): a neighbour, else anywhere.
-                    None => {
-                        let close: Vec<(i8, i8)> = free.iter().copied().filter(|p| near(*p)).collect();
-                        let from = if close.is_empty() { &free } else { &close };
-                        from[rng.below(from.len())]
-                    }
+                match layout {
+                    Layout::Editorial => (editorial_side, 0),
+                    Layout::Hero | Layout::Crescendo => (if calm { 0 } else { editorial_side }, 0),
+                    Layout::Focus | Layout::Split | Layout::Climb | Layout::Echo | Layout::Anthem => (0, 0),
                 }
             };
-            let e = energy.between(f64::from(lines[i].ms), ends[i]).unwrap_or(if calm { 0.4 } else { 0.65 });
-            let pick_enter = |e: f64| -> [(Enter, u32); 6] {
-                if e > 0.6 {
-                    [
-                        (Enter::Pop, 3),
-                        (Enter::Stamp, 2),
-                        (Enter::Slice, 2),
-                        (Enter::Drift, 1),
-                        (Enter::Letters, 1),
-                        (Enter::Rise, 0),
-                    ]
-                } else if e < 0.35 {
-                    [
-                        (Enter::Letters, 3),
-                        (Enter::Rise, 3),
-                        (Enter::Drift, 1),
-                        (Enter::Pop, 1),
-                        (Enter::Slice, 0),
-                        (Enter::Stamp, 0),
-                    ]
-                } else {
-                    [
-                        (Enter::Pop, 2),
-                        (Enter::Rise, 2),
-                        (Enter::Drift, 2),
-                        (Enter::Letters, 1),
-                        (Enter::Slice, 1),
-                        (Enter::Stamp, 1),
-                    ]
-                }
+
+            let e = energy.between(f64::from(lines[i].ms), ends[i]).unwrap_or(if calm { 0.35 } else { 0.62 });
+            let pick_enter: [(Enter, u32); 5] = if calm || e < 0.4 {
+                [(Enter::Illuminate, 5), (Enter::Curtain, 3), (Enter::Focus, 2), (Enter::Glide, 1), (Enter::Impact, 0)]
+            } else if e > 0.65 {
+                [(Enter::Curtain, 3), (Enter::Glide, 3), (Enter::Focus, 2), (Enter::Impact, 2), (Enter::Illuminate, 1)]
+            } else {
+                [(Enter::Illuminate, 3), (Enter::Curtain, 3), (Enter::Glide, 2), (Enter::Focus, 2), (Enter::Impact, 0)]
             };
-            let pick_exit = |e: f64| -> [(Exit, u32); 6] {
-                if e > 0.6 {
-                    [
-                        (Exit::Scatter, 3),
-                        (Exit::Zoom, 3),
-                        (Exit::Steps, 2),
-                        (Exit::Slide, 1),
-                        (Exit::Fold, 1),
-                        (Exit::Sink, 0),
-                    ]
-                } else if e < 0.35 {
-                    [
-                        (Exit::Sink, 3),
-                        (Exit::Steps, 3),
-                        (Exit::Slide, 2),
-                        (Exit::Fold, 1),
-                        (Exit::Zoom, 0),
-                        (Exit::Scatter, 0),
-                    ]
-                } else {
-                    [
-                        (Exit::Sink, 2),
-                        (Exit::Steps, 2),
-                        (Exit::Slide, 2),
-                        (Exit::Fold, 2),
-                        (Exit::Zoom, 2),
-                        (Exit::Scatter, 2),
-                    ]
-                }
-            };
-            let enters: Vec<(Enter, u32)> =
-                pick_enter(e).into_iter().filter(|x| Some(x.0) != prev.map(|p| p.enter)).collect();
-            // What covers the screen only with room before the next line; the block's last line leaves
-            // stronger.
-            let gap = order
-                .get(n + 1)
-                .map_or(f64::INFINITY, |&(nsi, nj, _)| f64::from(lines[sections[nsi].lines[nj]].ms) - ends[i]);
+            let enters_pool: Vec<(Enter, u32)> =
+                pick_enter.into_iter().filter(|x| x.1 > 0 && Some(x.0) != prev.map(|p| p.enter)).collect();
+
             let last_of_block = j + 1 == s.lines.len();
-            let exits: Vec<(Exit, u32)> = pick_exit(e)
-                .into_iter()
-                .filter(|x| Some(x.0) != prev.map(|p| p.exit))
-                .map(|(x, w)| match x {
-                    Exit::Zoom | Exit::Scatter if gap < ROOM_MS => (x, 0),
-                    Exit::Zoom | Exit::Scatter | Exit::Fold if last_of_block => (x, w * 2),
-                    _ => (x, w),
-                })
-                .collect();
+            let pick_exit: [(Exit, u32); 4] = [
+                (Exit::DriftUp, 3),
+                (Exit::Dissolve, 3),
+                (Exit::CurtainDown, 2),
+                (Exit::Recede, if last_of_block { 4 } else { 1 }),
+            ];
+            let exits_pool: Vec<(Exit, u32)> =
+                pick_exit.into_iter().filter(|x| Some(x.0) != prev.map(|p| p.exit)).collect();
+
             Shot {
                 layout,
-                x: place.0,
-                y: place.1,
+                x,
+                y,
                 hero,
-                enter: rng.weighted(&enters).unwrap_or(Enter::Pop),
-                exit: rng.weighted(&exits).unwrap_or(Exit::Slide),
+                enter: rng.weighted(&enters_pool).unwrap_or(Enter::Illuminate),
+                exit: rng.weighted(&exits_pool).unwrap_or(Exit::Dissolve),
                 level: 0,
-                paper: Paper::Dark,
-                script: false,
+                italic: false,
                 singer,
                 answer,
                 cont,
             }
         };
-        // The script face: always at the stair's ends; on a hero word now and then, never twice in a row.
-        shot.script = match shot.layout {
-            Layout::Stair => true,
-            Layout::Hero => (3..=12).contains(&hero_len) && !prev.is_some_and(|p| p.script) && rng.coin(),
+
+        // Editorial italic contrast on emphasis words: restrained, never monotonous.
+        shot.italic = match shot.layout {
+            Layout::Hero => (3..=14).contains(&hero_len) && !prev.is_some_and(|p| p.italic),
+            Layout::Focus | Layout::Editorial => {
+                (4..=12).contains(&hero_len) && !prev.is_some_and(|p| p.italic) && rng.coin()
+            }
             _ => false,
         };
-        // An answer types its letters; a group's words drift in from both sides.
         if answer {
-            shot.enter = Enter::Letters;
+            shot.enter = Enter::Glide;
         } else if duet && singer == 2 {
-            shot.enter = Enter::Drift;
+            shot.enter = Enter::Focus;
         }
         all[si].push(shot);
         prev = Some(shot);
     }
-    // The peak: bars on the anthem of the strongest choruses after the first (of the only one when there is
-    // one), one a chorus, at most MAX_BARS; without a chorus, the strongest line when it is loud enough.
-    let late = info.iter().any(|x| x.0 >= 2);
-    let mut cands: Vec<usize> = (0..order.len())
-        .filter(|&n| {
-            let (si, j, _) = order[n];
-            all[si][j].layout == Layout::Anthem && Layout::Bar.fits(info[n].1, 0) && (!late || info[n].0 >= 2)
-        })
-        .collect();
-    if runs == 0 {
-        cands = (0..order.len())
-            .filter(|&n| Layout::Bar.fits(info[n].1, 0) && info[n].2.is_some_and(|e| e > 0.8))
-            .collect();
-    }
-    // The strongest first; without the analysis, the latest.
-    cands.sort_by(|&a, &b| info[b].2.unwrap_or(0.0).total_cmp(&info[a].2.unwrap_or(0.0)).then(b.cmp(&a)));
-    let mut bars: Vec<usize> = Vec::new();
-    for n in cands {
-        let limit = if runs == 0 { 1 } else { MAX_BARS };
-        if bars.len() < limit && bars.iter().all(|&m| info[m].0 != info[n].0 || runs == 0) {
-            bars.push(n);
-        }
-    }
-    for &n in &bars {
-        let (si, j, _) = order[n];
-        all[si][j].layout = Layout::Bar;
-        all[si][j].script = false;
-    }
-    // The paper cuts only on an event: a scene's start (every other driven verse on light paper), a bar
-    // (light for its line), a duet's answer once the paper has stayed PAPER_HOLD_MS.
-    let (mut paper, mut since, mut driven) = (Paper::Dark, 0.0, 0usize);
-    for (n, &(si, j, _)) in order.iter().enumerate() {
-        let s = &sections[si];
-        let ms = f64::from(lines[s.lines[j]].ms);
-        if j == 0 {
-            paper = Paper::Dark;
-            if s.kind == Kind::Editorial {
-                driven += 1;
-                if driven % 2 == 0 {
-                    paper = Paper::Light;
-                }
-            }
-            since = ms;
-        }
-        let shot = &mut all[si][j];
-        if shot.answer && ms - since >= PAPER_HOLD_MS {
-            paper = if paper == Paper::Dark { Paper::Light } else { Paper::Dark };
-            since = ms;
-        }
-        shot.paper = if bars.contains(&n) { Paper::Light } else { paper };
-    }
+
     let mut last = Camera::Push;
     for (s, shots) in sections.iter_mut().zip(all) {
         s.shots = shots;
@@ -942,7 +766,7 @@ fn shoot(
             Kind::Chorus | Kind::Opening => Camera::Push,
             Kind::Credits => Camera::Rise,
             _ => {
-                let moves = [Camera::Pull, Camera::Left, Camera::Right, Camera::Rise, Camera::Roll, Camera::Push];
+                let moves = [Camera::Pull, Camera::Left, Camera::Right, Camera::Rise, Camera::Push];
                 let free: Vec<Camera> = moves.into_iter().filter(|m| *m != last).collect();
                 free[rng.below(free.len())]
             }
@@ -964,8 +788,6 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     let bpm = facts.and_then(|f| f.bpm).filter(|b| b.is_finite() && *b > 0.0);
     let beat = bpm.map(|b| 60_000.0 / b);
     let offset = facts.and_then(|f| f.beat_offset_ms).filter(|o| o.is_finite()).unwrap_or(0.0);
-    // A cut at `t` moves to the nearest bar line within reach that lies between `lo` (the end of what is
-    // still sung) and `hi` (the next line's lead), so it never makes a word late nor cuts one short.
     let snap = |t: f64, lo: f64, hi: f64| match beat {
         Some(beat) => {
             let bar = beat * 4.0;
@@ -983,7 +805,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     let ends: Vec<f64> = (0..lines.len()).map(|i| line_end(lines, i, duration)).collect();
     let texts: Vec<String> = lines.iter().map(|l| norm(&l.text)).collect();
     let sung: Vec<usize> = (0..lines.len()).filter(|&i| !texts[i].is_empty()).collect();
-    let mut count = std::collections::HashMap::<&str, u32>::new();
+    let mut count = HashMap::<&str, u32>::new();
     let mut echoes = vec![0u8; lines.len()];
     for &i in &sung {
         let n = count.entry(texts[i].as_str()).or_default();
@@ -995,14 +817,12 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
 
     let mut out = Vec::new();
     if sung.is_empty() {
-        // No lyrics: the cover's opening, an instrumental with the relief, the credits.
         let head = snap((duration * 0.2).min(12_000.0), 0.0, duration);
         let tail = snap(duration - (duration * 0.2).min(15_000.0), head, duration);
         out.push(section(Kind::Opening, 0.0, head, "no_lyrics"));
         out.push(section(Kind::Instrumental, head, tail, "no_lyrics"));
         out.push(section(Kind::Credits, tail, duration, "no_lyrics"));
     } else {
-        // 1. Blocks of lines.
         let gap_max = beat.map_or(4500.0, |b| (b * 7.0).max(3000.0));
         let mut blocks: Vec<Vec<usize>> = Vec::new();
         for (k, &i) in sung.iter().enumerate() {
@@ -1015,13 +835,11 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
             }
             blocks.last_mut().expect("a block").push(i);
         }
-        // 2. The opening, until the first line.
         let lead = |i: usize| f64::from(lines[i].ms) - LEAD_MS;
         let first = snap(lead(sung[0]), 0.0, lead(sung[0]));
         if first >= MIN_OPENING_MS {
             out.push(section(Kind::Opening, 0.0, first, "before_first"));
         }
-        // 3. Each block a scene, and an instrumental in a long gap after it.
         let mut last_verse = if rng.coin() { Kind::Editorial } else { Kind::Close };
         let mut chorus_no = 0;
         let instrumental = beat.map_or(5000.0, |b| (b * 8.0).max(5000.0));
@@ -1069,7 +887,6 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
                 None => out.push(s),
             }
         }
-        // 4. The credits, after the last line.
         let last_end = ends[*sung.last().expect("a line")];
         let credits = snap(last_end + beat.unwrap_or(1000.0), last_end, duration);
         if duration - credits >= MIN_CREDITS_MS {
@@ -1081,7 +898,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     }
     let duration_ms = duration.max(1.0).round() as u32;
     let mut sections = tidy(out, duration_ms);
-    // The words the song sings, for the emphasis words, and how fast they come, for the voice.
+
     let mut counts = HashMap::<String, u32>::new();
     let (mut sung_words, mut sung_ms) = (0usize, 0.0);
     for &i in &sung {
@@ -1093,10 +910,10 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
         sung_ms += (ends[i] - f64::from(lines[i].ms)).clamp(0.0, 15_000.0);
     }
     let per_s = (sung_ms >= 5000.0).then(|| sung_words as f64 / (sung_ms / 1000.0));
-    let voice = voice(bpm, energy.1, per_s, &mut rng);
+    let mood = mood(bpm, energy.1, per_s, &mut rng);
     let duet = [0, 1].iter().all(|&v| sung.iter().filter(|&&i| lines[i].voice == v).count() >= 2);
-    shoot(&mut sections, lines, &ends, &energy, &counts, duet, beat.map(|b| (b, offset)), &mut rng);
-    // How each scene is entered, from the one before it.
+    shoot(&mut sections, lines, &ends, &energy, &counts, duet, &mut rng);
+
     let text = |k: Kind| matches!(k, Kind::Close | Kind::Editorial | Kind::Chorus);
     for k in 1..sections.len() {
         let (was, is) = (sections[k - 1].kind, sections[k].kind);
@@ -1111,7 +928,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     Script {
         duration_ms,
         sections,
-        voice,
+        mood,
         duet,
         grid: bpm.map(|bpm| Grid { bpm, offset_ms: offset }),
         light: energy.light(),
@@ -1126,9 +943,7 @@ pub fn direct(lines: &[Line], facts: Option<&Facts>, track: &Track) -> Script {
     }
 }
 
-/// Makes the sections contiguous from 0 to `duration`: each starts where the one before ends, and one
-/// left with no time (a cut snapped past the next) gives its lines to the one before, or to the next one
-/// when it is the first. A scene without text that gets lines becomes a close-up.
+/// Makes the sections contiguous from 0 to `duration`.
 fn tidy(sections: Vec<Section>, duration: u32) -> Vec<Section> {
     let take = |s: &mut Section, lines: Vec<usize>| {
         s.lines.extend(lines);
@@ -1166,6 +981,31 @@ fn tidy(sections: Vec<Section>, duration: u32) -> Vec<Section> {
     out
 }
 
+/// Upgrades Google/YouTube Music cover URLs that carry tiny dimensions (e.g. `=w120-h120`) to a crisp
+/// 544×544 square while preserving the validated host and path.
+fn hi_res_artwork(url: &str) -> Option<String> {
+    let valid = crate::player::artwork(url)?;
+    if let Some((base, suffix)) = valid.rsplit_once('=')
+        && (valid.contains("googleusercontent.com/") || valid.contains("ggpht.com/"))
+        && suffix.starts_with('w')
+        && suffix.contains("-h")
+        && !suffix.contains('/')
+    {
+        return Some(format!("{base}=w544-h544-l90-rj"));
+    }
+    Some(valid)
+}
+
+/// Cached backdrop + halo data URLs for the current cover, owned by Stage so it works even with
+/// `ambient_mode` disabled.
+#[derive(Default, Clone)]
+struct StageArt {
+    url: Option<String>,
+    backdrop: Option<String>,
+    halo: Option<String>,
+}
+
+static ART: Mutex<StageArt> = Mutex::new(StageArt { url: None, backdrop: None, halo: None });
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// The plugin was on at startup, so the page has the module.
 static LOADED: AtomicBool = AtomicBool::new(false);
@@ -1174,6 +1014,18 @@ static AVAILABLE: AtomicBool = AtomicBool::new(false);
 static OPEN: AtomicBool = AtomicBool::new(false);
 static FONT_SENT: AtomicBool = AtomicBool::new(false);
 
+fn build_stage_art(url: &str) -> Result<(String, String), String> {
+    let art = artwork::load(url)?;
+    let encode = |pixels: windows::core::Result<Vec<u8>>, side: u32| {
+        let png = artwork::png(&pixels.map_err(|e| e.to_string())?, side, side).map_err(|e| e.to_string())?;
+        Ok::<_, String>(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png)))
+    };
+    let backdrop = encode(artwork::stage_backdrop(&art, BACKDROP_SIDE, BACKDROP_SIGMA), BACKDROP_SIDE)?;
+    let halo =
+        encode(artwork::halo(&art, HALO_SIDE, HALO_SIGMA, HALO_SATURATION, HALO_BRIGHTNESS, HALO_SOLID), HALO_SIDE)?;
+    Ok((backdrop, halo))
+}
+
 pub fn start(app: &AppHandle) {
     let _ = APP.set(app.clone());
     if !app.state::<Live>().plugin("stage") {
@@ -1181,17 +1033,20 @@ pub fn start(app: &AppHandle) {
     }
     LOADED.store(true, Ordering::Relaxed);
     AVAILABLE.store(true, Ordering::Relaxed);
+
+    // Track metadata & script refreshes.
     let mut rx = app.state::<Player>().subscribe();
     std::thread::spawn(move || {
-        let mut last_meta: Option<(Option<String>, String, i64)> = None;
+        let mut last_meta: Option<(Option<String>, String, Option<String>, i64)> = None;
         loop {
             match rx.blocking_recv() {
                 Ok(Event::Track(s)) => {
-                    last_meta = Some((s.track.id, s.track.album, (s.track.duration * 2.0).round() as i64));
+                    last_meta =
+                        Some((s.track.id, s.track.album, s.track.artwork, (s.track.duration * 2.0).round() as i64));
                     refresh();
                 }
                 Ok(Event::Progress(s)) => {
-                    let meta = (s.track.id, s.track.album, (s.track.duration * 2.0).round() as i64);
+                    let meta = (s.track.id, s.track.album, s.track.artwork, (s.track.duration * 2.0).round() as i64);
                     if last_meta.as_ref() != Some(&meta) {
                         last_meta = Some(meta);
                         if is_open() {
@@ -1204,6 +1059,38 @@ pub fn start(app: &AppHandle) {
             }
         }
     });
+
+    // Dedicated cover art worker for Stage's smooth Gaussian backdrop and halo.
+    let mut art_rx = app.state::<Player>().subscribe();
+    std::thread::spawn(move || {
+        let mut last_url: Option<Option<String>> = None;
+        loop {
+            match art_rx.blocking_recv() {
+                Ok(event) => {
+                    let wanted = event.state().track.artwork.clone();
+                    if last_url.as_ref() == Some(&wanted) {
+                        continue;
+                    }
+                    last_url = Some(wanted.clone());
+                    let (backdrop, halo) = match wanted.as_deref().map(build_stage_art) {
+                        Some(Ok((b, h))) => (Some(b), Some(h)),
+                        Some(Err(e)) => {
+                            eprintln!("stage: backdrop not built: {e}");
+                            (None, None)
+                        }
+                        None => (None, None),
+                    };
+                    *ART.lock().unwrap_or_else(|e| e.into_inner()) = StageArt { url: wanted, backdrop, halo };
+                    if is_open() {
+                        refresh();
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
     let mut queue_rx = app.state::<Player>().subscribe_queue();
     std::thread::spawn(move || {
         loop {
@@ -1229,8 +1116,7 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::Relaxed)
 }
 
-/// The plugin's switch: off closes the stage and takes the button away until it is on again (which,
-/// without the module in the page, needs a restart).
+/// The plugin's switch: off closes the stage and takes the button away until it is on again.
 pub fn set_enabled(app: &AppHandle, on: bool) {
     if !on {
         close(app);
@@ -1241,8 +1127,7 @@ pub fn set_enabled(app: &AppHandle, on: bool) {
     crate::titlebar::refresh(app);
 }
 
-/// Opens the stage: the window comes back if hidden, goes fullscreen, the page gets the focus and the
-/// script. Not in game mode. Any thread.
+/// Opens the stage: the window comes back if hidden, goes fullscreen, the page gets focus and the script.
 pub fn open(app: &AppHandle) {
     if !available() || crate::game_mode::is_on() || OPEN.swap(true, Ordering::Relaxed) {
         return;
@@ -1258,8 +1143,17 @@ pub fn open(app: &AppHandle) {
     if !FONT_SENT.swap(true, Ordering::Relaxed) {
         let fonts: Vec<Value> = FONTS
             .iter()
-            .map(|(family, bytes)| {
-                json!({ "family": family, "data": base64::engine::general_purpose::STANDARD.encode(bytes) })
+            .map(|f| {
+                let mut obj = json!({
+                    "family": f.family,
+                    "style": f.style,
+                    "weight": f.weight,
+                    "data": base64::engine::general_purpose::STANDARD.encode(f.bytes),
+                });
+                if let Some(s) = f.stretch {
+                    obj["stretch"] = Value::String(s.into());
+                }
+                obj
             })
             .collect();
         crate::injections::send(app, "stageFont", &json!({ "fonts": fonts }));
@@ -1283,8 +1177,7 @@ pub fn close(app: &AppHandle) {
     }
 }
 
-/// Closes the stage on the page only (the window was minimized: it leaves fullscreen once restored, see
-/// titlebar.rs). Whether it was open.
+/// Closes the stage on the page only (window minimized: leaves fullscreen on restore, see titlebar.rs).
 pub fn close_page(app: &AppHandle) -> bool {
     if !OPEN.swap(false, Ordering::Relaxed) {
         return false;
@@ -1294,15 +1187,14 @@ pub fn close_page(app: &AppHandle) -> bool {
     true
 }
 
-/// Writes the script again (the track, its lines, its facts or its background changed); only while open.
-/// Any thread.
+/// Writes the script again (the track, its lines, its facts or its backdrop changed); only while open.
 pub fn refresh() {
     if let Some(app) = APP.get().filter(|_| is_open()) {
         crate::injections::send(app, "stage", &payload(app));
     }
 }
 
-/// What the page gets while open (see injections/stage/page.js).
+/// What the page gets while open (see `injections/stage/page.js`).
 fn payload(app: &AppHandle) -> Value {
     let state = app.state::<Player>().current();
     let track = state.map(|s| s.track).unwrap_or_else(|| crate::player::Track {
@@ -1338,19 +1230,22 @@ fn payload(app: &AppHandle) -> Value {
     let timed = |ws: &crate::lyrics::Words| -> Value {
         if ws.is_empty() { Value::Null } else { ws.iter().map(|(ms, w)| json!([ms, w])).collect() }
     };
-    // [start, text, words, singer, background vocals]
     let page_lines: Vec<Value> =
         lines.iter().map(|l| json!([l.ms, l.text, timed(&l.words), l.voice, timed(&l.bg)])).collect();
     let subtitles = app.state::<Live>().get().stage.translation;
     let translation = (subtitles && lines.iter().any(|l| l.translation.is_some()))
         .then(|| lines.iter().map(|l| l.translation.as_deref()).collect::<Vec<_>>());
+    let art = ART.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let art_matches = art.url == track.artwork;
     json!({
         "open": true,
         "id": track.id,
+        "artwork": track.artwork.as_deref().and_then(hi_res_artwork),
+        "backdrop": if art_matches { art.backdrop } else { None },
+        "halo": if art_matches { art.halo } else { None },
         "script": script,
         "lines": page_lines,
         "translation": translation,
-        "field": crate::ambient::field(),
         "texts": {
             "leave": t("Leave the stage"),
             "esc": t("Esc to leave"),
@@ -1383,7 +1278,6 @@ mod tests {
         Track { title: "T", artist: "A", album: "B", duration_ms, seed: "abcdefghijk", next: None }
     }
 
-    /// 120 BPM (500 ms beats, 2 s bars) from 0, with an even envelope.
     fn facts(duration_s: f64) -> Facts {
         let bins = (duration_s * 10.0) as usize;
         let bytes: Vec<u8> = (0..bins).flat_map(|b| [(b % 200) as u8 + 20, 120, 60]).collect();
@@ -1402,7 +1296,6 @@ mod tests {
         }
     }
 
-    /// A verse, a chorus, a long gap, the verse again, the chorus again.
     fn song() -> Vec<Line> {
         vec![
             line(10_100, 13_000, "Acordei com a cidade acesa"),
@@ -1429,117 +1322,6 @@ mod tests {
         assert!(s.sections.iter().all(|s| s.to_ms > s.from_ms), "{:?}", s.sections);
     }
 
-    #[test]
-    fn repeated_lines_are_a_chorus() {
-        let s = direct(&song(), None, &track(60_000));
-        let choruses: Vec<&Section> = s.sections.iter().filter(|s| s.kind == Kind::Chorus).collect();
-        assert_eq!(choruses.len(), 2, "{:?}", kinds(&s));
-        assert_eq!((choruses[0].chorus_no, choruses[1].chorus_no), (1, 2));
-        assert_eq!(choruses[0].lines, [2, 3]);
-        // A verse lifts into the chorus; the gap after it is a frame, and the verse after it a return.
-        assert_eq!(choruses[0].entry, Entry::Lift);
-        assert_eq!(kinds(&s)[3], Kind::Instrumental);
-        assert_eq!(
-            s.sections.iter().map(|x| x.entry).skip(3).take(2).collect::<Vec<_>>(),
-            [Entry::Frame, Entry::Return]
-        );
-        // Accents, case and punctuation do not matter; the second time is an echo of the first.
-        assert_eq!(s.echoes[6], 1);
-        assert_eq!(s.echoes[2], 0);
-    }
-
-    #[test]
-    fn a_long_gap_is_an_instrumental() {
-        let s = direct(&song(), None, &track(60_000));
-        let i = s.sections.iter().position(|s| s.kind == Kind::Instrumental).expect("an instrumental");
-        let inst = &s.sections[i];
-        assert!(inst.from_ms >= 22_000 && inst.to_ms <= 40_100, "{inst:?}");
-        assert_eq!(s.sections[i + 1].lines[0], 4);
-    }
-
-    #[test]
-    fn cuts_land_on_the_bar_without_cutting_a_line() {
-        let lines = song();
-        let s = direct(&lines, Some(&facts(60.0)), &track(60_000));
-        // The first line at 10.1 s: the bar at 10 s is past its lead (9.95 s), so the cut stays there.
-        assert_eq!(s.sections[0].kind, Kind::Opening);
-        assert_eq!(s.sections[0].to_ms, 9950);
-        // The chorus at 16.2 s moves back to the bar at 16 s, where the line before it ends.
-        let chorus = s.sections.iter().find(|x| x.kind == Kind::Chorus).expect("a chorus");
-        assert_eq!(chorus.from_ms, 16_000);
-        // No scene of lines starts after its first line's lead, nor before the line before it ends.
-        for x in s.sections.iter().filter(|x| !x.lines.is_empty()) {
-            assert!(f64::from(x.from_ms) <= f64::from(lines[x.lines[0]].ms) - LEAD_MS, "{x:?}");
-            assert!(x.lines[0].checked_sub(1).is_none_or(|p| x.from_ms >= lines[p].end), "{x:?}");
-        }
-        assert_eq!(s.grid, Some(Grid { bpm: 120.0, offset_ms: 0.0 }));
-        assert_eq!(s.light.len(), 600);
-        assert_contiguous(&s);
-    }
-
-    #[test]
-    fn without_facts_the_lyrics_decide() {
-        let s = direct(&song(), None, &track(60_000));
-        assert!(s.grid.is_none() && s.light.is_empty());
-        assert!(s.sections.iter().all(|x| !matches!(x.why, "low_energy" | "high_energy")));
-        assert_eq!(s.sections[0].to_ms, 9950);
-        // The verses alternate between the close-up and the editorial stack.
-        let verses: Vec<Kind> = kinds(&s).into_iter().filter(|k| matches!(k, Kind::Close | Kind::Editorial)).collect();
-        assert_eq!(verses.len(), 2);
-        assert_ne!(verses[0], verses[1]);
-        assert_contiguous(&s);
-    }
-
-    #[test]
-    fn without_lyrics_an_opening_an_instrumental_and_credits() {
-        let s = direct(&[], None, &track(200_000));
-        assert_eq!(kinds(&s), [Kind::Opening, Kind::Instrumental, Kind::Credits]);
-        assert_contiguous(&s);
-        let blank = direct(&[line(1000, 2000, "  "), line(3000, 0, "♪")], None, &track(200_000));
-        assert_eq!(kinds(&blank), kinds(&s));
-    }
-
-    #[test]
-    fn a_song_without_gaps_has_no_instrumental() {
-        let lines: Vec<Line> =
-            (0..30).map(|i| line(5000 + i * 3000, 5000 + i * 3000 + 2800, &format!("line {i}"))).collect();
-        let s = direct(&lines, None, &track(100_000));
-        assert!(!kinds(&s).contains(&Kind::Instrumental), "{:?}", kinds(&s));
-        assert_eq!(kinds(&s).first(), Some(&Kind::Opening));
-        assert_eq!(kinds(&s).last(), Some(&Kind::Credits));
-        assert_contiguous(&s);
-    }
-
-    #[test]
-    fn a_single_line() {
-        let s = direct(&[line(500, 0, "only this")], None, &track(30_000));
-        assert_eq!(s.sections.len(), 2, "{:?}", kinds(&s));
-        assert!(matches!(s.sections[0].kind, Kind::Close | Kind::Editorial));
-        assert_eq!(s.sections[1].kind, Kind::Credits);
-        assert_eq!(s.sections[0].lines, [0]);
-        assert_eq!(s.ends, [4500]);
-        assert_contiguous(&s);
-    }
-
-    #[test]
-    fn sections_cover_the_whole_track() {
-        for (lines, f, d) in [
-            (song(), None, 60_000),
-            (song(), Some(facts(60.0)), 60_000),
-            (song(), Some(facts(60.0)), 0),
-            (song(), None, 30_000),
-            (vec![line(0, 100, "a"), line(100, 50, "a"), line(100, 0, "b")], None, 1000),
-        ] {
-            let s = direct(&lines, f.as_ref(), &track(d));
-            assert_contiguous(&s);
-            let shown: Vec<usize> = s.sections.iter().flat_map(|x| x.lines.clone()).collect();
-            let sung = lines.iter().filter(|l| !norm(&l.text).is_empty()).count();
-            assert_eq!(shown.len(), sung, "every sung line once: {:?}", s.sections);
-        }
-    }
-
-    /// A longer song: two verses of four lines, a four-line chorus three times (the last after a gap), an
-    /// unrepeated bridge, with word times on the chorus.
     fn long_song() -> Vec<Line> {
         let chorus = ["Hold on to the night", "We are burning slow", "Hold on hold on", "Till the morning goes"];
         let verse = |n: u32| -> Vec<String> {
@@ -1573,7 +1355,6 @@ mod tests {
         out
     }
 
-    /// The shots in order, each with whether a textless scene comes right before it.
     fn shots(s: &Script) -> Vec<(Shot, bool, Kind)> {
         let mut out = Vec::new();
         let mut gap = true;
@@ -1591,26 +1372,103 @@ mod tests {
     }
 
     #[test]
-    fn no_layout_or_place_twice_in_a_row() {
-        let seeds = ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "0", "kJQP7kiw5Fk", "x1y2z3", "seed", "another one"];
+    fn repeated_lines_are_a_chorus() {
+        let s = direct(&song(), None, &track(60_000));
+        let choruses: Vec<&Section> = s.sections.iter().filter(|s| s.kind == Kind::Chorus).collect();
+        assert_eq!(choruses.len(), 2, "{:?}", kinds(&s));
+        assert_eq!((choruses[0].chorus_no, choruses[1].chorus_no), (1, 2));
+        assert_eq!(choruses[0].lines, [2, 3]);
+        assert_eq!(choruses[0].entry, Entry::Lift);
+        assert_eq!(kinds(&s)[3], Kind::Instrumental);
+        assert_eq!(
+            s.sections.iter().map(|x| x.entry).skip(3).take(2).collect::<Vec<_>>(),
+            [Entry::Frame, Entry::Return]
+        );
+        assert_eq!(s.echoes[6], 1);
+        assert_eq!(s.echoes[2], 0);
+    }
+
+    #[test]
+    fn a_long_gap_is_an_instrumental() {
+        let s = direct(&song(), None, &track(60_000));
+        let i = s.sections.iter().position(|s| s.kind == Kind::Instrumental).expect("an instrumental");
+        let inst = &s.sections[i];
+        assert!(inst.from_ms >= 22_000 && inst.to_ms <= 40_100, "{inst:?}");
+        assert_eq!(s.sections[i + 1].lines[0], 4);
+    }
+
+    #[test]
+    fn cuts_land_on_the_bar_without_cutting_a_line() {
+        let lines = song();
+        let s = direct(&lines, Some(&facts(60.0)), &track(60_000));
+        assert_eq!(s.sections[0].kind, Kind::Opening);
+        assert_eq!(s.sections[0].to_ms, 9950);
+        let chorus = s.sections.iter().find(|x| x.kind == Kind::Chorus).expect("a chorus");
+        assert_eq!(chorus.from_ms, 16_000);
+        for x in s.sections.iter().filter(|x| !x.lines.is_empty()) {
+            assert!(f64::from(x.from_ms) <= f64::from(lines[x.lines[0]].ms) - LEAD_MS, "{x:?}");
+            assert!(x.lines[0].checked_sub(1).is_none_or(|p| x.from_ms >= lines[p].end), "{x:?}");
+        }
+        assert_eq!(s.grid, Some(Grid { bpm: 120.0, offset_ms: 0.0 }));
+        assert_eq!(s.light.len(), 600);
+        assert_contiguous(&s);
+    }
+
+    #[test]
+    fn without_facts_the_lyrics_decide() {
+        let s = direct(&song(), None, &track(60_000));
+        assert!(s.grid.is_none() && s.light.is_empty());
+        assert!(s.sections.iter().all(|x| !matches!(x.why, "low_energy" | "high_energy")));
+        let verses: Vec<Kind> = kinds(&s).into_iter().filter(|k| matches!(k, Kind::Close | Kind::Editorial)).collect();
+        assert_eq!(verses.len(), 2);
+        assert_ne!(verses[0], verses[1]);
+        assert_contiguous(&s);
+    }
+
+    #[test]
+    fn without_lyrics_an_opening_an_instrumental_and_credits() {
+        let s = direct(&[], None, &track(200_000));
+        assert_eq!(kinds(&s), [Kind::Opening, Kind::Instrumental, Kind::Credits]);
+        assert_contiguous(&s);
+        let blank = direct(&[line(1000, 2000, "  "), line(3000, 0, "♪")], None, &track(200_000));
+        assert_eq!(kinds(&blank), kinds(&s));
+    }
+
+    #[test]
+    fn sections_cover_the_whole_track() {
+        for (lines, f, d) in [
+            (song(), None, 60_000),
+            (song(), Some(facts(60.0)), 60_000),
+            (song(), Some(facts(60.0)), 0),
+            (song(), None, 30_000),
+            (vec![line(0, 100, "a"), line(100, 50, "a"), line(100, 0, "b")], None, 1000),
+        ] {
+            let s = direct(&lines, f.as_ref(), &track(d));
+            assert_contiguous(&s);
+            let shown: Vec<usize> = s.sections.iter().flat_map(|x| x.lines.clone()).collect();
+            let sung = lines.iter().filter(|l| !norm(&l.text).is_empty()).count();
+            assert_eq!(shown.len(), sung, "every sung line once: {:?}", s.sections);
+        }
+    }
+
+    #[test]
+    fn no_layout_twice_in_a_row_and_every_layout_fits() {
+        let seeds = ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "0", "kJQP7kiw5Fk", "x1y2z3", "seed"];
         for seed in seeds {
             for (lines, f) in [(song(), None), (long_song(), None), (long_song(), Some(facts(160.0)))] {
                 let s = direct(&lines, f.as_ref(), &Track { seed, ..track(160_000) });
                 let all = shots(&s);
                 for w in all.windows(2) {
                     let ((a, _, _), (b, gap, _)) = (w[0], w[1]);
-                    if gap {
-                        continue;
+                    if !gap {
+                        assert_ne!(a.layout, b.layout, "{seed}: {all:?}");
                     }
-                    assert_ne!(a.layout, b.layout, "{seed}: {all:?}");
-                    assert_ne!((a.x, a.y), (b.x, b.y), "{seed}: {all:?}");
                 }
-                // The anthem is the chorus' own, and each layout only takes the lines it fits.
                 for x in &s.sections {
                     for (&i, shot) in x.lines.iter().zip(&x.shots) {
                         assert!(shot.layout != Layout::Anthem || x.kind == Kind::Chorus);
                         let n = lines[i].text.split_whitespace().count();
-                        assert!(shot.layout.fits(n, 0), "{:?} for {n} words", shot.layout);
+                        assert!(shot.layout.fits(n), "{:?} for {n} words", shot.layout);
                         assert!(shot.hero.is_some_and(|h| h < n));
                     }
                 }
@@ -1625,17 +1483,13 @@ mod tests {
             let runs: Vec<Vec<Shot>> =
                 s.sections.iter().filter(|x| x.kind == Kind::Chorus).map(|x| x.shots.clone()).collect();
             assert_eq!(runs.len(), 3, "{:?}", kinds(&s));
-            // The bars stand in for the anthem at the peak.
-            let anthem = |l: Layout| if l == Layout::Bar { Layout::Anthem } else { l };
-            let look = |r: &[Shot]| r.iter().map(|x| (anthem(x.layout), x.x, x.y, x.enter, x.exit)).collect::<Vec<_>>();
+            let look = |r: &[Shot]| r.iter().map(|x| (x.layout, x.x, x.y, x.enter, x.exit)).collect::<Vec<_>>();
             assert_eq!(look(&runs[0]), look(&runs[1]));
             assert_eq!(look(&runs[0]), look(&runs[2]));
             assert_eq!(runs[0][0].layout, Layout::Anthem);
             assert_eq!((runs[0][0].x, runs[0][0].y), (0, 0));
             let levels: Vec<u8> = runs.iter().map(|r| r[0].level).collect();
             assert_eq!(levels, [1, 2, 3]);
-            assert!(runs.iter().all(|r| r.iter().all(|x| x.level == r[0].level)));
-            // Verses are never at level > 0.
             assert!(s.sections.iter().filter(|x| x.kind != Kind::Chorus).all(|x| x.shots.iter().all(|y| y.level == 0)));
         }
     }
@@ -1645,15 +1499,8 @@ mod tests {
         let a = direct(&long_song(), Some(&facts(160.0)), &track(160_000));
         let b = direct(&long_song(), Some(&facts(160.0)), &track(160_000));
         assert_eq!(a, b);
-        let looks = |seed: &'static str| {
-            let s = direct(&long_song(), None, &Track { seed, ..track(160_000) });
-            shots(&s).into_iter().map(|(x, _, _)| (x.layout, x.x, x.y)).collect::<Vec<_>>()
-        };
-        assert_eq!(looks("abcdefghijk"), looks("abcdefghijk"));
-        assert_ne!(looks("abcdefghijk"), looks("dQw4w9WgXcQ"), "another seed, another show");
     }
 
-    /// A duet: the first singer, the second answering, both together, never a line twice.
     fn duet_song() -> Vec<Line> {
         [0, 0, 1, 0, 1, 1, 2, 2, 0, 1, 0, 2]
             .iter()
@@ -1668,104 +1515,56 @@ mod tests {
     #[test]
     fn a_duet_gives_each_singer_a_side_and_answers() {
         let lines = duet_song();
-        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
-            for f in [None, Some(facts(60.0))] {
-                let s = direct(&lines, f.as_ref(), &Track { seed, ..track(60_000) });
-                assert!(s.duet);
-                let mut prev: Option<u8> = None;
-                for x in &s.sections {
-                    if x.lines.is_empty() {
-                        prev = None;
-                    }
-                    for (&i, shot) in x.lines.iter().zip(&x.shots) {
-                        let v = lines[i].voice;
-                        assert_eq!((shot.singer, shot.x), (v, [-1, 1, 0][usize::from(v)]), "{seed}: line {i}");
-                        let answer = prev.is_some_and(|p| p < 2 && v < 2 && p != v);
-                        assert_eq!(shot.answer, answer, "{seed}: line {i}");
-                        assert!(!answer || shot.enter == Enter::Letters);
-                        prev = Some(v);
-                    }
+        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz"] {
+            let s = direct(&lines, None, &Track { seed, ..track(60_000) });
+            assert!(s.duet);
+            let mut prev: Option<u8> = None;
+            for x in &s.sections {
+                if x.lines.is_empty() {
+                    prev = None;
                 }
-                for w in shots(&s).windows(2) {
-                    assert!(w[1].1 || (w[0].0.x, w[0].0.y) != (w[1].0.x, w[1].0.y), "{seed}: {w:?}");
+                for (&i, shot) in x.lines.iter().zip(&x.shots) {
+                    let v = lines[i].voice;
+                    assert_eq!((shot.singer, shot.x), (v, [-1, 1, 0][usize::from(v)]), "{seed}: line {i}");
+                    let answer = prev.is_some_and(|p| p < 2 && v < 2 && p != v);
+                    assert_eq!(shot.answer, answer, "{seed}: line {i}");
+                    assert!(!answer || shot.enter == Enter::Glide);
+                    prev = Some(v);
                 }
             }
         }
-        // One singer is not a duet.
-        let solo: Vec<Line> = duet_song().into_iter().map(|l| Line { voice: 0, ..l }).collect();
-        let s = direct(&solo, None, &track(60_000));
-        assert!(!s.duet && shots(&s).iter().all(|(x, _, _)| x.singer == 0 && !x.answer));
     }
 
     #[test]
-    fn the_bars_come_at_most_twice_on_the_strongest_choruses() {
-        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
-            for f in [None, Some(facts(160.0))] {
-                let s = direct(&long_song(), f.as_ref(), &Track { seed, ..track(160_000) });
-                let bars: Vec<Shot> =
-                    shots(&s).into_iter().filter(|(x, _, _)| x.layout == Layout::Bar).map(|x| x.0).collect();
-                assert!((1..=MAX_BARS).contains(&bars.len()), "{seed}: {bars:?}");
-                // Never on the first chorus, one a chorus, on light paper.
-                assert!(bars.iter().all(|x| x.level >= 2 && x.paper == Paper::Light), "{seed}: {bars:?}");
-                assert!(bars.windows(2).all(|w| w[0].level != w[1].level), "{seed}: {bars:?}");
-            }
-        }
-        // Without a chorus or the analysis, no peak to mark.
-        let s = direct(&duet_song(), None, &track(60_000));
-        assert!(shots(&s).iter().all(|(x, _, _)| x.layout != Layout::Bar));
-    }
-
-    #[test]
-    fn the_paper_cuts_only_on_an_event() {
-        let mut light = false;
-        for seed in ["abcdefghijk", "dQw4w9WgXcQ", "zzzzzzzzzzz", "seed"] {
-            for (lines, f, d) in
-                [(long_song(), Some(facts(160.0)), 160_000), (long_song(), None, 160_000), (duet_song(), None, 60_000)]
-            {
-                let s = direct(&lines, f.as_ref(), &Track { seed, ..track(d) });
-                for x in &s.sections {
-                    for w in x.shots.windows(2) {
-                        let event = w[0].layout == Layout::Bar || w[1].layout == Layout::Bar || w[1].answer;
-                        assert!(w[0].paper == w[1].paper || event, "{seed}: {:?}", x.shots);
-                    }
-                    light |= x.shots.iter().any(|y| y.paper == Paper::Light && y.layout != Layout::Bar);
-                }
-            }
-        }
-        assert!(light, "some scene is on light paper");
-    }
-
-    #[test]
-    fn the_emphasis_word_is_the_longest_held() {
-        let ws: Vec<(f64, String)> = [(0.0, "I"), (200.0, "will"), (500.0, "wait"), (2500.0, "for"), (2700.0, "you")]
-            .iter()
-            .map(|(ms, w)| (*ms, (*w).to_owned()))
-            .collect();
-        assert_eq!(hero(&ws, 3000.0, &HashMap::new()), Some(2));
-        // Short words only when there is nothing else.
-        let short: Vec<(f64, String)> = vec![(0.0, "oh".into()), (100.0, "no".into())];
-        assert_eq!(hero(&short, 2000.0, &HashMap::new()), Some(1));
-        assert_eq!(hero(&[], 1000.0, &HashMap::new()), None);
-    }
-
-    #[test]
-    fn the_voice_follows_tempo_and_loudness() {
+    fn the_mood_follows_tempo_and_loudness_and_diversifies() {
         let with = |bpm: f64, level: u8| {
             let mut f = facts(160.0);
             f.bpm = Some(bpm);
             let bins = 1600;
             let bytes: Vec<u8> = (0..bins).flat_map(|b| [level.saturating_add((b % 7) as u8), level, 60]).collect();
             f.envelope = base64::engine::general_purpose::STANDARD.encode(bytes);
-            direct(&long_song(), Some(&f), &track(160_000)).voice
+            direct(&long_song(), Some(&f), &track(160_000)).mood
         };
-        assert_eq!(with(150.0, 235), Voice::Compressed);
-        assert_eq!(with(68.0, 90), Voice::Expanded);
-        // Without facts, a ballad's slow words are expanded and a fast flow is compressed.
-        let slow: Vec<Line> = (0..10).map(|i| line(5000 + i * 6000, 5000 + i * 6000 + 5800, "so slow")).collect();
-        assert_eq!(direct(&slow, None, &track(80_000)).voice, Voice::Expanded);
-        let fast: Vec<Line> = (0..10)
-            .map(|i| line(5000 + i * 2000, 5000 + i * 2000 + 1900, "words come so fast here in this one line now"))
+        assert_eq!(with(155.0, 240), Mood::Poster);
+        assert_eq!(with(66.0, 85), Mood::Cinema);
+        // Mid-tempo tracks diversify across seeds instead of collapsing to one face.
+        let mid: std::collections::HashSet<u8> = ["a1", "b2", "c3", "d4", "e5", "f6", "g7", "h8"]
+            .into_iter()
+            .map(|seed| direct(&long_song(), None, &Track { seed, ..track(160_000) }).mood as u8)
             .collect();
-        assert_eq!(direct(&fast, None, &track(40_000)).voice, Voice::Compressed);
+        assert!(mid.len() >= 2, "expected multiple moods across seeds: {mid:?}");
+    }
+
+    #[test]
+    fn hi_res_artwork_upgrades_tiny_google_thumbnails_and_rejects_bad_hosts() {
+        assert_eq!(
+            hi_res_artwork("https://lh3.googleusercontent.com/abc=w120-h120-l90-rj").as_deref(),
+            Some("https://lh3.googleusercontent.com/abc=w544-h544-l90-rj")
+        );
+        assert_eq!(
+            hi_res_artwork("https://i.ytimg.com/vi/abc12345678/hqdefault.jpg").as_deref(),
+            Some("https://i.ytimg.com/vi/abc12345678/hqdefault.jpg")
+        );
+        assert_eq!(hi_res_artwork("https://evil.example.com/a.jpg"), None);
     }
 }

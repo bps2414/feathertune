@@ -2,6 +2,14 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.3.0 — 2026-11-27
+
+- **Palco reformulado com visual cinematográfico:** saíram o fundo em blocos 8×8, os holofotes artificiais e os cortes bruscos para papel claro, entrando uma tela de capa com blur Gaussiano suave (`128×128`), crossfade A/B entre faixas, lavagens cromáticas lentas e grading escuro consistente (mesmo em capas brancas).
+- **Tipografia variada sem esticar nem repetir glow neon:** o Palco agora combina Instrument Serif (regular e itálico), Plus Jakarta Sans, Syne e Anybody em quatro direções de arte (`cinema`, `editorial`, `poster`, `nocturne`) com papéis distintos entre versos e refrões, removendo o esticamento horizontal por palavra e a camada duplicada de brilho neon em todas as palavras.
+- **Animações fluidas e transições limpas:** saíram as entradas secas sem fade, letras piscando em 1 ms, saídas em degraus, flashes brancos e estrelas clip-art, entrando revelações cinematográficas suaves (incluindo iluminação progressiva de foco suave), saídas sem colisão e enquadramento equilibrado em oito composições refinadas.
+- **Capas corrigidas e fim das capas duplicadas:** removida a capa voadora duplicada e corrigido o ciclo de vida das cenas para atualizar no lugar quando a letra ou o fundo chegam para a mesma faixa; agora as capas ficam em molduras quadradas fixas em alta resolução, com recorte de barras pretas em miniaturas 4:3, fade suave ao carregar, fallback em caso de erro e créditos sem sobreposição com "A seguir".
+- Ainda não conferido no app rodando: o fluxo visual do Palco em faixas e capas variadas, o recorte em miniaturas 4:3/16:9 e o custo de CPU/GPU enquanto aberto.
+
 ## 1.2.2 — 2026-11-26
 
 - **Progresso na barra de tarefas agora é configurável:** desligue **Progresso na barra de tarefas** em Geral > Janela e bandeja > Controles na barra de tarefas (`[taskbar] progress = false`) para remover na hora a barra de progresso (e o estado amarelo ao pausar) do ícone na barra de tarefas, mantendo os botões na miniatura.

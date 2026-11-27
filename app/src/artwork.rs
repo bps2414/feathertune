@@ -238,6 +238,112 @@ fn halo_pixels(src: &[u8], n: usize, sigma: f32, saturation: f32, brightness: f3
     out
 }
 
+/// Smooth atmospheric backdrop for Stage (`stage.rs`): crops the cover's center square (trimming 4:3
+/// letterbox bars when present), scales to `side` × `side`, applies a clamped-edge separable Gaussian blur
+/// (so there are no 8×8 blocks and no dark frame borders), and applies filmic tonal grading with a ceiling
+/// on brightness so light lyrics always stay readable even on bright white covers. Straight BGRA for `png`.
+pub fn stage_backdrop(art: &Art, side: u32, sigma: f32) -> Result<Vec<u8>> {
+    let small = unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let source = wic.CreateBitmapFromMemory(
+            art.width,
+            art.height,
+            &GUID_WICPixelFormat32bppPBGRA,
+            art.width * 4,
+            &art.pixels,
+        )?;
+        // Classic 4:3 video thumbnails (e.g. 480x360) often bake black letterbox bars at top and bottom.
+        let ratio = art.width as f32 / art.height.max(1) as f32;
+        let crop_side = if (1.28..=1.39).contains(&ratio) {
+            ((art.width as f32 * 9.0 / 16.0).round() as u32).min(art.height).max(1)
+        } else {
+            art.width.min(art.height)
+        };
+        let rect = WICRect {
+            X: ((art.width - crop_side) / 2) as i32,
+            Y: ((art.height - crop_side) / 2) as i32,
+            Width: crop_side as i32,
+            Height: crop_side as i32,
+        };
+        let clipper = wic.CreateBitmapClipper()?;
+        clipper.Initialize(&source, &rect)?;
+        let scaler = wic.CreateBitmapScaler()?;
+        scaler.Initialize(&clipper, side, side, WICBitmapInterpolationModeFant)?;
+        let mut pixels = vec![0u8; (side * side * 4) as usize];
+        scaler.CopyPixels(std::ptr::null(), side * 4, &mut pixels)?;
+        pixels
+    };
+    Ok(backdrop_pixels(&small, side as usize, sigma))
+}
+
+/// Separable clamped-edge Gaussian blur + filmic tonal grading on a premultiplied BGRA square.
+fn backdrop_pixels(src: &[u8], n: usize, sigma: f32) -> Vec<u8> {
+    let radius = (sigma * 2.5).ceil() as isize;
+    let kernel: Vec<f32> = (-radius..=radius).map(|i| (-0.5 * (i as f32 / sigma).powi(2)).exp()).collect();
+    let total: f32 = kernel.iter().sum();
+    let blur = |from: &[f32], step: usize, lines: usize| {
+        let mut to = vec![0.0f32; from.len()];
+        for line in 0..n {
+            for at in 0..n {
+                let mut sum = [0.0f32; 3];
+                for (k, &w) in kernel.iter().enumerate() {
+                    let i = (at as isize + k as isize - radius).clamp(0, n as isize - 1) as usize;
+                    let p = (line * lines + i * step) * 3;
+                    for c in 0..3 {
+                        sum[c] += from[p + c] * w;
+                    }
+                }
+                let p = (line * lines + at * step) * 3;
+                for c in 0..3 {
+                    to[p + c] = sum[c] / total;
+                }
+            }
+        }
+        to
+    };
+    // Unpremultiply to 0..1 RGB (stored in B, G, R order).
+    let mut rgb = vec![0.0f32; n * n * 3];
+    for i in 0..n * n {
+        let a = f32::from(src[i * 4 + 3]).max(1.0);
+        rgb[i * 3] = f32::from(src[i * 4]) / a;
+        rgb[i * 3 + 1] = f32::from(src[i * 4 + 1]) / a;
+        rgb[i * 3 + 2] = f32::from(src[i * 4 + 2]) / a;
+    }
+    let rows = blur(&rgb, 1, n);
+    let both = blur(&rows, n, 1);
+
+    // Measure average luminance so very bright or very dark covers both land in a rich cinema range.
+    let avg_luma: f32 = both.as_chunks::<3>().0.iter().map(|[b, g, r]| 0.213 * r + 0.715 * g + 0.072 * b).sum::<f32>()
+        / (n * n).max(1) as f32;
+    let exposure = if avg_luma > 0.45 {
+        (0.28 / avg_luma).clamp(0.32, 0.7)
+    } else if avg_luma < 0.08 {
+        1.25
+    } else {
+        0.64
+    };
+
+    let mut out = vec![0u8; n * n * 4];
+    for i in 0..n * n {
+        let (b, g, r) = (both[i * 3], both[i * 3 + 1], both[i * 3 + 2]);
+        let luma = 0.213 * r + 0.715 * g + 0.072 * b;
+        // Rich saturation without blowing out highlights, then soft-knee filmic roll-off and dark floor.
+        let grade = |v: f32| {
+            let sat = (luma + (v - luma) * 1.42).max(0.0);
+            let exp = sat * exposure;
+            let rolled = exp / (1.0 + exp * 0.75);
+            // Deep cinema lift so darks stay velvety (never pure crushed black noise).
+            (rolled.min(0.46) * 255.0).round().clamp(0.0, 255.0) as u8
+        };
+        out[i * 4] = grade(b);
+        out[i * 4 + 1] = grade(g);
+        out[i * 4 + 2] = grade(r);
+        out[i * 4 + 3] = 255;
+    }
+    out
+}
+
 /// Encodes top-down BGRA pixels (straight alpha) as PNG.
 pub fn png(pixels: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     unsafe {
@@ -290,6 +396,23 @@ mod tests {
         // Brightness scales the color only.
         let dark = halo_pixels(&src, n, 1.5, 1.0, 0.5, 0.45);
         assert_eq!(&dark[(n / 2 * n + n / 2) * 4..][..4], [20, 40, 100, 255]);
+    }
+
+    #[test]
+    fn stage_backdrop_stays_opaque_smooth_and_readable_on_white_covers() {
+        let n = 16;
+        // Pure white cover: must be graded down so white lyrics remain readable, with opaque edges.
+        let white: Vec<u8> = [255u8, 255, 255, 255].repeat(n * n);
+        let out = backdrop_pixels(&white, n, 2.0);
+        assert_eq!(out.len(), n * n * 4);
+        for px in out.as_chunks::<4>().0 {
+            assert_eq!(px[3], 255);
+            assert!(px[0] <= 120 && px[1] <= 120 && px[2] <= 120, "{px:?}");
+        }
+        // Colored cover: edges must not darken to transparent black (clamped blur).
+        let vivid: Vec<u8> = [200u8, 80, 40, 255].repeat(n * n);
+        let out = backdrop_pixels(&vivid, n, 2.0);
+        assert_eq!(&out[0..4], &out[(n / 2 * n + n / 2) * 4..][..4]);
     }
 
     #[test]

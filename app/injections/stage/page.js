@@ -111,7 +111,7 @@ const st = {
   stageJob: 0,
   leaving: [],
   aside: null,
-  // Active non-text scene `{ node, kind, artUrl, coverEl, haloEl, upNextEl }` and any outgoing scene.
+  // Active non-text scene `{ node, kind, cover, upNextSlot }` and any outgoing scene.
   scene: null,
   sceneOut: null,
   outSceneNode: null,
@@ -248,6 +248,7 @@ const check = (d) => {
   return {
     id: text(d.id, 64),
     artwork: validArtUrl(d.artwork),
+    artworkAlt: validArtUrl(d.artwork_alt),
     backdrop: typeof d.backdrop === 'string' && DATA_PNG.test(d.backdrop) ? d.backdrop : null,
     halo: typeof d.halo === 'string' && DATA_PNG.test(d.halo) ? d.halo : null,
     duration: s.duration_ms,
@@ -699,24 +700,36 @@ const bboxOf = (rows, lh) => {
 
 // ---------- bulletproof album cover & non-text scenes ----------
 
-const attachCoverImg = (container, src) => {
+// The cover's candidate URLs, best first: Rust's high-resolution one, the URL as the site gave it, the
+// media session's largest. Each is tried in turn when the one before fails to load.
+const coverSources = () => [...new Set([st.v.artwork, st.v.artworkAlt, fallbackArtwork()].filter(Boolean))];
+
+const attachCoverImg = (container, srcs) => {
   container.replaceChildren();
-  if (!src) return null;
+  if (!srcs.length) return null;
   const img = el('img', 'ft-cover-img', container);
   img.alt = '';
   img.decoding = 'async';
-  img.addEventListener('load', () => {
+  let at = 0;
+  const shown = () => {
+    if (img.classList.contains('ft-loaded')) return;
+    const src = img.currentSrc || img.src;
     if (img.naturalWidth > 0 && img.naturalHeight > 0) {
       const ratio = img.naturalWidth / img.naturalHeight;
       // 4:3 YouTube video thumbnails often bake top/bottom black letterbox bars into the JPEG.
       if (src.includes('ytimg.com') && ratio >= 1.25 && ratio <= 1.42) img.classList.add('ft-crop-43');
     }
     img.classList.add('ft-loaded');
-  });
+  };
+  img.addEventListener('load', shown);
   img.addEventListener('error', () => {
-    img.remove();
+    at += 1;
+    if (at < srcs.length) img.src = srcs[at];
+    else img.remove();
   });
-  img.src = src;
+  img.src = srcs[0];
+  // Already in the cache: it may be complete before the listener runs.
+  if (img.complete && img.naturalWidth > 0) shown();
   return img;
 };
 
@@ -731,19 +744,21 @@ const createCover = (parent, size, withKen = true) => {
   }
   const frame = el('div', 'ft-cover-frame', wrap);
   const holder = withKen ? el('div', 'ft-cover-ken', frame) : frame;
-  const src = st.v.artwork || fallbackArtwork();
-  attachCoverImg(holder, src);
-  return { wrap, halo, holder, artUrl: src };
+  const srcs = coverSources();
+  attachCoverImg(holder, srcs);
+  return { wrap, halo, holder, artKey: srcs.join('\n') };
 };
 
 // Updates cover/halo/up-next on a live scene in-place when late data arrives for the same track.
 const updateSceneInPlace = () => {
   const sc = st.scene;
   if (!sc) return;
-  const src = st.v.artwork || fallbackArtwork();
-  if (sc.cover && src && src !== sc.cover.artUrl) {
-    sc.cover.artUrl = src;
-    attachCoverImg(sc.cover.holder, src);
+  const srcs = coverSources();
+  const key = srcs.join('\n');
+  const loaded = !!sc.cover?.holder.querySelector('.ft-cover-img.ft-loaded');
+  if (sc.cover && srcs.length && key !== sc.cover.artKey && !loaded) {
+    sc.cover.artKey = key;
+    attachCoverImg(sc.cover.holder, srcs);
   }
   if (sc.cover && st.v.halo) {
     const bg = `url("${st.v.halo}")`;
@@ -837,7 +852,9 @@ const hideCount = () => {
   ui.count.classList.remove('ft-show', 'ft-last');
 };
 
-// Removes any active non-text scene cleanly; guarantees zero overlapping duplicate covers.
+// Removes any active non-text scene; guarantees it never stays on screen under the lyrics. Removal is on a
+// timer, never on an animation's promise: cancelling an animation replaces its `finished` promise with one
+// that never settles, which used to leave the opening card on screen for the rest of the song.
 const dropScene = (immediate = false) => {
   if (st.outSceneNode) {
     st.outSceneNode.remove();
@@ -849,6 +866,10 @@ const dropScene = (immediate = false) => {
   st.sceneOut = null;
   if (!sc) return;
   const node = sc.node;
+  const outDone = a?.playState === 'finished';
+  // Where its own exit had got to, so the fade below starts there instead of popping back to full.
+  let from = 1;
+  if (a && !outDone) from = clamp(Number(getComputedStyle(node).opacity) || 0, 0, 1);
   for (const anim of [...st.anims]) {
     const target = anim.effect?.target;
     if (target && node.contains(target)) {
@@ -856,14 +877,23 @@ const dropScene = (immediate = false) => {
       st.anims.delete(anim);
     }
   }
-  const gone = () => {
+  if (immediate || st.still || outDone || from < 0.02) {
+    node.remove();
+    return;
+  }
+  st.outSceneNode = node;
+  const ms = Math.round(380 * from);
+  node.animate(
+    [
+      { opacity: from, transform: 'scale(1)' },
+      { opacity: 0, transform: 'scale(0.97)' },
+    ],
+    { duration: ms, easing: EASE_EXIT, fill: 'forwards' },
+  );
+  setTimeout(() => {
     node.remove();
     if (st.outSceneNode === node) st.outSceneNode = null;
-  };
-  if (immediate || st.still || a?.playState === 'finished' || a?.playState === 'paused') return gone();
-  st.outSceneNode = node;
-  if (a) return void a.finished.then(gone, gone);
-  node.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.97)' }], { duration: 420, easing: EASE_EXIT, fill: 'forwards' }).finished.then(gone, gone);
+  }, ms + 60);
 };
 
 const mount = (k, ms) => {

@@ -2,6 +2,12 @@
 
 O que mudou em cada versão do feathertune. Os instaladores estão na [página de releases](https://github.com/bps2414/feathertune/releases). (English: [CHANGELOG.md](CHANGELOG.md))
 
+## 1.3.1 — 2026-11-27
+
+- **Palco: o cartão de abertura não fica mais por cima da letra.** A capa, o título e o artista da abertura agora saem quando a primeira linha chega, em vez de ficarem atrás da letra pelo resto da música.
+- **Palco: a capa do álbum volta a carregar.** Ele tenta primeiro a capa em alta resolução, depois a capa como o site a entrega e depois a do próprio player, então uma capa que falha num tamanho ainda aparece; o endereço em alta resolução agora só muda o tamanho e mantém as outras opções do site.
+- Ainda não conferido no app rodando: a abertura saindo na hora certa e a capa em várias faixas.
+
 ## 1.3.0 — 2026-11-27
 
 - **Palco reformulado com visual cinematográfico:** saíram o fundo em blocos 8×8, os holofotes artificiais e os cortes bruscos para papel claro, entrando uma tela de capa com blur Gaussiano suave (`128×128`), crossfade A/B entre faixas, lavagens cromáticas lentas e grading escuro consistente (mesmo em capas brancas).

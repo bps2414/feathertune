@@ -2,6 +2,12 @@
 
 What changed in each release of feathertune. Installers are on the [releases page](https://github.com/bps2414/feathertune/releases). (pt-BR: [CHANGELOG.pt-BR.md](CHANGELOG.pt-BR.md))
 
+## 1.3.1 — 2026-11-27
+
+- **Stage: the opening card no longer stays on screen over the lyrics.** The cover, title and artist of the opening now leave when the first line comes, instead of staying behind the lyrics for the rest of the song.
+- **Stage: the album cover loads again.** It tries the high-resolution cover first, then the cover as the site gives it, then the player's own, so a cover that fails at one size still shows; the high-resolution address now only changes the size and keeps the site's other options.
+- Not verified yet in the running app: the opening leaving on time and the cover on several tracks.
+
 ## 1.3.0 — 2026-11-27
 
 - **Stage rebuilt for a cinematic look:** replaced the blocky 8×8 background, harsh spotlights and sudden light-paper cuts with a smooth Gaussian-blurred cover canvas (`128×128`), A/B crossfades between tracks, subtle drifting aurora washes and consistent dark filmic grading (even on bright white covers).

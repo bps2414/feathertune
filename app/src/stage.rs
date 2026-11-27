@@ -981,19 +981,34 @@ fn tidy(sections: Vec<Section>, duration: u32) -> Vec<Section> {
     out
 }
 
-/// Upgrades Google/YouTube Music cover URLs that carry tiny dimensions (e.g. `=w120-h120`) to a crisp
-/// 544×544 square while preserving the validated host and path.
+/// Upgrades Google cover URLs that carry tiny dimensions (e.g. `=w120-h120-l90-rj`) to 544×544, changing
+/// only the width and height tokens and keeping the site's other flags; anything else is left as it is.
 fn hi_res_artwork(url: &str) -> Option<String> {
     let valid = crate::player::artwork(url)?;
-    if let Some((base, suffix)) = valid.rsplit_once('=')
-        && (valid.contains("googleusercontent.com/") || valid.contains("ggpht.com/"))
-        && suffix.starts_with('w')
-        && suffix.contains("-h")
-        && !suffix.contains('/')
+    let google = valid.contains("googleusercontent.com/") || valid.contains("ggpht.com/");
+    let Some((base, suffix)) = valid.rsplit_once('=').filter(|_| google) else {
+        return Some(valid);
+    };
+    let size =
+        |t: &str, p: char| t.strip_prefix(p).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    let tokens: Vec<&str> = suffix.split('-').collect();
+    if suffix.contains(['/', '?', '#']) || !tokens.iter().any(|t| size(t, 'w')) || !tokens.iter().any(|t| size(t, 'h'))
     {
-        return Some(format!("{base}=w544-h544-l90-rj"));
+        return Some(valid);
     }
-    Some(valid)
+    let upgraded: Vec<&str> = tokens
+        .iter()
+        .map(|t| {
+            if size(t, 'w') {
+                "w544"
+            } else if size(t, 'h') {
+                "h544"
+            } else {
+                t
+            }
+        })
+        .collect();
+    Some(format!("{base}={}", upgraded.join("-")))
 }
 
 /// Cached backdrop + halo data URLs for the current cover, owned by Stage so it works even with
@@ -1241,6 +1256,8 @@ fn payload(app: &AppHandle) -> Value {
         "open": true,
         "id": track.id,
         "artwork": track.artwork.as_deref().and_then(hi_res_artwork),
+        // The URL as the site gave it: the page falls back to it when the high-resolution one fails.
+        "artwork_alt": track.artwork.as_deref().and_then(crate::player::artwork),
         "backdrop": if art_matches { art.backdrop } else { None },
         "halo": if art_matches { art.halo } else { None },
         "script": script,
@@ -1560,6 +1577,14 @@ mod tests {
         assert_eq!(
             hi_res_artwork("https://lh3.googleusercontent.com/abc=w120-h120-l90-rj").as_deref(),
             Some("https://lh3.googleusercontent.com/abc=w544-h544-l90-rj")
+        );
+        assert_eq!(
+            hi_res_artwork("https://lh3.googleusercontent.com/abc=w60-h60-s-l90-rj").as_deref(),
+            Some("https://lh3.googleusercontent.com/abc=w544-h544-s-l90-rj")
+        );
+        assert_eq!(
+            hi_res_artwork("https://lh3.googleusercontent.com/abc=s120").as_deref(),
+            Some("https://lh3.googleusercontent.com/abc=s120")
         );
         assert_eq!(
             hi_res_artwork("https://i.ytimg.com/vi/abc12345678/hqdefault.jpg").as_deref(),
